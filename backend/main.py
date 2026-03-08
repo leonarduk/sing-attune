@@ -1,18 +1,20 @@
 """
 sing-attune Backend — FastAPI application entry point.
-Day 4: /audio/devices endpoint wired to real sounddevice enumeration.
+Day 6: Playback state machine + real WebSocket pitch stream.
 """
 
+import asyncio
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, UploadFile, File, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 
 from .score.parser import parse_musicxml
 from .audio.capture import list_input_devices, default_input_device_id
+from .audio.pipeline import PlaybackPipeline, _CLIENT_QUEUE_MAXSIZE
 
 app = FastAPI(
     title="sing-attune",
@@ -31,27 +33,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Application-lifetime pipeline (one instance per process) ──────────────────
+
+_pipeline = PlaybackPipeline()
+
+# Keepalive interval in seconds. If no pitch frames arrive for this long
+# (e.g. during PAUSED state), a ping is sent to keep the connection alive.
+_WS_KEEPALIVE_S = 5.0
+
+
+# ── Health ─────────────────────────────────────────────────────────────────────
+
 
 @app.get("/health")
 async def health() -> JSONResponse:
     return JSONResponse({"status": "ok", "version": "0.2.0"})
 
 
+# ── Audio devices ──────────────────────────────────────────────────────────────
+
+
 @app.get("/audio/devices")
 async def list_audio_devices() -> JSONResponse:
-    """
-    Return available audio input devices and the current default.
-
-    Response schema:
-        {
-            "default_device_id": int,
-            "devices": [
-                {"id": int, "name": str, "channels": int,
-                 "host_api": str, "default_sample_rate": float},
-                ...
-            ]
-        }
-    """
     devices = list_input_devices()
     default_id = default_input_device_id()
     return JSONResponse(
@@ -71,11 +74,96 @@ async def list_audio_devices() -> JSONResponse:
     )
 
 
+# ── Playback state machine ─────────────────────────────────────────────────────
+
+
+@app.post("/playback/start")
+async def playback_start(device_id: int | None = None) -> JSONResponse:
+    """
+    Begin audio capture and pitch detection.
+    Records t=0 — must be called at the same moment the frontend starts
+    AudioContext playback so both clocks anchor together.
+
+    Query param: device_id (optional) — sounddevice input device index.
+    Omit to use the system default.
+    """
+    loop = asyncio.get_event_loop()
+    _pipeline.start(device_id=device_id, loop=loop)
+    return JSONResponse({"state": _pipeline.state.name, "t_ms": _pipeline.elapsed_ms})
+
+
+@app.post("/playback/pause")
+async def playback_pause() -> JSONResponse:
+    """Suspend capture and hold the current t offset."""
+    _pipeline.pause()
+    return JSONResponse({"state": _pipeline.state.name, "t_ms": _pipeline.elapsed_ms})
+
+
+@app.post("/playback/resume")
+async def playback_resume() -> JSONResponse:
+    """Resume capture from the held t offset."""
+    _pipeline.resume()
+    return JSONResponse({"state": _pipeline.state.name, "t_ms": _pipeline.elapsed_ms})
+
+
+@app.post("/playback/stop")
+async def playback_stop() -> JSONResponse:
+    """Stop capture, destroy pipeline, reset t to zero."""
+    _pipeline.stop()
+    return JSONResponse({"state": _pipeline.state.name, "t_ms": 0.0})
+
+
+@app.get("/playback/state")
+async def playback_state() -> JSONResponse:
+    """Return current playback state and position — useful for frontend reconnect."""
+    return JSONResponse({"state": _pipeline.state.name, "t_ms": _pipeline.elapsed_ms})
+
+
+# ── WebSocket pitch stream ─────────────────────────────────────────────────────
+
+
+@app.websocket("/ws/pitch")
+async def pitch_stream(websocket: WebSocket) -> None:
+    """
+    Stream real-time pitch frames to the frontend at ~20Hz.
+
+    Frame format: {"t": float, "midi": float, "conf": float}
+      t    — ms since playback start (aligned with AudioContext.currentTime * 1000)
+      midi — MIDI float with cent detail (e.g. 60.3 = C4 + 30 cents)
+      conf — confidence 0.0–1.0 (frames below 0.6 are dropped before reaching here)
+
+    The client receives frames only during PLAYING state.
+    Connection survives pause/resume — no reconnect needed.
+    A keepalive ping is sent every _WS_KEEPALIVE_S seconds when no frames arrive
+    (e.g. during PAUSED state) so the connection stays open.
+    """
+    await websocket.accept()
+    await websocket.send_json({"status": "connected"})
+
+    q: asyncio.Queue = asyncio.Queue(maxsize=_CLIENT_QUEUE_MAXSIZE)
+    _pipeline.add_client(q)
+
+    try:
+        while True:
+            try:
+                frame = await asyncio.wait_for(q.get(), timeout=_WS_KEEPALIVE_S)
+                await websocket.send_json(frame)
+            except asyncio.TimeoutError:
+                # No frames for _WS_KEEPALIVE_S seconds (e.g. paused) — send ping
+                await websocket.send_json({"ping": True})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        _pipeline.remove_client(q)
+
+
+# ── Score upload ───────────────────────────────────────────────────────────────
+
+
 @app.post("/score")
 async def load_score(file: UploadFile = File(...)) -> JSONResponse:
-    """
-    Accept a MusicXML upload (.xml or .mxl) and return the parsed ScoreModel.
-    """
     suffix = Path(file.filename or "score.xml").suffix.lower()
     if suffix not in {".xml", ".mxl"}:
         raise HTTPException(
@@ -98,14 +186,6 @@ async def load_score(file: UploadFile = File(...)) -> JSONResponse:
         tmp_path.unlink(missing_ok=True)
 
     return JSONResponse(score_model.model_dump())
-
-
-@app.websocket("/ws/pitch")
-async def pitch_stream(websocket: WebSocket) -> None:
-    """Stream real-time pitch frames to the frontend. Stub — implemented Day 6."""
-    await websocket.accept()
-    await websocket.send_json({"status": "connected", "note": "pitch pipeline not yet active"})
-    await websocket.close()
 
 
 if __name__ == "__main__":

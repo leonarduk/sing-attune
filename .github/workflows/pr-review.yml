@@ -1,0 +1,113 @@
+name: PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  lint:
+    name: Code style (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff
+        run: ruff check backend/
+
+  test:
+    name: Tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system audio libraries
+        run: sudo apt-get install -y libportaudio2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: |
+          uv sync
+          uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+          uv pip install torchcrepe
+
+      - name: Run tests
+        run: uv run pytest backend/tests/ -v --tb=short
+
+  ai-review:
+    name: AI code review
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        id: diff
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          DIFF=$(git diff origin/${{ github.base_ref }}...HEAD -- '*.py' | head -c 30000)
+          echo "diff<<EOF" >> $GITHUB_OUTPUT
+          echo "$DIFF" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Get linked issue body
+        id: issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_NUM=$(gh pr view ${{ github.event.pull_request.number }} --json body,title \
+            | jq -r '[.title, .body] | join(" ")' \
+            | grep -oP '(?<=#)\d+' | head -1)
+          if [ -n "$ISSUE_NUM" ]; then
+            ISSUE_BODY=$(gh issue view "$ISSUE_NUM" --json body -q .body 2>/dev/null || echo "Issue not found")
+          else
+            ISSUE_BODY="No linked issue found. Review code on its own merits."
+          fi
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$ISSUE_BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Call Claude API
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          DIFF: ${{ steps.diff.outputs.diff }}
+          ISSUE_BODY: ${{ steps.issue.outputs.body }}
+        run: |
+          # Write review to a file — never interpolate API output into shell
+          python3 .github/scripts/claude_review.py > /tmp/review_body.md
+
+      - name: Post review comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Prepend header and footer to the review file, then post in one shot
+          {
+            echo "## AI Code Review"
+            echo ""
+            cat /tmp/review_body.md
+            echo ""
+            echo "---"
+            echo "*Reviewed by Claude via [pr-review.yml](.github/workflows/pr-review.yml). Advisory only.*"
+          } > /tmp/comment_body.md
+
+          gh pr comment "$PR_NUMBER" --body-file /tmp/comment_body.md
