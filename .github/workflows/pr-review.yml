@@ -86,25 +86,28 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Call Claude API
-        id: claude
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           DIFF: ${{ steps.diff.outputs.diff }}
           ISSUE_BODY: ${{ steps.issue.outputs.body }}
         run: |
-          REVIEW=$(python3 .github/scripts/claude_review.py)
-          echo "review<<EOF" >> $GITHUB_OUTPUT
-          echo "$REVIEW" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Write review to a file — never interpolate API output into shell
+          python3 .github/scripts/claude_review.py > /tmp/review_body.md
 
       - name: Post review comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          gh pr comment ${{ github.event.pull_request.number }} --body "## AI Code Review
+          # Prepend header and footer to the review file, then post in one shot
+          {
+            echo "## AI Code Review"
+            echo ""
+            cat /tmp/review_body.md
+            echo ""
+            echo "---"
+            echo "*Reviewed by Claude via [pr-review.yml](.github/workflows/pr-review.yml). Advisory only.*"
+          } > /tmp/comment_body.md
 
-          ${{ steps.claude.outputs.review }}
-
-          ---
-          *Reviewed by Claude via [pr-review.yml](.github/workflows/pr-review.yml). Advisory only.*"
+          gh pr comment "$PR_NUMBER" --body-file /tmp/comment_body.md
