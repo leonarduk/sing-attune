@@ -173,7 +173,9 @@ class TestLatencyBreakdownGPU:
 
     @pytest.fixture
     def gpu_pipeline(self):
+        """Create a PitchPipeline, patch _infer before start() to avoid race, then start."""
         p = PitchPipeline(engine=Engine.TORCHCREPE)
+        # Warmup happens in start(); yield the started pipeline.
         p.start()
         time.sleep(0.5)  # let warmup complete
         yield p
@@ -182,9 +184,16 @@ class TestLatencyBreakdownGPU:
     # ── Stage 1: CREPE inference ───────────────────────────────────────────────
 
     def test_crepe_inference_p95_under_40ms(self, gpu_pipeline: PitchPipeline) -> None:
-        """CREPE inference p95 must be ≤ 40 ms on RTX 5070."""
+        """CREPE inference p95 must be ≤ 40 ms on RTX 5070.
+
+        Measurement: stop the pipeline, wrap _infer, restart.  This avoids
+        the race condition of patching a method on a running worker thread.
+        """
         latencies: list[float] = []
         done = threading.Event()
+
+        # Stop → patch → restart to avoid concurrent method replacement.
+        gpu_pipeline.stop()
         original_infer = gpu_pipeline._infer
 
         def timed_infer(window: np.ndarray, capture_time_ms: float):
@@ -196,6 +205,7 @@ class TestLatencyBreakdownGPU:
             return result
 
         gpu_pipeline._infer = timed_infer  # type: ignore[method-assign]
+        gpu_pipeline.start()
 
         for _ in range(self.N_SAMPLES + 5):
             gpu_pipeline.push(_sine_window(440.0))
@@ -223,15 +233,17 @@ class TestLatencyBreakdownGPU:
         Time from _on_pitch_frame() entry to payload dict creation must be
         ≤ 20 ms p95.
 
-        Measured by calling _on_pitch_frame() directly in a loop with an empty
-        client set — the method completes the lock + payload build and returns
-        immediately (no event loop needed).
+        Measured by calling _on_pitch_frame() directly in a loop with no
+        event loop set — the method returns early at the `if loop is None`
+        guard, so no actual WebSocket fan-out occurs and no asyncio loop
+        is needed.  This isolates the lock acquisition + payload build cost.
         """
         pl = PlaybackPipeline(engine=Engine.TORCHCREPE)
         pl._state = PlaybackState.PLAYING
         pl._play_monotonic = time.monotonic()
         pl._elapsed_ms = 0.0
-        pl._loop = None  # empty clients — call_soon_threadsafe never reached
+        # _loop is None by default; _on_pitch_frame returns early after the
+        # payload dict is built, before any call_soon_threadsafe calls.
 
         fake_frame = PitchFrame(time_ms=100.0, midi=69.0, confidence=0.9)
         latencies: list[float] = []
@@ -263,31 +275,20 @@ class TestLatencyBreakdownGPU:
         ────────────────────
         Cross-thread timestamp correlation is unreliable when frames can be
         dropped (torchcrepe returns None for low-confidence windows, so push
-        count != frame count).  Instead we monkeypatch _worker to record
-        the wall time at dequeue, then diff against the time recorded at the
-        start of on_frame() — both happen on the single worker thread, so
-        there is no cross-thread clock uncertainty.
+        count != frame count).  Instead we send one window at a time, block
+        until its frame arrives, then send the next.  This serialises
+        throughput (~50 × 40 ms ≈ 2 s total) but gives accurate per-window
+        push→emit latency — which is what the budget is defined against.
 
-        Specifically we wrap _infer so it saves t_dequeue into a thread-local
-        slot, and on_frame reads that slot.  This measures:
-            queue wait time  (dequeue - push, not measured here)
-          + inference time   (end of _infer - dequeue)
-        which equals push→emit when the queue is empty (the steady-state case).
-
-        To measure true push→emit we instead time from push() on the calling
-        thread.  But because torchcrepe drops frames (None return) the FIFO
-        approach is broken.  The clean solution: push one window, block until
-        the frame arrives, record push→receive.  This serialises throughput
-        but gives accurate single-window latency — which is what the budget
-        is defined against.
+        If a window produces no frame within 2 s it is skipped; ≥10 samples
+        required to pass.
         """
         single_latencies: list[float] = []
 
-        # Send one window at a time, wait for its frame, then send the next.
-        # This avoids any queue buildup and gives true per-window latency.
         for _ in range(self.N_SAMPLES):
             frame_received = threading.Event()
 
+            # Capture event in default arg to avoid late-binding closure issues.
             def on_frame(_f: PitchFrame, _ev: threading.Event = frame_received) -> None:
                 _ev.set()
 
@@ -299,8 +300,8 @@ class TestLatencyBreakdownGPU:
 
             if received:
                 single_latencies.append(time.monotonic() * 1000.0 - t_push)
-            # If timeout (no frame emitted — shouldn't happen for 440Hz sine),
-            # skip this sample so we don't inflate latency numbers.
+            # Timeout (no frame) means CREPE dropped the window (low confidence).
+            # Skip so we don't inflate latency numbers.
 
         if len(single_latencies) < 10:
             pytest.skip(
@@ -350,13 +351,14 @@ class TestStressDrift:
         pl._state = PlaybackState.PLAYING
         pl._play_monotonic = time.monotonic()
         pl._elapsed_ms = 0.0
-        pl._loop = None  # no WS clients needed
+        # _loop defaults to None; _on_pitch_frame returns early without fan-out.
 
         last_t_ms: list[float] = []
 
         def on_frame(_: PitchFrame) -> None:
-            t = pl._elapsed_ms + (time.monotonic() - pl._play_monotonic) * 1000.0
-            last_t_ms.append(t)
+            # Use the public property so we get the same calculation as
+            # production code (avoids duplicating the formula here).
+            last_t_ms.append(pl.elapsed_ms)
 
         pitch_pl = PitchPipeline(engine=Engine.PYIN, on_frame=on_frame)
         pitch_pl.start()
