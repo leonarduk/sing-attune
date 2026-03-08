@@ -15,16 +15,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Primary pitch engine — PyTorch-based, actively maintained, CUDA-friendly
-# Install PyTorch first per https://pytorch.org/get-started/locally/
-# then: uv pip install torchcrepe
+# Pitch engines — install PyTorch first:
+#   uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+# Then:
+#   uv pip install torchcrepe
 torchcrepe = [
     "torchcrepe>=0.0.20",
 ]
-# Lightweight CPU fallback (no GPU required)
-aubio = [
-    "aubio>=0.4.9",
-]
+# torchaudio pYIN (CPU fallback) ships with torchaudio — no separate install needed
 
 [dependency-groups]
 dev = [
