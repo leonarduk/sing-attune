@@ -33,6 +33,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install system audio libraries
+        run: sudo apt-get install -y libportaudio2
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 

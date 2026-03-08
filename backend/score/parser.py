@@ -9,7 +9,6 @@ Homeward Bound score exported from Audiveris).
 
 from __future__ import annotations
 
-import re
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path

@@ -21,9 +21,8 @@ import logging
 import time
 import threading
 from enum import Enum, auto
-from typing import Callable
 
-from .capture import MicCapture, AudioSession
+from .capture import MicCapture
 from .pitch import PitchFrame, PitchPipeline, Engine, select_engine
 
 log = logging.getLogger(__name__)

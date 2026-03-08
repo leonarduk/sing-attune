@@ -13,9 +13,7 @@ a mock pitch source injected via on_frame callback.
 
 import asyncio
 import time
-import threading
 
-import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 

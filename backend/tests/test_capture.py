@@ -10,7 +10,6 @@ MicCapture hardware tests are skipped by default — run with:
   uv run pytest -m hardware
 """
 
-import time
 import threading
 
 import numpy as np
