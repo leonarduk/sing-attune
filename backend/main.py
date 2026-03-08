@@ -14,7 +14,7 @@ import uvicorn
 
 from .score.parser import parse_musicxml
 from .audio.capture import list_input_devices, default_input_device_id
-from .audio.pipeline import PlaybackPipeline
+from .audio.pipeline import PlaybackPipeline, _CLIENT_QUEUE_MAXSIZE
 
 app = FastAPI(
     title="sing-attune",
@@ -36,6 +36,10 @@ app.add_middleware(
 # ── Application-lifetime pipeline (one instance per process) ──────────────────
 
 _pipeline = PlaybackPipeline()
+
+# Keepalive interval in seconds. If no pitch frames arrive for this long
+# (e.g. during PAUSED state), a ping is sent to keep the connection alive.
+_WS_KEEPALIVE_S = 5.0
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────
@@ -130,26 +134,23 @@ async def pitch_stream(websocket: WebSocket) -> None:
 
     The client receives frames only during PLAYING state.
     Connection survives pause/resume — no reconnect needed.
+    A keepalive ping is sent every _WS_KEEPALIVE_S seconds when no frames arrive
+    (e.g. during PAUSED state) so the connection stays open.
     """
     await websocket.accept()
     await websocket.send_json({"status": "connected"})
 
-    # Each WebSocket connection gets its own asyncio queue.
-    # The pitch worker thread posts frames via loop.call_soon_threadsafe.
-    q: asyncio.Queue = asyncio.Queue(maxsize=64)
+    q: asyncio.Queue = asyncio.Queue(maxsize=_CLIENT_QUEUE_MAXSIZE)
     _pipeline.add_client(q)
 
     try:
         while True:
-            # Wait for the next frame from the pitch pipeline
-            frame = await asyncio.wait_for(q.get(), timeout=5.0)
-            await websocket.send_json(frame)
-    except asyncio.TimeoutError:
-        # No frames for 5s — send a keepalive ping so the connection stays open
-        try:
-            await websocket.send_json({"ping": True})
-        except Exception:
-            pass
+            try:
+                frame = await asyncio.wait_for(q.get(), timeout=_WS_KEEPALIVE_S)
+                await websocket.send_json(frame)
+            except asyncio.TimeoutError:
+                # No frames for _WS_KEEPALIVE_S seconds (e.g. paused) — send ping
+                await websocket.send_json({"ping": True})
     except WebSocketDisconnect:
         pass
     except Exception:

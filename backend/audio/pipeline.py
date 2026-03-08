@@ -27,6 +27,11 @@ from .pitch import PitchFrame, PitchPipeline, Engine, select_engine
 
 log = logging.getLogger(__name__)
 
+# ── Constants ──────────────────────────────────────────────────────────────────
+
+# WebSocket client queue depth. At ~20Hz a full queue means >3s of backlog —
+# the client is hopelessly behind and frames should be dropped rather than block.
+_CLIENT_QUEUE_MAXSIZE = 64
 
 # ── State machine ──────────────────────────────────────────────────────────────
 
@@ -96,8 +101,9 @@ class PlaybackPipeline:
             if self._state == PlaybackState.PLAYING:
                 return
             if self._state == PlaybackState.PAUSED:
+                # Resume from pause — reuse existing hardware, do not reinitialise
                 self._resume_locked()
-                return
+                return  # ← must return; hardware already exists
 
             # STOPPED → PLAYING
             self._loop = loop
@@ -204,7 +210,6 @@ class PlaybackPipeline:
             "conf": round(frame.confidence, 3),
         }
 
-        # Fan out to all connected WebSocket clients via their asyncio queues
         loop = self._loop
         if loop is None or not loop.is_running():
             return
@@ -215,5 +220,7 @@ class PlaybackPipeline:
         for q in clients:
             try:
                 loop.call_soon_threadsafe(q.put_nowait, payload)
+            except asyncio.QueueFull:
+                log.warning("WS client queue full — dropping frame (client too slow)")
             except Exception:
                 pass  # client may have disconnected — harmless
