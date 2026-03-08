@@ -51,6 +51,8 @@ jobs:
   ai-review:
     name: AI code review
     runs-on: ubuntu-latest
+    # Advisory only — never block a merge due to AI review failure
+    continue-on-error: true
     permissions:
       pull-requests: write
       contents: read
@@ -86,6 +88,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Call Claude API
+        id: claude
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -96,6 +99,7 @@ jobs:
           python3 .github/scripts/claude_review.py > /tmp/review_body.md
 
       - name: Post review comment
+        if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -111,3 +115,16 @@ jobs:
           } > /tmp/comment_body.md
 
           gh pr comment "$PR_NUMBER" --body-file /tmp/comment_body.md
+
+      - name: Post failure notice
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr comment "$PR_NUMBER" --body \
+            "## AI Code Review — Skipped
+
+            The AI review step failed (likely an API key or quota issue). This is advisory only and does not affect CI status.
+
+            Check [Actions](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
