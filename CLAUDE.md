@@ -28,10 +28,26 @@
 1. Review the GitHub issue — check for stale assumptions before writing code
 2. Create feature branch
 3. Write code + tests
-4. Run tests — all must pass before committing
-5. Commit with `Closes #N` in body
-6. Push branch and open PR
-7. Merge PR → issue auto-closes
+4. Run linter — fix all violations before committing
+5. Run tests — all must pass before committing
+6. Commit with `Closes #N` in body
+7. Push branch and open PR
+8. Merge PR → issue auto-closes
+
+## Before every commit
+
+```powershell
+# 1. Fix all lint violations (auto-fixes unused imports etc.)
+uv run ruff check backend/ --fix
+
+# 2. Verify clean
+uv run ruff check backend/
+
+# 3. Run all tests
+uv run pytest -v
+```
+
+All three must pass. No exceptions.
 
 ## Testing
 
@@ -45,12 +61,22 @@ uv run pytest backend/tests/test_pipeline.py -v
 # GPU tests only run when CUDA is available (auto-skipped otherwise)
 ```
 
-All tests must pass before pushing. No exceptions.
+## What ruff catches
+
+ruff is a fast Python linter (written in Rust). It replaces flake8 + isort.
+Common violations it catches in this codebase:
+- `F401` — unused imports (auto-fixable with `--fix`)
+- `F841` — local variable assigned but never used
+- `E501` — line too long
+- `I001` — import ordering
+
+Run `uv run ruff check backend/ --fix` before committing — it auto-fixes
+most violations. If any remain after `--fix`, fix them manually.
 
 ## Python environment
 
 ```powershell
-# Install core deps
+# Install core deps (includes ruff as a dev dependency)
 uv sync
 
 # Install PyTorch (CUDA 12.8 — compatible with CUDA 12.9 runtime)
