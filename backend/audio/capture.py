@@ -8,8 +8,7 @@ Fills a ring buffer with overlapping 2048-sample windows at 22050 Hz.
 from __future__ import annotations
 
 import threading
-from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
 import numpy as np
@@ -18,7 +17,7 @@ import sounddevice as sd
 # ── Constants ──────────────────────────────────────────────────────────────────
 
 SAMPLE_RATE: int = 22050
-WINDOW_SIZE: int = 2048       # samples per analysis window (~93 ms)
+WINDOW_SIZE: int = 2048           # samples per analysis window (~93 ms)
 HOP_SIZE: int = WINDOW_SIZE // 2  # 50% overlap (~46 ms hop)
 
 # ── Device helpers ─────────────────────────────────────────────────────────────
@@ -56,6 +55,38 @@ def default_input_device_id() -> int:
     return sd.query_devices(kind="input")["index"]  # type: ignore[index]
 
 
+# ── Session state ──────────────────────────────────────────────────────────────
+
+
+class AudioSession:
+    """
+    Holds user-selected audio settings for the duration of a session.
+
+    Lightweight, thread-safe state holder — no hardware involved.
+    Persists the selected device_id so MicCapture can be stopped and
+    restarted (e.g. after settings change) without losing the selection.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._device_id: int | None = None
+
+    @property
+    def device_id(self) -> int | None:
+        with self._lock:
+            return self._device_id
+
+    @device_id.setter
+    def device_id(self, value: int | None) -> None:
+        with self._lock:
+            self._device_id = value
+
+    def reset(self) -> None:
+        """Clear all session state."""
+        with self._lock:
+            self._device_id = None
+
+
 # ── Ring buffer ────────────────────────────────────────────────────────────────
 
 
@@ -78,13 +109,10 @@ class RingBuffer:
         self._hop_size = hop_size
         self._on_window = on_window
         self._buf = np.zeros(window_size, dtype=np.float32)
-        self._fill = 0          # samples written into _buf
-        self._dropped = 0       # frames dropped (buffer full)
+        self._fill = 0
 
     def push(self, samples: np.ndarray) -> None:
-        """
-        Push a block of mono float32 samples.  Called from the audio thread.
-        """
+        """Push a block of mono float32 samples. Called from the audio thread."""
         offset = 0
         while offset < len(samples):
             space = self._window_size - self._fill
@@ -101,10 +129,6 @@ class RingBuffer:
                     self._hop_size :
                 ]
                 self._fill = self._window_size - self._hop_size
-
-    @property
-    def dropped(self) -> int:
-        return self._dropped
 
 
 # ── Capture stream ─────────────────────────────────────────────────────────────
@@ -133,18 +157,16 @@ class MicCapture:
         self._stream: sd.InputStream | None = None
         self._lock = threading.Lock()
 
-    # ── Public API ─────────────────────────────────────────────────────────
-
     def start(self) -> None:
         with self._lock:
             if self._stream is not None:
-                return  # already running
+                return
             self._stream = sd.InputStream(
                 device=self._device_id,
                 channels=1,
                 samplerate=self._sample_rate,
                 dtype="float32",
-                blocksize=HOP_SIZE,   # callback fires every hop
+                blocksize=HOP_SIZE,
                 callback=self._callback,
             )
             self._stream.start()
@@ -169,17 +191,14 @@ class MicCapture:
     def sample_rate(self) -> int:
         return self._sample_rate
 
-    # ── Internal ───────────────────────────────────────────────────────────
-
     def _callback(
         self,
         indata: np.ndarray,
         frames: int,
-        time,       # CData — not used
+        time,
         status: sd.CallbackFlags,
     ) -> None:
         if status:
-            # Log but don't crash — overflow/underrun in real-time thread
             print(f"[capture] sounddevice status: {status}")
-        mono = indata[:, 0]   # take channel 0 (mic array is stereo, we want mono)
+        mono = indata[:, 0]
         self._ring.push(mono)
