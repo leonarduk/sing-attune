@@ -3,7 +3,9 @@
 Quick benchmark: torchcrepe 'full' vs 'tiny' on RTX 5070.
 Run: uv run python backend/scripts/benchmark_crepe.py
 """
-import math, time
+import math
+import time
+
 import numpy as np
 import torch
 import torchcrepe
