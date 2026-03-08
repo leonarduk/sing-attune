@@ -6,8 +6,8 @@ Three acceptance criteria from issue #2:
   AC2: Ring buffer fills without dropping frames at 22050 Hz
   AC3: Device selection persists across a session (via AudioSession)
 
-MicCapture hardware tests are skipped by default — run with:
-  uv run pytest -m hardware
+Hardware tests require real audio devices and are skipped in CI automatically.
+Run locally with: uv run pytest -m hardware
 """
 
 import threading
@@ -153,15 +153,18 @@ class TestRingBuffer:
 
 class TestDeviceEnumeration:
     def test_list_input_devices_returns_list(self):
+        """list_input_devices() must always return a list, even when empty."""
         devices = list_input_devices()
         assert isinstance(devices, list)
 
+    @pytest.mark.hardware
     def test_at_least_one_input_device(self):
         """AC1 (unit): at least one input device exists on this machine."""
         devices = list_input_devices()
         assert len(devices) >= 1, "No input devices found"
 
     def test_device_fields(self):
+        """Each returned device has the expected fields and types."""
         devices = list_input_devices()
         for d in devices:
             assert isinstance(d, AudioDevice)
@@ -176,9 +179,12 @@ class TestDeviceEnumeration:
         for d in devices:
             assert d.channels >= 1
 
+    @pytest.mark.hardware
     def test_default_device_id_is_int(self):
+        """default_input_device_id() returns an int when a device is present."""
         assert isinstance(default_input_device_id(), int)
 
+    @pytest.mark.hardware
     def test_default_device_in_list(self):
         devices = list_input_devices()
         ids = {d.id for d in devices}
@@ -190,7 +196,12 @@ class TestDeviceEnumeration:
 
 
 class TestAudioDevicesEndpoint:
-    """AC1: GET /audio/devices returns at least one device via the HTTP API."""
+    """AC1: GET /audio/devices returns device list via the HTTP API.
+
+    The endpoint always returns 200 — an empty device list is valid in CI.
+    Hardware-dependent assertions (at least one device, default in list)
+    are marked @pytest.mark.hardware and skipped in CI automatically.
+    """
 
     @pytest.fixture
     def client(self):
@@ -211,6 +222,7 @@ class TestAudioDevicesEndpoint:
         assert "devices" in data
         assert "default_device_id" in data
 
+    @pytest.mark.hardware
     def test_endpoint_at_least_one_device(self, client):
         """AC1: the HTTP response must contain at least one input device."""
         resp = client.get("/audio/devices")
@@ -227,6 +239,7 @@ class TestAudioDevicesEndpoint:
             assert "host_api" in device
             assert "default_sample_rate" in device
 
+    @pytest.mark.hardware
     def test_endpoint_default_device_in_list(self, client):
         resp = client.get("/audio/devices")
         data = resp.json()

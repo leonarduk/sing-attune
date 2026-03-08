@@ -50,9 +50,15 @@ def list_input_devices() -> list[AudioDevice]:
     return devices
 
 
-def default_input_device_id() -> int:
-    """Return sounddevice's current default input device index."""
-    return sd.query_devices(kind="input")["index"]  # type: ignore[index]
+def default_input_device_id() -> int | None:
+    """Return sounddevice's current default input device index.
+
+    Returns None if no input devices are available (e.g. in CI).
+    """
+    try:
+        return sd.query_devices(kind="input")["index"]  # type: ignore[index]
+    except sd.PortAudioError:
+        return None
 
 
 # ── Session state ──────────────────────────────────────────────────────────────
