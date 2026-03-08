@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>sing-attune</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    header {
+      padding: 12px 20px;
+      background: #16213e;
+      border-bottom: 1px solid #0f3460;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 { font-size: 1.2rem; color: #e94560; }
+    #status {
+      font-size: 0.8rem;
+      color: #aaa;
+    }
+    #status.ok { color: #4caf50; }
+    #status.error { color: #e94560; }
+    main {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 12px;
+      color: #555;
+    }
+    main p { font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>sing-attune</h1>
+    <span id="status">checking backend…</span>
+  </header>
+  <main>
+    <p>Score renderer — Day 8</p>
+    <p>Pitch overlay — Day 9</p>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
