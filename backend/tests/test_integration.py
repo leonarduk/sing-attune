@@ -188,6 +188,8 @@ class TestLatencyBreakdownGPU:
 
         Measurement: stop the pipeline, wrap _infer, restart.  This avoids
         the race condition of patching a method on a running worker thread.
+        Note: stop/restart triggers a second warmup, so the first 1-2 samples
+        may be slower; with N_SAMPLES=50 the p95 is not materially affected.
         """
         latencies: list[float] = []
         done = threading.Event()
@@ -282,16 +284,25 @@ class TestLatencyBreakdownGPU:
 
         If a window produces no frame within 2 s it is skipped; ≥10 samples
         required to pass.
+
+        Closure note
+        ────────────
+        The `_ev=frame_received` default argument is intentional and correct.
+        Default args in Python are evaluated at `def` time; since `def` is
+        inside the loop, each iteration creates a new function object with a
+        fresh Event bound as its default.  A bare closure would capture the
+        *name* frame_received by reference and would race.
         """
         single_latencies: list[float] = []
 
         for _ in range(self.N_SAMPLES):
             frame_received = threading.Event()
 
-            # Capture event in default arg to avoid late-binding closure issues.
             def on_frame(_f: PitchFrame, _ev: threading.Event = frame_received) -> None:
                 _ev.set()
 
+            # PitchPipeline._worker reads self._on_frame at call time — safe to
+            # replace between iterations without a lock.
             gpu_pipeline._on_frame = on_frame
 
             t_push = time.monotonic() * 1000.0
