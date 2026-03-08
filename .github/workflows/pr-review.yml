@@ -39,7 +39,6 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync
-          # PyTorch CPU build — GPU not available in CI
           uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
           uv pip install torchcrepe
 
@@ -55,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history so we can diff against base branch
+          fetch-depth: 0
 
       - name: Get PR diff
         id: diff
@@ -66,124 +65,43 @@ jobs:
           echo "$DIFF" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Get issue body
+      - name: Get linked issue body
         id: issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Extract issue number from PR title or body (looks for #N pattern)
           ISSUE_NUM=$(gh pr view ${{ github.event.pull_request.number }} --json body,title \
             | jq -r '[.title, .body] | join(" ")' \
             | grep -oP '(?<=#)\d+' | head -1)
-
           if [ -n "$ISSUE_NUM" ]; then
             ISSUE_BODY=$(gh issue view "$ISSUE_NUM" --json body -q .body 2>/dev/null || echo "Issue not found")
           else
             ISSUE_BODY="No linked issue found. Review code on its own merits."
           fi
-
           echo "body<<EOF" >> $GITHUB_OUTPUT
           echo "$ISSUE_BODY" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Call Claude API for review
+      - name: Call Claude API
         id: claude
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          PR_TITLE="${{ github.event.pull_request.title }}"
-          DIFF="${{ steps.diff.outputs.diff }}"
-          ISSUE_BODY="${{ steps.issue.outputs.body }}"
-
-          RESPONSE=$(python3 - <<'PYEOF'
-          import os, json, urllib.request, sys
-
-          api_key = os.environ["ANTHROPIC_API_KEY"]
-          pr_title = os.environ.get("PR_TITLE", "")
-          diff = os.environ.get("DIFF", "")
-          issue_body = os.environ.get("ISSUE_BODY", "")
-
-          prompt = f"""You are a senior engineer reviewing a pull request for **sing-attune**, a real-time choir practice app.
-
-The stack is Python/FastAPI backend + Vite+TypeScript frontend + Electron (future).
-Key constraints: audio latency <80ms end-to-end, thread-safe pitch pipeline, asyncio event loop correctness.
-
-## Linked issue / acceptance criteria
-{issue_body}
-
-## PR title
-{pr_title}
-
-## Diff (Python files only, truncated at 30k chars)
-```diff
-{diff}
-```
-
-Review this PR across these dimensions. Be direct and specific — cite line numbers or function names where relevant.
-If something looks fine, say so briefly. Spend your words on real concerns.
-
-### 1. Acceptance criteria
-Does the code satisfy every AC in the linked issue? Call out any gaps explicitly.
-
-### 2. Bugs and logic errors
-Any incorrect behaviour, edge cases that aren't handled, or off-by-one errors?
-
-### 3. Thread safety and async correctness
-- Are shared mutable objects properly locked?
-- Is `call_soon_threadsafe` used correctly?
-- Any asyncio anti-patterns (blocking calls in coroutines, wrong loop assumptions)?
-
-### 4. Test coverage
-Are the acceptance criteria actually exercised by tests? Any obvious missing cases?
-
-### 5. Minor issues (optional)
-Style, naming, docstrings — only flag if they'd cause future confusion.
-
-End with a one-line summary verdict: **APPROVE**, **REQUEST CHANGES**, or **COMMENT** (no blocking concerns but worth noting).
-"""
-
-          payload = {
-              "model": "claude-sonnet-4-20250514",
-              "max_tokens": 1500,
-              "messages": [{"role": "user", "content": prompt}]
-          }
-
-          req = urllib.request.Request(
-              "https://api.anthropic.com/v1/messages",
-              data=json.dumps(payload).encode(),
-              headers={
-                  "x-api-key": api_key,
-                  "anthropic-version": "2023-06-01",
-                  "content-type": "application/json",
-              },
-              method="POST"
-          )
-
-          with urllib.request.urlopen(req) as resp:
-              data = json.loads(resp.read())
-
-          review = data["content"][0]["text"]
-          print(review)
-          PYEOF
-          )
-
-          echo "review<<EOF" >> $GITHUB_OUTPUT
-          echo "$RESPONSE" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-        env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           DIFF: ${{ steps.diff.outputs.diff }}
           ISSUE_BODY: ${{ steps.issue.outputs.body }}
+        run: |
+          REVIEW=$(python3 .github/scripts/claude_review.py)
+          echo "review<<EOF" >> $GITHUB_OUTPUT
+          echo "$REVIEW" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Post review comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BODY="## 🤖 AI Code Review
+          gh pr comment ${{ github.event.pull_request.number }} --body "## AI Code Review
 
           ${{ steps.claude.outputs.review }}
 
           ---
-          *Reviewed by Claude via [pr-review.yml](.github/workflows/pr-review.yml). This is advisory — human review still required.*"
-
-          gh pr comment ${{ github.event.pull_request.number }} --body "$BODY"
+          *Reviewed by Claude via [pr-review.yml](.github/workflows/pr-review.yml). Advisory only.*"
