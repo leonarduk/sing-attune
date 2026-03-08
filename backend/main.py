@@ -1,6 +1,6 @@
 """
 sing-attune Backend — FastAPI application entry point.
-Day 2: /score endpoint accepts MusicXML upload and returns parsed ScoreModel.
+Day 4: /audio/devices endpoint wired to real sounddevice enumeration.
 """
 
 import tempfile
@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 from .score.parser import parse_musicxml
+from .audio.capture import list_input_devices, default_input_device_id
 
 app = FastAPI(
     title="sing-attune",
@@ -38,16 +39,42 @@ async def health() -> JSONResponse:
 
 @app.get("/audio/devices")
 async def list_audio_devices() -> JSONResponse:
-    """Return available input devices. Stub — implemented Day 4."""
-    return JSONResponse({"devices": [], "note": "audio pipeline not yet initialised"})
+    """
+    Return available audio input devices and the current default.
+
+    Response schema:
+        {
+            "default_device_id": int,
+            "devices": [
+                {"id": int, "name": str, "channels": int,
+                 "host_api": str, "default_sample_rate": float},
+                ...
+            ]
+        }
+    """
+    devices = list_input_devices()
+    default_id = default_input_device_id()
+    return JSONResponse(
+        {
+            "default_device_id": default_id,
+            "devices": [
+                {
+                    "id": d.id,
+                    "name": d.name,
+                    "channels": d.channels,
+                    "host_api": d.host_api,
+                    "default_sample_rate": d.default_sample_rate,
+                }
+                for d in devices
+            ],
+        }
+    )
 
 
 @app.post("/score")
 async def load_score(file: UploadFile = File(...)) -> JSONResponse:
     """
     Accept a MusicXML upload (.xml or .mxl) and return the parsed ScoreModel.
-
-    The file is written to a temp location, parsed, then deleted.
     """
     suffix = Path(file.filename or "score.xml").suffix.lower()
     if suffix not in {".xml", ".mxl"}:
