@@ -1,5 +1,7 @@
 # sing-attune
 
+[![codecov](https://codecov.io/gh/leonarduk/sing-attune/branch/main/graph/badge.svg)](https://codecov.io/gh/leonarduk/sing-attune)
+
 **Practice your choir part. Hear the notes. Sing along. See your pitch in real time.**
 
 sing-attune plays your part from a MusicXML score through your headphones. You sing along. As you sing, your pitch appears live on the score — a moving dot over the notation, green when you're on it, red when you're not. No post-hoc analysis, no percentage scores. Just an honest mirror of what your voice is doing, in the moment, against what the music asks for.
@@ -8,7 +10,7 @@ sing-attune plays your part from a MusicXML score through your headphones. You s
 
 ## The loop
 
-1. Load a MusicXML file (MuseScore, Sibelius, Finale, Audiveris)
+1. Load a MusicXML file (MuseScore, Sibelius, Finale, Audivelis)
 2. Select your part
 3. Press play — the score plays piano tones through your headphones
 4. Sing along
@@ -120,13 +122,14 @@ API docs: http://localhost:8000/docs
 
 Every pull request runs:
 - **ruff** — Python linter
-- **pytest** — full test suite (116 tests; hardware tests auto-skip in CI)
+- **pytest** — full test suite with coverage (hardware tests auto-skip in CI)
+- **Codecov** — coverage delta reported on every PR
 - **Claude AI review** — reviews the diff against the linked issue's acceptance criteria
 
 Run locally before pushing:
 ```powershell
 uv run ruff check backend/ --fix
-uv run pytest -v
+uv run pytest -v --cov=backend --cov-report=term-missing
 ```
 
 See [CLAUDE.md](CLAUDE.md) for branching conventions and the full pre-commit checklist.
@@ -139,12 +142,12 @@ See [CLAUDE.md](CLAUDE.md) for branching conventions and the full pre-commit che
 backend/
   score/          MusicXML parsing, data models, beat-time timeline
   audio/          Mic capture, pitch detection pipeline, playback state machine
-  tests/          pytest suite (116 tests)
+  tests/          pytest suite (hardware tests auto-skip in CI)
   main.py         FastAPI app, REST endpoints, WebSocket pitch stream
 frontend/
   src/            Vite + TypeScript — score renderer, pitch canvas, playback, controls
 .github/
-  workflows/      PR review: ruff + pytest + Claude AI review
+  workflows/      PR review: ruff + pytest + Codecov + Claude AI review
   scripts/        claude_review.py — AI review script
 musescore/        Test scores (Homeward Bound, Parts I & II)
 ```
