@@ -49,8 +49,13 @@ export class ScoreRenderer {
     this.osmd = new OpenSheetMusicDisplay(container, {
       autoResize: true,
       drawTitle: true,
-      followCursor: true,
+      // followCursor scrolls the browser *window*, not our #score-container div.
+      // ScoreCursor._scrollToCursor() calls scrollIntoView() on the cursor element
+      // which handles container-level scroll correctly. Keeping this true would
+      // cause double-scroll jank, so it is disabled.
+      followCursor: false,
       // Compact layout reduces whitespace; suitable for choir parts at 1080p.
+      // Typed as string in IOSMDOptions — no cast needed.
       drawingParameters: 'compacttight',
     });
   }
@@ -82,13 +87,10 @@ export class ScoreRenderer {
     const model = (await resp.json()) as ScoreModel;
 
     // Phase 2: OSMD render
-    // .mxl is a ZIP; pass as ArrayBuffer. .xml/.musicxml pass as text.
-    const isMxl = file.name.toLowerCase().endsWith('.mxl');
-    const content: string | ArrayBuffer = isMxl
-      ? await file.arrayBuffer()
-      : await file.text();
-
-    await this.osmd.load(content);
+    // File extends Blob; osmd.load() accepts Blob and handles both .xml and
+    // .mxl internally (JSZip detects the ZIP magic bytes automatically).
+    // Do NOT pass ArrayBuffer — it is not in the osmd.load() type signature.
+    await this.osmd.load(file);
     this.osmd.render();
 
     // Commit state only after both phases succeed
