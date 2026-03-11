@@ -45,8 +45,14 @@ jobs:
           uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
           uv pip install torchcrepe
 
-      - name: Run tests
-        run: uv run pytest backend/tests/ -v --tb=short
+      - name: Run tests with coverage
+        run: uv run pytest backend/tests/ -v --tb=short --cov=backend --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          slug: leonarduk/sing-attune
+        # No token needed — org uses tokenless uploads
 
   ai-review:
     name: AI code review
