@@ -10,7 +10,7 @@ sing-attune plays your part from a MusicXML score through your headphones. You s
 
 ## The loop
 
-1. Load a MusicXML file (MuseScore, Sibelius, Finale, Audivelis)
+1. Load a MusicXML file (MuseScore, Sibelius, Finale, Audiveris)
 2. Select your part
 3. Press play — the score plays piano tones through your headphones
 4. Sing along
