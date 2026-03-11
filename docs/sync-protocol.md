@@ -87,10 +87,10 @@ function frameToAudioTime(frame_t_ms: number): number {
 `POST /playback/start` records `time.monotonic()` as `_play_monotonic` and resets `_elapsed_ms = 0`. All subsequent `t` values are computed as:
 
 ```
-t_ms = (_elapsed_ms + (time.monotonic() - _play_monotonic)) * 1000
+t_ms = _elapsed_ms + (time.monotonic() - _play_monotonic) * 1000
 ```
 
-This is already implemented in `pipeline.py`. Do not change the timing model without updating this document.
+Note: `_elapsed_ms` is already in milliseconds; only the live delta `(time.monotonic() - _play_monotonic)` is in seconds and requires the `* 1000` conversion. This is already implemented in `pipeline.py`. Do not change the timing model without updating this document.
 
 ---
 
