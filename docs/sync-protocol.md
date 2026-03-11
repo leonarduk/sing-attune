@@ -208,6 +208,8 @@ If the WebSocket disconnects unexpectedly, the frontend should:
 
 The backend sends `{ "ping": true }` every 5 seconds when no frames are flowing (i.e. during PAUSED state). The frontend must not treat this as a pitch frame. Silently discard it.
 
+> **STOPPED state note:** The keepalive only fires during PAUSED state. During STOPPED state the WebSocket is open but silent — no pings are sent. Most browsers and proxies timeout an idle WebSocket after 60–120 seconds. The frontend should therefore close and re-open the WebSocket on the next Play press if the session has been STOPPED for more than 30 seconds, rather than assuming the existing connection is still healthy.
+
 ---
 
 ## 8. State machine summary
@@ -242,5 +244,6 @@ Before merging any #8 or #9 PR:
 - [ ] Resume recaptures `audioCtx.currentTime` as `audioResumeTime`
 - [ ] `frameToAudioTime()` updated on every resume to use new anchor pair
 - [ ] `{ ping: true }` and `{ status: "connected" }` messages silently discarded
+- [ ] WebSocket closes and re-opens on Play if previously STOPPED for >30 seconds
 - [ ] WebSocket reconnect implemented with `GET /playback/state` re-anchor
 - [ ] No use of `Date.now()` anywhere in the sync path
