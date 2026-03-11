@@ -16,6 +16,8 @@ import { ScoreRenderer } from './score/renderer';
 import { ScoreCursor } from './score/cursor';
 import { SoundfontLoader } from './playback/soundfont';
 import { PlaybackEngine, beatToSeconds } from './playback/engine';
+import { PlaybackEngine } from './playback/engine';
+import { getVisiblePartOptions } from './part-options';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -33,6 +35,7 @@ const tempoSliderEl   = document.getElementById('tempo-slider') as HTMLInputElem
 const tempoLabelEl    = document.getElementById('tempo-label')  as HTMLSpanElement;
 const headphoneWarning = document.getElementById('headphone-warning') as HTMLDivElement;
 const warningDismiss  = document.getElementById('warning-dismiss') as HTMLButtonElement;
+const showAccompanimentEl = document.getElementById('show-accompaniment') as HTMLInputElement;
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
@@ -110,11 +113,14 @@ async function loadScore(file: File): Promise<void> {
   try {
     const model = await renderer.load(file);
 
-    // Populate part selector
-    partSelectEl.innerHTML = model.parts
-      .map((p) => `<option value="${p}">${p}</option>`)
+    // Populate part selector (accompaniment hidden by default)
+    const visibleParts = getVisiblePartOptions(model.parts, showAccompanimentEl.checked);
+    partSelectEl.innerHTML = visibleParts
+      .map((option) => `<option value="${option.name}">${option.name}</option>`)
       .join('');
-    partSelectEl.disabled = model.parts.length <= 1;
+    const selectedPart = visibleParts[0]?.name ?? model.parts[0] ?? '';
+    partSelectEl.value = selectedPart;
+    partSelectEl.disabled = visibleParts.length <= 1;
 
     const bpm = model.tempo_marks[0]?.bpm ?? 120;
     scoreInfoEl.textContent =
@@ -128,7 +134,7 @@ async function loadScore(file: File): Promise<void> {
     engine.schedule(
       model.notes,
       model.tempo_marks,
-      model.parts[0] ?? '',
+      selectedPart,
       parseFloat(tempoSliderEl.value) / 100,
     );
 
@@ -194,6 +200,42 @@ async function seekByBeats(delta: number): Promise<void> {
   engine.seekToBeat(targetBeat);
   cursor.seekToBeat(targetBeat);
   if (engine.state !== 'playing') stopCursorRaf();
+}
+
+function scheduleSelectedPart(selectedPart: string): void {
+  if (!engine || !renderer?.scoreModel) return;
+
+  engine.schedule(
+    renderer.scoreModel.notes,
+    renderer.scoreModel.tempo_marks,
+    selectedPart,
+    parseFloat(tempoSliderEl.value) / 100,
+  );
+
+  if (engine.state === 'playing') {
+    engine.stop();
+    stopCursorRaf();
+    cursor?.stop();
+    cursor?.osmd.cursor.show();
+    engine.play(0);
+    startCursorRaf();
+  }
+}
+
+function refreshPartSelector(): void {
+  if (!renderer?.scoreModel) return;
+  const allParts = renderer.scoreModel.parts;
+  const selectedBefore = partSelectEl.value;
+  const visibleParts = getVisiblePartOptions(allParts, showAccompanimentEl.checked);
+  partSelectEl.innerHTML = visibleParts
+    .map((option) => `<option value="${option.name}">${option.name}</option>`)
+    .join('');
+
+  const stillVisible = visibleParts.some((option) => option.name === selectedBefore);
+  const selectedPart = stillVisible ? selectedBefore : (visibleParts[0]?.name ?? allParts[0] ?? '');
+  partSelectEl.value = selectedPart;
+  partSelectEl.disabled = !engine || visibleParts.length <= 1;
+  scheduleSelectedPart(selectedPart);
 }
 
 // ── Transport controls ────────────────────────────────────────────────────────
@@ -268,23 +310,11 @@ btnRewind.addEventListener('click', async () => {
 // ── Part selector ─────────────────────────────────────────────────────────────
 
 partSelectEl.addEventListener('change', () => {
-  if (!engine || !renderer?.scoreModel) return;
-  const model = renderer.scoreModel;
-  engine.schedule(
-    model.notes,
-    model.tempo_marks,
-    partSelectEl.value,
-    parseFloat(tempoSliderEl.value) / 100,
-  );
-  // If playing, restart from beat 0 with the new part
-  if (engine.state === 'playing') {
-    engine.stop();
-    stopCursorRaf();
-    cursor?.stop();
-    cursor?.osmd.cursor.show();
-    engine.play(0);
-    startCursorRaf();
-  }
+  scheduleSelectedPart(partSelectEl.value);
+});
+
+showAccompanimentEl.addEventListener('change', () => {
+  refreshPartSelector();
 });
 
 // ── Tempo slider ──────────────────────────────────────────────────────────────
