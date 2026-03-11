@@ -12,11 +12,15 @@
  *     delta on each RAF frame.
  *   - Tempo changes are respected: elapsedToBeat() in timing.ts integrates
  *     across all TempoMark entries from startBeat onwards.
- *   - scrollIntoView with inline:'center' keeps the cursor horizontally
- *     centred in the scroll container without JS scroll calculation.
+ *   - scrollIntoView with block:'nearest' prevents vertical jumps when the
+ *     score container is taller than the viewport; inline:'center' keeps the
+ *     cursor horizontally centred within the scroll container.
  *   - RealValue * 4: OSMD's currentTimeStamp.RealValue is in whole notes.
  *     Multiplying by 4 converts to quarter-note beats (our ScoreModel unit).
  *     This is a unit conversion, not a 4/4 time-signature assumption.
+ *   - JS is single-threaded, so there is no race between the EndReached check
+ *     and requestAnimationFrame scheduling. pause() calls cancelAnimationFrame
+ *     before any RAF callback can fire, and _tick() guards on _playing anyway.
  */
 import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import type { ScoreModel } from './renderer';
@@ -76,6 +80,13 @@ export class ScoreCursor {
    * Seek the cursor to a specific beat position.
    * Call this from Day 9+ pitch overlay to drive the cursor from
    * AudioContext.currentTime rather than the internal wall clock.
+   *
+   * OSMD's cursor is a forward-only iterator: reset() goes to beat 0;
+   * next() advances one position. There is no O(1) seek. Seeking backward
+   * therefore resets to 0 and replays cursor.next() forward to the target.
+   * For typical choir piece lengths (~200 cursor positions) this is fast
+   * enough to be imperceptible. If it ever becomes a bottleneck, consider
+   * OSMD's CursorType.CurrentArea variant which supports independent scrolling.
    */
   seekToBeat(beat: number): void {
     if (beat < this._lastAdvancedBeat) {
@@ -125,7 +136,8 @@ export class ScoreCursor {
   private _scrollToCursor(): void {
     const el = this.osmd.cursor.cursorElement;
     if (el) {
-      // 'auto' is instant; avoids fighting with the 60Hz tick when smooth.
+      // block:'nearest' prevents vertical jumps; inline:'center' keeps
+      // the cursor horizontally centred within the #score-container div.
       el.scrollIntoView({ block: 'nearest', inline: 'center' });
     }
   }

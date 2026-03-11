@@ -19,6 +19,12 @@ import type { TempoMark } from './renderer';
  * Coordinate system: beats are quarter-note beats throughout.
  * OSMD's currentTimeStamp.RealValue is in whole notes; multiply by 4 to convert.
  * This conversion is a unit definition, not a time-signature assumption.
+ *
+ * Assumption: if tempoMarks is non-empty, tempoMarks[0].beat === 0.
+ * The backend parser always satisfies this. If startBeat is before the first
+ * tempo mark, the first mark's BPM would be used for the opening bars, which
+ * would be incorrect. This cannot occur with our data but is documented here
+ * so the constraint is visible.
  */
 export function elapsedToBeat(
   elapsedMs: number,
