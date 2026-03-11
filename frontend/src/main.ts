@@ -16,6 +16,7 @@ import { ScoreRenderer } from './score/renderer';
 import { ScoreCursor } from './score/cursor';
 import { SoundfontLoader } from './playback/soundfont';
 import { PlaybackEngine } from './playback/engine';
+import { getVisiblePartOptions } from './part-options';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -47,25 +48,6 @@ let soundfontLoadPromise: Promise<void> | null = null;
 
 // External cursor RAF (replaces ScoreCursor's internal wall-clock loop)
 let cursorRafId: number | null = null;
-
-type PartOption = {
-  name: string;
-  hiddenByDefault: boolean;
-};
-
-function isAccompanimentPart(partName: string): boolean {
-  const normalized = partName.toLowerCase();
-  return ['piano', 'keyboard', 'accompaniment', 'accomp', 'pno', 'kbd']
-    .some((alias) => normalized.includes(alias));
-}
-
-function getVisiblePartOptions(parts: string[], includeAccompaniment: boolean): PartOption[] {
-  const options = parts.map((name) => ({ name, hiddenByDefault: isAccompanimentPart(name) }));
-  if (includeAccompaniment) return options;
-
-  const filtered = options.filter((option) => !option.hiddenByDefault);
-  return filtered.length > 0 ? filtered : options;
-}
 
 // ── Backend health ────────────────────────────────────────────────────────────
 
@@ -190,21 +172,9 @@ function stopCursorRaf(): void {
   }
 }
 
-function refreshPartSelector(): void {
-  if (!renderer?.scoreModel) return;
-  const allParts = renderer.scoreModel.parts;
-  const selectedBefore = partSelectEl.value;
-  const visibleParts = getVisiblePartOptions(allParts, showAccompanimentEl.checked);
-  partSelectEl.innerHTML = visibleParts
-    .map((option) => `<option value="${option.name}">${option.name}</option>`)
-    .join('');
+function scheduleSelectedPart(selectedPart: string): void {
+  if (!engine || !renderer?.scoreModel) return;
 
-  const stillVisible = visibleParts.some((option) => option.name === selectedBefore);
-  const selectedPart = stillVisible ? selectedBefore : (visibleParts[0]?.name ?? allParts[0] ?? '');
-  partSelectEl.value = selectedPart;
-  partSelectEl.disabled = !engine || visibleParts.length <= 1;
-
-  if (!engine) return;
   engine.schedule(
     renderer.scoreModel.notes,
     renderer.scoreModel.tempo_marks,
@@ -220,6 +190,22 @@ function refreshPartSelector(): void {
     engine.play(0);
     startCursorRaf();
   }
+}
+
+function refreshPartSelector(): void {
+  if (!renderer?.scoreModel) return;
+  const allParts = renderer.scoreModel.parts;
+  const selectedBefore = partSelectEl.value;
+  const visibleParts = getVisiblePartOptions(allParts, showAccompanimentEl.checked);
+  partSelectEl.innerHTML = visibleParts
+    .map((option) => `<option value="${option.name}">${option.name}</option>`)
+    .join('');
+
+  const stillVisible = visibleParts.some((option) => option.name === selectedBefore);
+  const selectedPart = stillVisible ? selectedBefore : (visibleParts[0]?.name ?? allParts[0] ?? '');
+  partSelectEl.value = selectedPart;
+  partSelectEl.disabled = !engine || visibleParts.length <= 1;
+  scheduleSelectedPart(selectedPart);
 }
 
 // ── Transport controls ────────────────────────────────────────────────────────
@@ -259,7 +245,7 @@ btnStop.addEventListener('click', () => {
 // ── Part selector ─────────────────────────────────────────────────────────────
 
 partSelectEl.addEventListener('change', () => {
-  refreshPartSelector();
+  scheduleSelectedPart(partSelectEl.value);
 });
 
 showAccompanimentEl.addEventListener('change', () => {
