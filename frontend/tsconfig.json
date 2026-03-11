@@ -9,7 +9,13 @@
     "noImplicitReturns": true,
     "outDir": "dist",
     "rootDir": "src",
-    "lib": ["ES2022", "DOM"]
+    "lib": [
+      "ESNext",
+      "DOM"
+    ],
+    "skipLibCheck": true
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }
