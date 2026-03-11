@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>sing-attune</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
       font-family: system-ui, sans-serif;
       background: #1a1a2e;
@@ -13,43 +14,125 @@
       display: flex;
       flex-direction: column;
       height: 100vh;
+      overflow: hidden;
     }
+
+    /* ── Header ── */
     header {
-      padding: 12px 20px;
+      padding: 10px 20px;
       background: #16213e;
       border-bottom: 1px solid #0f3460;
       display: flex;
       align-items: center;
       gap: 16px;
+      flex-shrink: 0;
     }
-    header h1 { font-size: 1.2rem; color: #e94560; }
+    header h1 { font-size: 1.1rem; color: #e94560; }
     #status {
       font-size: 0.8rem;
       color: #aaa;
+      margin-left: auto;
     }
-    #status.ok { color: #4caf50; }
-    #status.error { color: #e94560; }
-    main {
-      flex: 1;
+    #status.ok     { color: #4caf50; }
+    #status.error  { color: #e94560; }
+    #status.loading { color: #ffa726; }
+
+    /* ── Toolbar ── */
+    #toolbar {
+      padding: 8px 20px;
+      background: #16213e;
+      border-bottom: 1px solid #0f3460;
       display: flex;
       align-items: center;
-      justify-content: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .transport-btn {
+      padding: 5px 18px;
+      border: 1px solid #0f3460;
+      border-radius: 4px;
+      background: #0f3460;
+      color: #eee;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .transport-btn:hover:not(:disabled) { background: #1a5276; }
+    .transport-btn:disabled { opacity: 0.4; cursor: default; }
+    #score-info {
+      font-size: 0.8rem;
+      color: #aaa;
+      margin-left: 12px;
+    }
+
+    /* ── Main content area ── */
+    main {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Drop zone — shown before a score is loaded */
+    #drop-zone {
+      position: absolute;
+      inset: 0;
+      display: flex;
       flex-direction: column;
+      align-items: center;
+      justify-content: center;
       gap: 12px;
+      border: 2px dashed #0f3460;
+      margin: 24px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
       color: #555;
     }
-    main p { font-size: 0.9rem; }
+    #drop-zone.drag-over {
+      border-color: #e94560;
+      background: rgba(233, 69, 96, 0.05);
+      color: #e94560;
+    }
+    #drop-zone.hidden { display: none; }
+    #drop-zone p    { font-size: 0.9rem; }
+    #drop-zone span { font-size: 0.75rem; }
+
+    /* Score container — OSMD renders here */
+    #score-container {
+      position: absolute;
+      inset: 0;
+      overflow-x: auto;
+      overflow-y: auto;
+      padding: 16px;
+      background: #fff;   /* OSMD renders on white */
+    }
+    /* Hidden input used to open the OS file picker */
+    #file-input { display: none; }
   </style>
 </head>
 <body>
+
   <header>
     <h1>sing-attune</h1>
     <span id="status">checking backend…</span>
   </header>
+
+  <div id="toolbar">
+    <button id="btn-play"  class="transport-btn">▶ Play</button>
+    <button id="btn-pause" class="transport-btn">⏸ Pause</button>
+    <button id="btn-stop"  class="transport-btn">⏹ Stop</button>
+    <span id="score-info"></span>
+  </div>
+
   <main>
-    <p>Score renderer — Day 8</p>
-    <p>Pitch overlay — Day 9</p>
+    <div id="drop-zone">
+      <p>Drop a MusicXML file here</p>
+      <span>.xml or .mxl — or click to browse</span>
+    </div>
+    <div id="score-container"></div>
   </main>
+
+  <input type="file" id="file-input" accept=".xml,.mxl" />
   <script type="module" src="/src/main.ts"></script>
+
 </body>
 </html>
