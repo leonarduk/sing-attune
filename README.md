@@ -43,7 +43,7 @@ That's it.
 
 ## Status
 
-🚧 **Early development** — backend complete through Day 6, frontend UI in progress.
+🚧 **Early development** — backend complete through Day 7, frontend score rendering (Day 8a) now working.
 
 | Component | Status |
 |-----------|--------|
@@ -53,8 +53,8 @@ That's it.
 | Audio capture (mic) | ✅ Done |
 | Pitch detection (torchcrepe/pYIN) | ✅ Done |
 | WebSocket pitch stream | ✅ Done |
-| Backend integration tests | 🔲 Day 7 |
-| Score renderer (OSMD) | 🔲 Day 8 |
+| Backend integration tests | ✅ Done |
+| Score renderer (OSMD) | ✅ Done (Day 8a) |
 | Score playback (Web Audio) | 🔲 Day 9 |
 | Real-time pitch overlay | 🔲 Day 10 |
 | Transport controls | 🔲 Day 11 |
