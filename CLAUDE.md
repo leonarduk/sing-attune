@@ -4,23 +4,35 @@
 
 - **Never commit directly to `main`**
 - One branch per issue: `feature/dayN-short-description`
-- Create the branch before writing any code:
+- **Always create the branch from the GitHub issue** using `gh issue develop`:
   ```
-  git checkout -b feature/day7-integration-tests
+  gh issue develop <N> --checkout --branch feature/dayN-short-description
+  ```
+  This links the branch to the issue on GitHub automatically.
+- If `gh` is unavailable, create manually then link explicitly:
+  ```
+  git checkout -b feature/dayN-short-description
+  # and reference the issue in every commit (see below)
   ```
 - At end of day: push branch, open PR, merge via GitHub
 
 ## Commit messages
 
 - Format: `type: short description`
-- Always reference the issue number in the **body** (not the subject line):
+- **Every commit must reference the issue number** — use `Refs #N` for intermediate commits, `Closes #N` for the final commit:
   ```
-  feat: Day 7 — backend integration tests and latency baseline
+  # Intermediate commit:
+  feat: add pitch frame queue
 
-  Closes #5
+  Refs #8
+
+  # Final commit (closes the issue on PR merge):
+  feat: Day 8 — frontend sync protocol
+
+  Closes #8
   ```
-- Use `Closes #N` to auto-close the issue on merge
-- Use `Refs #N` if the commit is partial progress on an issue
+- `Closes #N` goes in the **body**, not the subject line
+- Do not leave any commit without an issue reference — it makes history untraceable
 - Types: `feat`, `fix`, `test`, `chore`, `refactor`, `docs`
 
 ## Workflow per issue
