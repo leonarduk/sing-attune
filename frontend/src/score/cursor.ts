@@ -10,13 +10,17 @@
  *   - Cursor advance is O(1) amortised during forward playback: we never
  *     reset unless seeking backward, so we only call cursor.next() for the
  *     delta on each RAF frame.
- *   - Tempo changes are respected: _elapsedToBeat() integrates across all
- *     TempoMark entries from startBeat onwards.
+ *   - Tempo changes are respected: elapsedToBeat() in timing.ts integrates
+ *     across all TempoMark entries from startBeat onwards.
  *   - scrollIntoView with inline:'center' keeps the cursor horizontally
  *     centred in the scroll container without JS scroll calculation.
+ *   - RealValue * 4: OSMD's currentTimeStamp.RealValue is in whole notes.
+ *     Multiplying by 4 converts to quarter-note beats (our ScoreModel unit).
+ *     This is a unit conversion, not a 4/4 time-signature assumption.
  */
 import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import type { ScoreModel } from './renderer';
+import { elapsedToBeat } from './timing';
 
 export class ScoreCursor {
   private readonly osmd: OpenSheetMusicDisplay;
@@ -90,7 +94,7 @@ export class ScoreCursor {
   private _tick(): void {
     if (!this._playing) return;
     const elapsedMs = performance.now() - this.startWallMs;
-    const beat = this.startBeat + this._elapsedToBeat(elapsedMs);
+    const beat = this.startBeat + elapsedToBeat(elapsedMs, this.startBeat, this.model.tempo_marks);
     this._advanceTo(beat);
 
     if (!this.osmd.cursor.Iterator.EndReached) {
@@ -104,6 +108,9 @@ export class ScoreCursor {
    * Advance OSMD cursor forward to targetBeat without resetting.
    * Only calls cursor.next() for the increment since the last frame — O(1)
    * amortised over the whole piece.
+   *
+   * RealValue * 4: whole notes → quarter-note beats (unit conversion, not
+   * a 4/4 assumption — see file-level note).
    */
   private _advanceTo(targetBeat: number): void {
     while (!this.osmd.cursor.Iterator.EndReached) {
@@ -113,48 +120,6 @@ export class ScoreCursor {
       this._lastAdvancedBeat = cursorBeat;
     }
     this._scrollToCursor();
-  }
-
-  /**
-   * Convert ms elapsed since play() was called to beats elapsed,
-   * integrating across all tempo changes that occur after startBeat.
-   */
-  private _elapsedToBeat(elapsedMs: number): number {
-    const marks = this.model.tempo_marks;
-    if (marks.length === 0) return elapsedMs / 500; // 120 bpm default
-
-    // Find the tempo mark active at startBeat
-    let idx = 0;
-    for (let i = marks.length - 1; i >= 0; i--) {
-      if (marks[i].beat <= this.startBeat) {
-        idx = i;
-        break;
-      }
-    }
-
-    let remaining = elapsedMs;
-    let beat = this.startBeat;
-
-    for (let i = idx; remaining > 0; i++) {
-      const bpm = marks[i]?.bpm ?? marks[marks.length - 1].bpm;
-      const msPerBeat = 60_000 / bpm;
-      const nextMarkBeat = marks[i + 1]?.beat;
-
-      if (nextMarkBeat === undefined) {
-        // Final tempo segment — remaining ms maps directly to beats
-        return beat + remaining / msPerBeat - this.startBeat;
-      }
-
-      const msToNextMark = (nextMarkBeat - beat) * msPerBeat;
-      if (remaining <= msToNextMark) {
-        return beat + remaining / msPerBeat - this.startBeat;
-      }
-
-      remaining -= msToNextMark;
-      beat = nextMarkBeat;
-    }
-
-    return beat - this.startBeat;
   }
 
   private _scrollToCursor(): void {
