@@ -150,6 +150,16 @@ class PlaybackPipeline:
             self._state = PlaybackState.STOPPED
             log.info("PlaybackPipeline stopped")
 
+
+    def seek(self, t_ms: float) -> None:
+        with self._lock:
+            if self._state == PlaybackState.STOPPED:
+                return
+            self._elapsed_ms = max(0.0, t_ms)
+            if self._state == PlaybackState.PLAYING:
+                self._play_monotonic = time.monotonic()
+            log.info("PlaybackPipeline seeked to t=%.1f ms (state=%s)", self._elapsed_ms, self._state.name)
+
     @property
     def state(self) -> PlaybackState:
         with self._lock:

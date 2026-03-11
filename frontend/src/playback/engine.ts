@@ -187,6 +187,20 @@ export class PlaybackEngine {
    *
    * If not playing: stores the multiplier for the next play() call.
    */
+
+  /** Seek to a beat position; if playing, reschedule immediately from that beat. */
+  seekToBeat(beat: number): void {
+    const targetBeat = Math.max(0, beat);
+    if (this._state === 'playing') {
+      this._stopSources();
+      this._startBeat = targetBeat;
+      this._startAudioTime = this.ctx.currentTime + RESCHEDULE_OFFSET_S;
+      this._scheduleFrom(targetBeat, this._startAudioTime);
+      return;
+    }
+    this._startBeat = targetBeat;
+  }
+
   setTempoMultiplier(multiplier: number): void {
     if (this._state !== 'playing') {
       this._tempoMultiplier = multiplier;

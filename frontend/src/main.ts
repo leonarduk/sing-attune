@@ -15,7 +15,7 @@
 import { ScoreRenderer } from './score/renderer';
 import { ScoreCursor } from './score/cursor';
 import { SoundfontLoader } from './playback/soundfont';
-import { PlaybackEngine } from './playback/engine';
+import { PlaybackEngine, beatToSeconds } from './playback/engine';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -27,6 +27,7 @@ const scoreInfoEl     = document.getElementById('score-info')   as HTMLDivElemen
 const btnPlay         = document.getElementById('btn-play')     as HTMLButtonElement;
 const btnPause        = document.getElementById('btn-pause')    as HTMLButtonElement;
 const btnStop         = document.getElementById('btn-stop')     as HTMLButtonElement;
+const btnRewind       = document.getElementById('btn-rewind')   as HTMLButtonElement;
 const partSelectEl    = document.getElementById('part-select')  as HTMLSelectElement;
 const tempoSliderEl   = document.getElementById('tempo-slider') as HTMLInputElement;
 const tempoLabelEl    = document.getElementById('tempo-label')  as HTMLSpanElement;
@@ -167,9 +168,37 @@ function stopCursorRaf(): void {
   }
 }
 
+// ── Backend transport helpers ───────────────────────────────────────────────
+
+async function postPlayback(path: '/playback/start' | '/playback/pause' | '/playback/resume' | '/playback/stop'): Promise<void> {
+  const res = await fetch(path, { method: 'POST' });
+  if (!res.ok) throw new Error(`Playback command failed: ${path} (HTTP ${res.status})`);
+}
+
+async function seekPlayback(tMs: number): Promise<void> {
+  const res = await fetch(`/playback/seek?t_ms=${encodeURIComponent(tMs.toFixed(1))}`, { method: 'POST' });
+  if (!res.ok) throw new Error(`Playback command failed: /playback/seek (HTTP ${res.status})`);
+}
+
+function beatToMs(beat: number): number {
+  if (!renderer?.scoreModel || !engine) return 0;
+  const seconds = beatToSeconds(beat, renderer.scoreModel.tempo_marks, engine.tempoMultiplier);
+  return seconds * 1000;
+}
+
+async function seekByBeats(delta: number): Promise<void> {
+  if (!engine || !cursor || !renderer?.scoreModel) return;
+  const totalBeats = renderer.scoreModel.total_beats;
+  const targetBeat = Math.max(0, Math.min(totalBeats, engine.currentBeat + delta));
+  await seekPlayback(beatToMs(targetBeat));
+  engine.seekToBeat(targetBeat);
+  cursor.seekToBeat(targetBeat);
+  if (engine.state !== 'playing') stopCursorRaf();
+}
+
 // ── Transport controls ────────────────────────────────────────────────────────
 
-btnPlay.addEventListener('click', () => {
+btnPlay.addEventListener('click', async () => {
   if (!engine || !cursor || !renderer?.scoreModel) return;
 
   // Show headphone warning on every play
@@ -177,27 +206,62 @@ btnPlay.addEventListener('click', () => {
 
   const fromBeat = engine.state === 'paused' ? engine.startBeat : 0;
 
-  if (fromBeat === 0) {
-    // Full reset: reposition cursor to start
-    cursor.stop(); // resets OSMD cursor to beat 0 and hides it
-    cursor.osmd.cursor.show();
+  try {
+    if (fromBeat > 0) {
+      await postPlayback('/playback/resume');
+    } else {
+      await postPlayback('/playback/start');
+      // Full reset: reposition cursor to start
+      cursor.stop(); // resets OSMD cursor to beat 0 and hides it
+      cursor.osmd.cursor.show();
+    }
+
+    engine.play(fromBeat);
+    startCursorRaf();
+  } catch (err) {
+    setStatus('playback start failed', 'error');
+    console.error('Play failed:', err);
   }
-
-  engine.play(fromBeat);
-  startCursorRaf();
 });
 
-btnPause.addEventListener('click', () => {
+btnPause.addEventListener('click', async () => {
   if (!engine) return;
-  engine.pause();
-  stopCursorRaf();
+  try {
+    await postPlayback('/playback/pause');
+    engine.pause();
+    stopCursorRaf();
+  } catch (err) {
+    setStatus('pause failed', 'error');
+    console.error('Pause failed:', err);
+  }
 });
 
-btnStop.addEventListener('click', () => {
+btnStop.addEventListener('click', async () => {
   if (!engine || !cursor) return;
+  try {
+    await postPlayback('/playback/stop');
+  } catch (err) {
+    setStatus('stop failed', 'error');
+    console.error('Stop failed:', err);
+  }
   engine.stop();
   stopCursorRaf();
   cursor.stop();
+  headphoneWarning.classList.add('hidden');
+});
+
+btnRewind.addEventListener('click', async () => {
+  if (!engine || !cursor) return;
+  try {
+    await postPlayback('/playback/stop');
+  } catch (err) {
+    setStatus('rewind failed', 'error');
+    console.error('Rewind failed:', err);
+  }
+  engine.stop();
+  stopCursorRaf();
+  cursor.stop();
+  cursor.osmd.cursor.show();
   headphoneWarning.classList.add('hidden');
 });
 
@@ -238,6 +302,42 @@ warningDismiss.addEventListener('click', () => {
   headphoneWarning.classList.add('hidden');
 });
 
+// ── Keyboard shortcuts ───────────────────────────────────────────────────────
+
+window.addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  const tag = (e.target as HTMLElement | null)?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (btnPlay.disabled) return;
+    if (engine?.state === 'playing') {
+      btnPause.click();
+    } else {
+      btnPlay.click();
+    }
+    return;
+  }
+
+  if (e.key.toLowerCase() === 'r') {
+    e.preventDefault();
+    if (!btnRewind.disabled) btnRewind.click();
+    return;
+  }
+
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    void seekByBeats(-4);
+    return;
+  }
+
+  if (e.key === 'ArrowRight') {
+    e.preventDefault();
+    void seekByBeats(4);
+  }
+});
+
 // ── Drag-and-drop / file picker ───────────────────────────────────────────────
 
 dropZoneEl.addEventListener('dragover', (e) => {
@@ -269,6 +369,7 @@ function setTransportEnabled(enabled: boolean): void {
   btnPlay.disabled = !enabled;
   btnPause.disabled = !enabled;
   btnStop.disabled = !enabled;
+  btnRewind.disabled = !enabled;
   partSelectEl.disabled = !enabled;
   tempoSliderEl.disabled = !enabled;
 }

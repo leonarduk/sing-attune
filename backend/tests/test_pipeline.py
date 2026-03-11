@@ -118,6 +118,34 @@ class TestPlaybackStateMachine:
         assert p.state == PlaybackState.STOPPED
         assert p.elapsed_ms == 0.0
 
+    def test_seek_updates_elapsed_while_paused(self):
+        p = self._pipeline()
+        p._state = PlaybackState.PAUSED
+        p._elapsed_ms = 400.0
+
+        p.seek(1250.0)
+
+        assert p.elapsed_ms == 1250.0
+
+    def test_seek_resets_play_anchor_while_playing(self):
+        p = self._pipeline()
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic() - 0.5
+        p._elapsed_ms = 300.0
+
+        p.seek(900.0)
+        t_after_seek = p.elapsed_ms
+        time.sleep(0.02)
+
+        assert 900.0 <= t_after_seek < 940.0
+        assert p.elapsed_ms > t_after_seek
+
+    def test_seek_is_noop_when_stopped(self):
+        p = self._pipeline()
+        p.seek(1000.0)
+        assert p.state == PlaybackState.STOPPED
+        assert p.elapsed_ms == 0.0
+
     def test_double_start_is_safe(self):
         p = self._pipeline()
         p._capture = _MockCapture()
@@ -292,6 +320,18 @@ class TestPlaybackEndpoints:
         client.post("/playback/stop")
         resp = client.post("/playback/resume")
         assert resp.status_code == 200
+
+    def test_playback_seek_returns_200(self, client):
+        client.post('/playback/stop')
+        resp = client.post('/playback/seek?t_ms=2500')
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data['state'] == 'STOPPED'
+        assert data['t_ms'] == 0.0
+
+    def test_playback_seek_rejects_negative_t(self, client):
+        resp = client.post('/playback/seek?t_ms=-1')
+        assert resp.status_code == 400
 
     def test_state_schema(self, client):
         resp = client.get("/playback/state")

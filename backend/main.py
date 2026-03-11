@@ -119,6 +119,15 @@ async def playback_state() -> JSONResponse:
     return JSONResponse({"state": _pipeline.state.name, "t_ms": _pipeline.elapsed_ms})
 
 
+@app.post("/playback/seek")
+async def playback_seek(t_ms: float) -> JSONResponse:
+    """Seek playback position in milliseconds while retaining current state."""
+    if t_ms < 0:
+        raise HTTPException(status_code=400, detail="t_ms must be >= 0")
+    _pipeline.seek(t_ms)
+    return JSONResponse({"state": _pipeline.state.name, "t_ms": _pipeline.elapsed_ms})
+
+
 # ── WebSocket pitch stream ─────────────────────────────────────────────────────
 
 
