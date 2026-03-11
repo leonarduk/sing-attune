@@ -1,12 +1,15 @@
 /**
  * ScoreCursor — drives the OSMD visual cursor from a beat clock.
  *
- * In Day 8, the beat clock is a wall-clock approximation (performance.now()).
- * In Day 9+, replace the internal _tick() call with seekToBeat() driven by
- * AudioContext.currentTime converted to beats — the interface is already
- * designed for that handover.
+ * Day 8a used an internal wall-clock loop (performance.now()). Day 8b
+ * replaced that with external seekToBeat() calls driven by
+ * AudioContext.currentTime via PlaybackEngine.currentBeat in main.ts.
+ * The internal _tick() / play() path is retained for isolated testing
+ * but is not used in normal operation.
  *
  * Design notes:
+ *   - osmd is public so main.ts can call osmd.cursor.show() after stop()
+ *     (stop() hides the cursor; show() is needed before RAF starts).
  *   - Cursor advance is O(1) amortised during forward playback: we never
  *     reset unless seeking backward, so we only call cursor.next() for the
  *     delta on each RAF frame.
@@ -27,7 +30,8 @@ import type { ScoreModel } from './renderer';
 import { elapsedToBeat } from './timing';
 
 export class ScoreCursor {
-  private readonly osmd: OpenSheetMusicDisplay;
+  /** Public so main.ts can call osmd.cursor.show() after stop(). */
+  readonly osmd: OpenSheetMusicDisplay;
   private readonly model: ScoreModel;
 
   private rafId: number | null = null;
@@ -78,8 +82,7 @@ export class ScoreCursor {
 
   /**
    * Seek the cursor to a specific beat position.
-   * Call this from Day 9+ pitch overlay to drive the cursor from
-   * AudioContext.currentTime rather than the internal wall clock.
+   * Called from main.ts RAF loop (engine.currentBeat) in Day 8b+.
    *
    * OSMD's cursor is a forward-only iterator: reset() goes to beat 0;
    * next() advances one position. There is no O(1) seek. Seeking backward
@@ -100,7 +103,7 @@ export class ScoreCursor {
     return this._playing;
   }
 
-  // ── Private ──────────────────────────────────────────────────────────────────
+  // ── Private ───────────────────────────────────────────────────────────────────
 
   private _tick(): void {
     if (!this._playing) return;
