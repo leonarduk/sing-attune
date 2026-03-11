@@ -22,6 +22,8 @@ export function expectedNoteAtBeat(beat: number, notes: NoteModel[]): NoteModel 
   if (idx < 0) return null;
   const candidate = notes[idx];
   const end = candidate.beat_start + candidate.duration;
+  // Notes use half-open beat ranges [start, end), matching how scheduling
+  // and measure boundaries are represented in the score model.
   return beat >= candidate.beat_start && beat < end ? candidate : null;
 }
 

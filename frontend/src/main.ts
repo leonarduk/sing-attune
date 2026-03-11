@@ -17,6 +17,7 @@ import { ScoreCursor } from './score/cursor';
 import { SoundfontLoader } from './playback/soundfont';
 import { PlaybackEngine } from './playback/engine';
 import { PitchOverlay } from './pitch/overlay';
+import { parsePitchFrame, reconnectDelayMs } from './pitch/socket';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,9 @@ let soundfontLoadPromise: Promise<void> | null = null;
 let cursorRafId: number | null = null;
 let pitchOverlay: PitchOverlay | null = null;
 let pitchWs: WebSocket | null = null;
+let pitchReconnectTimer: number | null = null;
+let shouldReconnectPitchSocket = false;
+let pitchReconnectAttempts = 0;
 
 // ── Backend health ────────────────────────────────────────────────────────────
 
@@ -186,6 +190,13 @@ function cursorXPosition(): number {
 }
 
 function closePitchSocket(): void {
+  shouldReconnectPitchSocket = false;
+  pitchReconnectAttempts = 0;
+  if (pitchReconnectTimer !== null) {
+    window.clearTimeout(pitchReconnectTimer);
+    pitchReconnectTimer = null;
+  }
+
   if (pitchWs) {
     pitchWs.close();
     pitchWs = null;
@@ -194,10 +205,40 @@ function closePitchSocket(): void {
 
 function connectPitchSocket(): void {
   if (!pitchOverlay) return;
-  closePitchSocket();
+  shouldReconnectPitchSocket = true;
+
+  if (pitchReconnectTimer !== null) {
+    window.clearTimeout(pitchReconnectTimer);
+    pitchReconnectTimer = null;
+  }
+
+  if (pitchWs && (pitchWs.readyState === WebSocket.OPEN || pitchWs.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
 
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   pitchWs = new WebSocket(`${protocol}://${window.location.host}/ws/pitch`);
+
+  pitchWs.onopen = () => {
+    pitchReconnectAttempts = 0;
+  };
+
+  pitchWs.onerror = () => {
+    pitchWs?.close();
+  };
+
+  pitchWs.onclose = () => {
+    pitchWs = null;
+    if (!shouldReconnectPitchSocket || !pitchOverlay) return;
+
+    pitchReconnectAttempts += 1;
+    const delayMs = reconnectDelayMs(pitchReconnectAttempts);
+
+    pitchReconnectTimer = window.setTimeout(() => {
+      pitchReconnectTimer = null;
+      connectPitchSocket();
+    }, delayMs);
+  };
 
   pitchWs.onmessage = (event) => {
     if (!pitchOverlay) return;
@@ -208,13 +249,11 @@ function connectPitchSocket(): void {
       return;
     }
 
-    const frame = payload as { t?: unknown; midi?: unknown; conf?: unknown; ping?: boolean };
-    if (typeof frame.t !== 'number' || typeof frame.midi !== 'number' || typeof frame.conf !== 'number') {
-      return;
-    }
+    const frame = parsePitchFrame(payload);
+    if (!frame) return;
 
     pitchOverlay.pushFrame(
-      { t: frame.t, midi: frame.midi, conf: frame.conf },
+      frame,
       cursorXPosition(),
     );
   };
