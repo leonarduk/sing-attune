@@ -33,9 +33,34 @@
       color: #aaa;
       margin-left: auto;
     }
-    #status.ok     { color: #4caf50; }
-    #status.error  { color: #e94560; }
+    #status.ok      { color: #4caf50; }
+    #status.error   { color: #e94560; }
     #status.loading { color: #ffa726; }
+
+    /* ── Headphone warning banner ── */
+    #headphone-warning {
+      background: #7b3f00;
+      border-bottom: 1px solid #e65100;
+      padding: 6px 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.85rem;
+      color: #ffe0b2;
+      flex-shrink: 0;
+    }
+    #headphone-warning.hidden { display: none; }
+    #headphone-warning span { flex: 1; }
+    #warning-dismiss {
+      background: none;
+      border: 1px solid #e65100;
+      color: #ffe0b2;
+      border-radius: 3px;
+      padding: 2px 8px;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    #warning-dismiss:hover { background: rgba(230,81,0,0.3); }
 
     /* ── Toolbar ── */
     #toolbar {
@@ -46,6 +71,7 @@
       align-items: center;
       gap: 10px;
       flex-shrink: 0;
+      flex-wrap: wrap;
     }
     .transport-btn {
       padding: 5px 18px;
@@ -58,10 +84,45 @@
     }
     .transport-btn:hover:not(:disabled) { background: #1a5276; }
     .transport-btn:disabled { opacity: 0.4; cursor: default; }
+
+    .toolbar-divider {
+      width: 1px;
+      height: 24px;
+      background: #0f3460;
+      margin: 0 4px;
+    }
+
+    /* Part selector */
+    #part-select {
+      background: #0f3460;
+      color: #eee;
+      border: 1px solid #0f3460;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    #part-select:disabled { opacity: 0.4; cursor: default; }
+
+    /* Tempo slider */
+    .tempo-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+      color: #aaa;
+    }
+    #tempo-slider {
+      width: 80px;
+      accent-color: #e94560;
+    }
+    #tempo-label { min-width: 36px; color: #eee; font-size: 0.8rem; }
+
+    /* Score info */
     #score-info {
       font-size: 0.8rem;
       color: #aaa;
-      margin-left: 12px;
+      margin-left: 4px;
     }
 
     /* ── Main content area ── */
@@ -105,7 +166,7 @@
       padding: 16px;
       background: #fff;   /* OSMD renders on white */
     }
-    /* Hidden input used to open the OS file picker */
+
     #file-input { display: none; }
   </style>
 </head>
@@ -116,10 +177,30 @@
     <span id="status">checking backend…</span>
   </header>
 
+  <!-- Headphone warning: shown every time Play is pressed -->
+  <div id="headphone-warning" class="hidden">
+    <span>🎧 Use headphones — speakers cause mic bleed and will break pitch detection.</span>
+    <button id="warning-dismiss">Dismiss</button>
+  </div>
+
   <div id="toolbar">
     <button id="btn-play"  class="transport-btn">▶ Play</button>
     <button id="btn-pause" class="transport-btn">⏸ Pause</button>
     <button id="btn-stop"  class="transport-btn">⏹ Stop</button>
+
+    <div class="toolbar-divider"></div>
+
+    <label for="part-select" style="font-size:0.8rem;color:#aaa;">Part:</label>
+    <select id="part-select"></select>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="tempo-group">
+      <label for="tempo-slider">Tempo:</label>
+      <input id="tempo-slider" type="range" min="50" max="150" value="100" step="5" />
+      <span id="tempo-label">100%</span>
+    </div>
+
     <span id="score-info"></span>
   </div>
 
