@@ -65,7 +65,9 @@ jobs:
         id: diff
         run: |
           git fetch origin ${{ github.base_ref }}
-          DIFF=$(git diff origin/${{ github.base_ref }}...HEAD -- '*.py' | head -c 30000)
+          DIFF=$(git diff origin/${{ github.base_ref }}...HEAD \
+            -- '*.py' '*.ts' '*.tsx' '*.js' '*.json' '*.md' '*.yaml' '*.yml' \
+            | head -c 30000)
           echo "diff<<EOF" >> $GITHUB_OUTPUT
           echo "$DIFF" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -104,7 +106,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          # Prepend header and footer to the review file, then post in one shot
           {
             echo "## AI Code Review"
             echo ""

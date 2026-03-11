@@ -33,26 +33,36 @@ asyncio event loop correctness.
 ## PR title
 {pr_title}
 
-## Diff (Python files only, truncated at 30k chars)
+## Diff (Python, TypeScript, Markdown, config files — truncated at 30k chars)
 {diff}
+
+If the diff is empty, this is likely a docs-only or config-only PR whose file types \
+were not captured. In that case, review the PR based solely on the linked issue \
+acceptance criteria and PR title, and note that no diff was available.
 
 Review this PR across these dimensions. Be direct and specific — cite line numbers \
 or function names where relevant. If something looks fine, say so briefly. \
 Spend your words on real concerns.
 
 ### 1. Acceptance criteria
-Does the code satisfy every AC in the linked issue? Call out any gaps explicitly.
+Does the diff satisfy every AC in the linked issue? Call out any gaps explicitly. \
+If no diff is available, assess whether the PR title and issue description suggest \
+the work is complete and correctly scoped.
 
 ### 2. Bugs and logic errors
-Any incorrect behaviour, edge cases that aren't handled, or off-by-one errors?
+Any incorrect behaviour, edge cases that aren't handled, or off-by-one errors? \
+For documentation PRs: are there factual errors, contradictions, or dangerously \
+misleading statements?
 
 ### 3. Thread safety and async correctness
+(Backend code only — skip for docs/frontend-only PRs)
 - Are shared mutable objects properly locked?
 - Is call_soon_threadsafe used correctly?
 - Any asyncio anti-patterns (blocking calls in coroutines, wrong loop assumptions)?
 
 ### 4. Test coverage
-Are the acceptance criteria actually exercised by tests? Any obvious missing cases?
+Are the acceptance criteria actually exercised by tests? Any obvious missing cases? \
+Not applicable for documentation-only PRs.
 
 ### 5. Minor issues (optional)
 Style, naming, docstrings — only flag if they would cause future confusion.
