@@ -94,6 +94,7 @@ export class PlaybackEngine {
   private _notes: NoteModel[] = [];
   private _tempoMarks: TempoMark[] = [];
   private _tempoMultiplier = 1;
+  private _transposeSemitones = 0;
 
   constructor(ctx: AudioContext, sf: SoundfontLoader) {
     this.ctx = ctx;
@@ -201,6 +202,26 @@ export class PlaybackEngine {
     this._startBeat = targetBeat;
   }
 
+
+  /**
+   * Set playback transposition in semitones.
+   * If playing, reschedule remaining notes immediately at the new pitch.
+   */
+  setTransposeSemitones(semitones: number): void {
+    const clamped = Math.max(-12, Math.min(12, Math.round(semitones)));
+    if (this._state !== 'playing') {
+      this._transposeSemitones = clamped;
+      return;
+    }
+
+    const beat = this.currentBeat;
+    this._stopSources();
+    this._transposeSemitones = clamped;
+    this._startBeat = beat;
+    this._startAudioTime = this.ctx.currentTime + RESCHEDULE_OFFSET_S;
+    this._scheduleFrom(beat, this._startAudioTime);
+  }
+
   setTempoMultiplier(multiplier: number): void {
     if (this._state !== 'playing') {
       this._tempoMultiplier = multiplier;
@@ -247,7 +268,8 @@ export class PlaybackEngine {
       // Skip notes that are already too late to schedule
       if (startAt < this.ctx.currentTime - LATE_TOLERANCE_S) continue;
 
-      const buf = this.sf.getBuffer(note.midi);
+      const targetMidi = note.midi + this._transposeSemitones;
+      const buf = this.sf.getBuffer(targetMidi);
       if (!buf) continue;
 
       const src = this.ctx.createBufferSource();
@@ -255,9 +277,9 @@ export class PlaybackEngine {
 
       // Pitch-correct: detune by the cent difference between desired MIDI note
       // and the sampled MIDI note (100 cents per semitone).
-      const sampledMidi = this.sf.getNearestSampledMidi(note.midi);
+      const sampledMidi = this.sf.getNearestSampledMidi(targetMidi);
       if (sampledMidi !== null) {
-        src.detune.value = (note.midi - sampledMidi) * 100;
+        src.detune.value = (targetMidi - sampledMidi) * 100;
       }
 
       src.connect(this.ctx.destination);

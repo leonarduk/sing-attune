@@ -15,9 +15,9 @@
 import { ScoreRenderer } from './score/renderer';
 import { ScoreCursor } from './score/cursor';
 import { SoundfontLoader } from './playback/soundfont';
-import { PlaybackEngine, beatToSeconds } from './playback/engine';
 import { PlaybackEngine } from './playback/engine';
 import { getVisiblePartOptions } from './part-options';
+import { beatToMs, postPlayback, seekPlayback } from './transport/controls';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -36,6 +36,7 @@ const tempoLabelEl    = document.getElementById('tempo-label')  as HTMLSpanEleme
 const headphoneWarning = document.getElementById('headphone-warning') as HTMLDivElement;
 const warningDismiss  = document.getElementById('warning-dismiss') as HTMLButtonElement;
 const showAccompanimentEl = document.getElementById('show-accompaniment') as HTMLInputElement;
+const transposeSelectEl = document.getElementById('transpose-select') as HTMLSelectElement;
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
@@ -50,6 +51,7 @@ let soundfontLoadPromise: Promise<void> | null = null;
 
 // External cursor RAF (replaces ScoreCursor's internal wall-clock loop)
 let cursorRafId: number | null = null;
+const SEEK_STEP_BEATS = 4;
 
 // ── Backend health ────────────────────────────────────────────────────────────
 
@@ -131,6 +133,7 @@ async function loadScore(file: File): Promise<void> {
     if (!audioCtx || !soundfont) throw new Error('AudioContext not available');
 
     engine = new PlaybackEngine(audioCtx, soundfont);
+    engine.setTransposeSemitones(parseInt(transposeSelectEl.value, 10) || 0);
     engine.schedule(
       model.notes,
       model.tempo_marks,
@@ -174,29 +177,11 @@ function stopCursorRaf(): void {
   }
 }
 
-// ── Backend transport helpers ───────────────────────────────────────────────
-
-async function postPlayback(path: '/playback/start' | '/playback/pause' | '/playback/resume' | '/playback/stop'): Promise<void> {
-  const res = await fetch(path, { method: 'POST' });
-  if (!res.ok) throw new Error(`Playback command failed: ${path} (HTTP ${res.status})`);
-}
-
-async function seekPlayback(tMs: number): Promise<void> {
-  const res = await fetch(`/playback/seek?t_ms=${encodeURIComponent(tMs.toFixed(1))}`, { method: 'POST' });
-  if (!res.ok) throw new Error(`Playback command failed: /playback/seek (HTTP ${res.status})`);
-}
-
-function beatToMs(beat: number): number {
-  if (!renderer?.scoreModel || !engine) return 0;
-  const seconds = beatToSeconds(beat, renderer.scoreModel.tempo_marks, engine.tempoMultiplier);
-  return seconds * 1000;
-}
-
 async function seekByBeats(delta: number): Promise<void> {
   if (!engine || !cursor || !renderer?.scoreModel) return;
   const totalBeats = renderer.scoreModel.total_beats;
   const targetBeat = Math.max(0, Math.min(totalBeats, engine.currentBeat + delta));
-  await seekPlayback(beatToMs(targetBeat));
+  await seekPlayback(beatToMs(targetBeat, renderer.scoreModel, engine.tempoMultiplier));
   engine.seekToBeat(targetBeat);
   cursor.seekToBeat(targetBeat);
   if (engine.state !== 'playing') stopCursorRaf();
@@ -211,6 +196,7 @@ function scheduleSelectedPart(selectedPart: string): void {
     selectedPart,
     parseFloat(tempoSliderEl.value) / 100,
   );
+  engine.setTransposeSemitones(parseInt(transposeSelectEl.value, 10) || 0);
 
   if (engine.state === 'playing') {
     engine.stop();
@@ -326,6 +312,13 @@ tempoSliderEl.addEventListener('input', () => {
   engine?.setTempoMultiplier(mult);
 });
 
+// ── Transpose selector ───────────────────────────────────────────────────────
+
+transposeSelectEl.addEventListener('change', () => {
+  const semitones = parseInt(transposeSelectEl.value, 10);
+  engine?.setTransposeSemitones(Number.isNaN(semitones) ? 0 : semitones);
+});
+
 // ── Headphone warning dismiss ─────────────────────────────────────────────────
 
 warningDismiss.addEventListener('click', () => {
@@ -358,13 +351,19 @@ window.addEventListener('keydown', (e) => {
 
   if (e.key === 'ArrowLeft') {
     e.preventDefault();
-    void seekByBeats(-4);
+    void seekByBeats(-SEEK_STEP_BEATS).catch((err) => {
+      setStatus('seek failed', 'error');
+      console.error('Seek failed:', err);
+    });
     return;
   }
 
   if (e.key === 'ArrowRight') {
     e.preventDefault();
-    void seekByBeats(4);
+    void seekByBeats(SEEK_STEP_BEATS).catch((err) => {
+      setStatus('seek failed', 'error');
+      console.error('Seek failed:', err);
+    });
   }
 });
 
@@ -402,6 +401,7 @@ function setTransportEnabled(enabled: boolean): void {
   btnRewind.disabled = !enabled;
   partSelectEl.disabled = !enabled;
   tempoSliderEl.disabled = !enabled;
+  transposeSelectEl.disabled = !enabled;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
