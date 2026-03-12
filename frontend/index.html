@@ -37,6 +37,20 @@
     #status.error   { color: #e94560; }
     #status.loading { color: #ffa726; }
 
+    #error-banner {
+      display: none;
+      background: #4a1f2a;
+      border-bottom: 1px solid #e94560;
+      color: #ffd0d8;
+      padding: 8px 20px;
+      font-size: 0.85rem;
+      flex-shrink: 0;
+    }
+
+    #error-banner.visible {
+      display: block;
+    }
+
     /* ── Headphone warning banner ── */
     #headphone-warning {
       background: #7b3f00;
@@ -167,6 +181,53 @@
       background: #fff;   /* OSMD renders on white */
     }
 
+    #score-loading {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 10px;
+      background: rgba(26, 26, 46, 0.65);
+      z-index: 20;
+      color: #eee;
+      font-size: 0.9rem;
+    }
+
+    #score-loading.visible {
+      display: flex;
+    }
+
+    #score-loading::before {
+      content: '';
+      width: 28px;
+      height: 28px;
+      border: 3px solid rgba(255, 255, 255, 0.25);
+      border-top-color: #e94560;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @media (max-width: 900px) {
+      #toolbar {
+        gap: 8px;
+      }
+
+      #score-info {
+        width: 100%;
+        margin-left: 0;
+      }
+
+      .toolbar-divider {
+        display: none;
+      }
+    }
+
     #file-input { display: none; }
   </style>
 </head>
@@ -176,6 +237,8 @@
     <h1>sing-attune</h1>
     <span id="status">checking backend…</span>
   </header>
+
+  <div id="error-banner" role="alert"></div>
 
   <!-- Headphone warning: shown every time Play is pressed -->
   <div id="headphone-warning" class="hidden">
@@ -209,6 +272,7 @@
   </div>
 
   <main>
+    <div id="score-loading" aria-live="polite">Loading score…</div>
     <div id="drop-zone">
       <p>Drop a MusicXML file here</p>
       <span>.xml or .mxl — or click to browse</span>

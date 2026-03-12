@@ -33,6 +33,8 @@ const tempoSliderEl   = document.getElementById('tempo-slider') as HTMLInputElem
 const tempoLabelEl    = document.getElementById('tempo-label')  as HTMLSpanElement;
 const headphoneWarning = document.getElementById('headphone-warning') as HTMLDivElement;
 const warningDismiss  = document.getElementById('warning-dismiss') as HTMLButtonElement;
+const scoreLoadingEl  = document.getElementById('score-loading') as HTMLDivElement;
+const errorBannerEl   = document.getElementById('error-banner') as HTMLDivElement;
 const showAccompanimentEl = document.getElementById('show-accompaniment') as HTMLInputElement;
 
 // ── Module state ──────────────────────────────────────────────────────────────
@@ -56,8 +58,10 @@ async function checkBackend(): Promise<void> {
     const res = await fetch('/health');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = (await res.json()) as { version: string };
+    clearErrorBanner();
     setStatus(`backend ok (v${data.version})`, 'ok');
   } catch (err) {
+    showErrorBanner('Cannot reach backend. Start backend and refresh the page.');
     setStatus('backend unreachable', 'error');
     console.error('Backend health check failed:', err);
   }
@@ -66,6 +70,25 @@ async function checkBackend(): Promise<void> {
 function setStatus(msg: string, cls: 'ok' | 'error' | 'loading' | ''): void {
   statusEl.textContent = msg;
   statusEl.className = cls;
+}
+
+function showLoading(message: string): void {
+  scoreLoadingEl.textContent = message;
+  scoreLoadingEl.classList.add('visible');
+}
+
+function hideLoading(): void {
+  scoreLoadingEl.classList.remove('visible');
+}
+
+function showErrorBanner(message: string): void {
+  errorBannerEl.textContent = message;
+  errorBannerEl.classList.add('visible');
+}
+
+function clearErrorBanner(): void {
+  errorBannerEl.textContent = '';
+  errorBannerEl.classList.remove('visible');
 }
 
 // ── Soundfont ─────────────────────────────────────────────────────────────────
@@ -83,6 +106,7 @@ function ensureSoundfont(): void {
   soundfont = new SoundfontLoader();
   soundfontLoadPromise = soundfont.load(audioCtx).catch((err: unknown) => {
     console.error('[Soundfont] load failed:', err);
+    showErrorBanner('Soundfont failed to load; playback is unavailable.');
     setStatus('soundfont load failed — no audio', 'error');
   });
 }
@@ -90,6 +114,8 @@ function ensureSoundfont(): void {
 // ── Score loading ─────────────────────────────────────────────────────────────
 
 async function loadScore(file: File): Promise<void> {
+  clearErrorBanner();
+  showLoading(`Loading ${file.name}…`);
   setStatus(`Loading ${file.name}…`, 'loading');
   dropZoneEl.classList.add('hidden');
   scoreInfoEl.textContent = '';
@@ -140,9 +166,12 @@ async function loadScore(file: File): Promise<void> {
     setTransportEnabled(true);
     setStatus('score loaded', 'ok');
   } catch (err) {
+    showErrorBanner('Could not load this MusicXML file. Try exporting again from notation software.');
     setStatus(String(err), 'error');
     console.error('Score load failed:', err);
     dropZoneEl.classList.remove('hidden');
+  } finally {
+    hideLoading();
   }
 }
 
