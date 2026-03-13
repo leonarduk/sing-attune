@@ -319,12 +319,16 @@ function connectPitchSocket(): void {
 function scheduleSelectedPart(selectedPart: string): void {
   if (!engine || !renderer?.scoreModel) return;
 
-  engine.schedule(
-    renderer.scoreModel.notes,
-    renderer.scoreModel.tempo_marks,
-    selectedPart,
-    parseFloat(tempoSliderEl.value) / 100,
-  );
+  if (engine.state === 'playing') {
+    engine.selectPart(selectedPart);
+  } else {
+    engine.schedule(
+      renderer.scoreModel.notes,
+      renderer.scoreModel.tempo_marks,
+      selectedPart,
+      parseFloat(tempoSliderEl.value) / 100,
+    );
+  }
   engine.setTransposeSemitones(parseInt(transposeSelectEl.value, 10) || 0);
 
   renderer.setHighlightedPart(selectedPart);

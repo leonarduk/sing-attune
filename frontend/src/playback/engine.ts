@@ -69,6 +69,8 @@ export type PlaybackState = 'idle' | 'playing' | 'paused';
 const SCHEDULE_OFFSET_S = 0.1;
 /** Gap between tempo change and rescheduled notes — avoids audible overlap. */
 const RESCHEDULE_OFFSET_S = 0.03;
+/** Small stop/start guard to avoid edge scheduling races at currentTime. */
+const STOP_SAFETY_OFFSET_S = 0.005;
 /** Extra release time appended to each note's stop time for natural decay. */
 const RELEASE_TAIL_S = 0.5;
 /** Ignore notes whose scheduled start time is already in the past by this margin. */
@@ -165,7 +167,7 @@ export class PlaybackEngine {
     if (this._state !== 'playing') return;
 
     const beat = this.currentBeat;
-    this._stopSources(this.ctx.currentTime + 0.005);
+    this._stopSources(this.ctx.currentTime + STOP_SAFETY_OFFSET_S);
     this._startBeat = beat;
     this._startAudioTime = this.ctx.currentTime + RESCHEDULE_OFFSET_S;
     this._scheduleFrom(beat, this._startAudioTime);
@@ -190,7 +192,7 @@ export class PlaybackEngine {
   pause(): void {
     if (this._state !== 'playing') return;
     const beat = this.currentBeat;
-    this._stopSources(this.ctx.currentTime + 0.005);
+    this._stopSources(this.ctx.currentTime + STOP_SAFETY_OFFSET_S);
     this._startBeat = beat;
     this._state = 'paused';
   }
@@ -313,7 +315,7 @@ export class PlaybackEngine {
         beatToSeconds(note.beat_start, this._tempoMarks, this._tempoMultiplier) +
         RELEASE_TAIL_S;
 
-      const safeStart = Math.max(startAt, this.ctx.currentTime + 0.005);
+      const safeStart = Math.max(startAt, this.ctx.currentTime + STOP_SAFETY_OFFSET_S);
       src.start(safeStart);
       src.stop(safeStart + noteDurS);
 
