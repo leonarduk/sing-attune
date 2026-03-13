@@ -32,6 +32,7 @@ export class PracticeRecorder {
   private stream: MediaStream | null = null;
   private chunks: BlobPart[] = [];
   private takeUrl: string | null = null;
+  private stopPromise: Promise<void> | null = null;
 
   static isSupported(): boolean {
     return typeof window !== 'undefined'
@@ -46,43 +47,64 @@ export class PracticeRecorder {
 
     this.discard();
     this.chunks = [];
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mimeType = getSupportedRecordingMimeType();
-    this.mediaRecorder = mimeType
-      ? new MediaRecorder(this.stream, { mimeType })
-      : new MediaRecorder(this.stream);
 
-    this.mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) this.chunks.push(event.data);
-    };
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    this.stream = stream;
 
-    this.mediaRecorder.start();
-    this.state = nextRecordingState(this.state, { type: 'start' });
+    try {
+      const mimeType = getSupportedRecordingMimeType();
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) this.chunks.push(event.data);
+      };
+
+      recorder.start();
+      this.mediaRecorder = recorder;
+      this.state = nextRecordingState(this.state, { type: 'start' });
+    } catch (error) {
+      this.cleanupStream();
+      throw error;
+    }
   }
 
   async stop(): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
     if (!this.mediaRecorder || this.state !== 'recording') return;
 
     const recorder = this.mediaRecorder;
-    await new Promise<void>((resolve) => {
-      recorder.onstop = () => {
+    this.stopPromise = new Promise<void>((resolve) => {
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
         const takeBlob = new Blob(this.chunks, { type: recorder.mimeType || 'audio/webm' });
         this.takeUrl = URL.createObjectURL(takeBlob);
         this.cleanupStream();
+        this.mediaRecorder = null;
+        this.chunks = [];
+        this.state = nextRecordingState(this.state, { type: 'stop' });
+        this.stopPromise = null;
         resolve();
       };
+
+      recorder.onstop = finish;
       recorder.stop();
+
+      if (recorder.state === 'inactive') {
+        finish();
+      }
     });
 
-    this.mediaRecorder = null;
-    this.chunks = [];
-    this.state = nextRecordingState(this.state, { type: 'stop' });
+    return this.stopPromise;
   }
 
   playLastTake(): HTMLAudioElement | null {
     if (!this.takeUrl || this.state !== 'recorded') return null;
     const audio = new Audio(this.takeUrl);
-    void audio.play();
+    void audio.play().catch(() => undefined);
     return audio;
   }
 
@@ -96,6 +118,7 @@ export class PracticeRecorder {
       this.mediaRecorder.stop();
     }
 
+    this.stopPromise = null;
     this.mediaRecorder = null;
     this.chunks = [];
     this.cleanupStream();
