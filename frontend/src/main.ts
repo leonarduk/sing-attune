@@ -19,7 +19,7 @@ import { PlaybackEngine } from './playback/engine';
 import { PitchOverlay } from './pitch/overlay';
 import { parsePitchFrame, reconnectDelayMs } from './pitch/socket';
 import { getVisiblePartOptions } from './part-options';
-import { beatToMs, postPlayback, seekPlayback, setPlaybackTempo } from './transport/controls';
+import { beatToMs, postPlayback, seekPlayback, setPlaybackTempo, setPlaybackTranspose } from './transport/controls';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -56,7 +56,6 @@ let soundfontLoadPromise: Promise<void> | null = null;
 
 // External cursor RAF (replaces ScoreCursor's internal wall-clock loop)
 let cursorRafId: number | null = null;
-const SEEK_STEP_BEATS = 4;
 let pitchOverlay: PitchOverlay | null = null;
 let pitchWs: WebSocket | null = null;
 let pitchReconnectTimer: number | null = null;
@@ -170,7 +169,7 @@ async function loadScore(file: File): Promise<void> {
     if (!audioCtx || !soundfont) throw new Error('AudioContext not available');
 
     engine = new PlaybackEngine(audioCtx, soundfont);
-    engine.setTransposeSemitones(parseInt(transposeSelectEl.value, 10) || 0);
+    engine.setTransposeSemitones(getTransposeSemitones());
     engine.schedule(
       model.notes,
       model.tempo_marks,
@@ -219,14 +218,25 @@ function stopCursorRaf(): void {
   }
 }
 
+/**
+ * Seek forward or backward by one bar.
+ *
+ * Step size is derived from the score's first time signature numerator so the
+ * jump is always a whole bar (e.g. 3 beats in 3/4, 4 in 4/4). Falls back to
+ * 4 if the score has no time signature data.
+ *
+ * Backend seek is awaited before moving the frontend to avoid a race where
+ * the frontend has moved but the backend still emits frames from the old position.
+ */
 async function seekByBeats(delta: number): Promise<void> {
   if (!engine || !cursor || !renderer?.scoreModel) return;
   const totalBeats = renderer.scoreModel.total_beats;
-  const targetBeat = Math.max(0, Math.min(totalBeats, engine.currentBeat + delta));
+  const stepBeats = renderer.scoreModel.time_signatures[0]?.numerator ?? 4;
+  const targetBeat = Math.max(0, Math.min(totalBeats, engine.currentBeat + delta * stepBeats));
   try {
     await seekPlayback(beatToMs(targetBeat, renderer.scoreModel, engine.tempoMultiplier));
   } catch (err) {
-    setStatus('seek failed', 'error');
+    setStatus(`seek failed: ${String(err)}`, 'error');
     console.error('Seek failed:', err);
     return;
   }
@@ -234,6 +244,12 @@ async function seekByBeats(delta: number): Promise<void> {
   engine.seekToBeat(targetBeat);
   cursor.seekToBeat(targetBeat);
   if (engine.state !== 'playing') stopCursorRaf();
+}
+
+/** Read the current transpose selector value as an integer, defaulting to 0. */
+function getTransposeSemitones(): number {
+  const parsed = parseInt(transposeSelectEl.value, 10);
+  return Number.isNaN(parsed) ? 0 : parsed;
 }
 
 function cursorXPosition(): number {
@@ -324,7 +340,7 @@ function scheduleSelectedPart(selectedPart: string): void {
     selectedPart,
     parseFloat(tempoSliderEl.value) / 100,
   );
-  engine.setTransposeSemitones(parseInt(transposeSelectEl.value, 10) || 0);
+  engine.setTransposeSemitones(getTransposeSemitones());
 
   if (engine.state === 'playing') {
     engine.stop();
@@ -376,7 +392,7 @@ btnPlay.addEventListener('click', async () => {
     engine.play(fromBeat);
     startCursorRaf();
   } catch (err) {
-    setStatus('playback start failed', 'error');
+    setStatus(`playback start failed: ${String(err)}`, 'error');
     console.error('Play failed:', err);
   }
 });
@@ -388,7 +404,7 @@ btnPause.addEventListener('click', async () => {
     engine.pause();
     stopCursorRaf();
   } catch (err) {
-    setStatus('pause failed', 'error');
+    setStatus(`pause failed: ${String(err)}`, 'error');
     console.error('Pause failed:', err);
   }
 });
@@ -403,7 +419,7 @@ btnStop.addEventListener('click', async () => {
     pitchOverlay?.clear();
     headphoneWarning.classList.add('hidden');
   } catch (err) {
-    setStatus('stop failed', 'error');
+    setStatus(`stop failed: ${String(err)}`, 'error');
     console.error('Stop failed:', err);
   }
 });
@@ -413,7 +429,7 @@ btnRewind.addEventListener('click', async () => {
   try {
     await postPlayback('/playback/stop');
   } catch (err) {
-    setStatus('rewind failed', 'error');
+    setStatus(`rewind failed: ${String(err)}`, 'error');
     console.error('Rewind failed:', err);
   }
   engine.stop();
@@ -455,16 +471,22 @@ tempoSliderEl.addEventListener('change', async () => {
     engine.setTempoMultiplier(previousMultiplier);
     tempoSliderEl.value = String(Math.round(previousMultiplier * 100));
     tempoLabelEl.textContent = `${tempoSliderEl.value}%`;
-    setStatus('tempo update failed', 'error');
+    setStatus(`tempo update failed: ${String(err)}`, 'error');
     console.error('Tempo update failed:', err);
   }
 });
 
 // ── Transpose selector ───────────────────────────────────────────────────────
 
-transposeSelectEl.addEventListener('change', () => {
-  const semitones = parseInt(transposeSelectEl.value, 10);
-  engine?.setTransposeSemitones(Number.isNaN(semitones) ? 0 : semitones);
+transposeSelectEl.addEventListener('change', async () => {
+  const semitones = getTransposeSemitones();
+  engine?.setTransposeSemitones(semitones);
+  try {
+    await setPlaybackTranspose(semitones);
+  } catch (err) {
+    setStatus(`transpose sync failed: ${String(err)}`, 'error');
+    console.error('Transpose sync failed:', err);
+  }
 });
 
 // ── Headphone warning dismiss ─────────────────────────────────────────────────
@@ -499,13 +521,13 @@ window.addEventListener('keydown', (e) => {
 
   if (e.key === 'ArrowLeft') {
     e.preventDefault();
-    void seekByBeats(-SEEK_STEP_BEATS);
+    void seekByBeats(-1);
     return;
   }
 
   if (e.key === 'ArrowRight') {
     e.preventDefault();
-    void seekByBeats(SEEK_STEP_BEATS);
+    void seekByBeats(1);
   }
 });
 

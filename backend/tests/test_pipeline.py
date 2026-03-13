@@ -157,6 +157,53 @@ class TestPlaybackStateMachine:
 
         assert p.elapsed_ms >= 40.0
 
+    def test_set_tempo_multiplier_while_stopped_only_stores_value(self):
+        """set_tempo_multiplier on a STOPPED pipeline must not accumulate elapsed."""
+        p = self._pipeline()
+        p.set_tempo_multiplier(2.0)
+        assert p.tempo_multiplier == pytest.approx(2.0)
+        assert p.elapsed_ms == 0.0
+
+    def test_set_tempo_multiplier_while_paused_only_stores_value(self):
+        """set_tempo_multiplier on a PAUSED pipeline must not accumulate elapsed."""
+        p = self._pipeline()
+        p._state = PlaybackState.PAUSED
+        p._elapsed_ms = 300.0
+        p.set_tempo_multiplier(0.75)
+        assert p.tempo_multiplier == pytest.approx(0.75)
+        assert p.elapsed_ms == pytest.approx(300.0)
+
+    def test_set_tempo_multiplier_rejects_zero_directly(self):
+        """set_tempo_multiplier(0) must raise ValueError on the pipeline itself.
+
+        The HTTP endpoint validates first (HTTPException), but direct callers
+        must also be protected. This covers the raise-ValueError line.
+        """
+        p = self._pipeline()
+        with pytest.raises(ValueError, match="multiplier must be > 0"):
+            p.set_tempo_multiplier(0)
+
+    def test_set_transpose_semitones_stores_value(self):
+        p = self._pipeline()
+        p.set_transpose_semitones(3)
+        assert p.transpose_semitones == 3
+
+    def test_set_transpose_semitones_clamps_to_plus_12(self):
+        p = self._pipeline()
+        p.set_transpose_semitones(99)
+        assert p.transpose_semitones == 12
+
+    def test_set_transpose_semitones_clamps_to_minus_12(self):
+        p = self._pipeline()
+        p.set_transpose_semitones(-99)
+        assert p.transpose_semitones == -12
+
+    def test_set_transpose_semitones_allows_zero(self):
+        p = self._pipeline()
+        p.set_transpose_semitones(7)
+        p.set_transpose_semitones(0)
+        assert p.transpose_semitones == 0
+
     def test_double_start_is_safe(self):
         p = self._pipeline()
         p._capture = _MockCapture()
@@ -353,6 +400,35 @@ class TestPlaybackEndpoints:
     def test_playback_tempo_rejects_invalid_multiplier(self, client):
         resp = client.post('/playback/tempo?multiplier=0')
         assert resp.status_code == 400
+
+    def test_playback_transpose_returns_200(self, client):
+        resp = client.post('/playback/transpose?semitones=3')
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data['transpose_semitones'] == 3
+
+    def test_playback_transpose_negative_semitones(self, client):
+        resp = client.post('/playback/transpose?semitones=-5')
+        assert resp.status_code == 200
+        assert resp.json()['transpose_semitones'] == -5
+
+    def test_playback_transpose_clamps_out_of_range(self, client):
+        resp = client.post('/playback/transpose?semitones=99')
+        assert resp.status_code == 200
+        assert resp.json()['transpose_semitones'] == 12
+
+    def test_playback_transpose_zero_resets(self, client):
+        client.post('/playback/transpose?semitones=6')
+        resp = client.post('/playback/transpose?semitones=0')
+        assert resp.status_code == 200
+        assert resp.json()['transpose_semitones'] == 0
+
+    def test_playback_transpose_returns_state_and_t_ms(self, client):
+        resp = client.post('/playback/transpose?semitones=2')
+        data = resp.json()
+        assert 'state' in data
+        assert 't_ms' in data
+        assert 'transpose_semitones' in data
 
     def test_state_schema(self, client):
         resp = client.get("/playback/state")
