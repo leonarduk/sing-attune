@@ -26,6 +26,7 @@ describe('PracticeRecorder', () => {
   const originalCreateObjectURL = URL.createObjectURL;
   const originalRevokeObjectURL = URL.revokeObjectURL;
   const originalAudio = (globalThis as { Audio?: typeof Audio }).Audio;
+  const originalDocument = (globalThis as { document?: Document }).document;
 
   const fakeTrack = { stop: vi.fn() };
   const fakeStream = { getTracks: () => [fakeTrack] } as unknown as MediaStream;
@@ -91,6 +92,19 @@ describe('PracticeRecorder', () => {
     URL.revokeObjectURL = vi.fn();
 
     const play = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('Audio', vi.fn(() => ({ play })));
+
+    vi.stubGlobal('document', {
+      body: { appendChild: vi.fn() },
+      createElement: vi.fn(() => ({
+        href: '',
+        download: '',
+        rel: '',
+        style: { display: '' },
+        click: vi.fn(),
+        remove: vi.fn(),
+      })),
+    } as unknown as Document);
     const pause = vi.fn();
     const removeAttribute = vi.fn();
     const load = vi.fn();
@@ -120,6 +134,10 @@ describe('PracticeRecorder', () => {
 
     if (originalAudio) {
       (globalThis as { Audio?: typeof Audio }).Audio = originalAudio;
+    }
+
+    if (originalDocument) {
+      (globalThis as { document?: Document }).document = originalDocument;
     }
   });
 
@@ -186,17 +204,51 @@ describe('PracticeRecorder', () => {
   });
 
 
-  it('reuses a single audio element for repeated playback', async () => {
+  it('saves last take with file picker when available', async () => {
+    const createWritable = vi.fn(async () => ({
+      write: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    }));
+    const showSaveFilePicker = vi.fn(async () => ({ createWritable }));
+    vi.stubGlobal('window', { showSaveFilePicker } as unknown as Window);
+
     const recorder = new PracticeRecorder();
     await recorder.start();
     await recorder.stop();
 
-    const firstAudio = recorder.playLastTake();
-    const secondAudio = recorder.playLastTake();
+    await expect(recorder.saveLastTake()).resolves.toBe(true);
+    expect(showSaveFilePicker).toHaveBeenCalledOnce();
+    expect(createWritable).toHaveBeenCalledOnce();
+  });
 
-    expect(firstAudio).not.toBeNull();
-    expect(secondAudio).toBe(firstAudio);
-    expect(Audio).toHaveBeenCalledTimes(1);
+  it('falls back to anchor download when file picker is unavailable', async () => {
+    const click = vi.fn();
+    const remove = vi.fn();
+    const link = {
+      href: '',
+      download: '',
+      rel: '',
+      style: { display: '' },
+      click,
+      remove,
+    };
+    vi.stubGlobal('window', {} as Window);
+    const createElement = vi.fn(() => link);
+    const appendChild = vi.fn();
+    vi.stubGlobal('document', {
+      body: { appendChild },
+      createElement,
+    } as unknown as Document);
+
+    const recorder = new PracticeRecorder();
+    await recorder.start();
+    await recorder.stop();
+
+    await expect(recorder.saveLastTake()).resolves.toBe(true);
+    expect(createElement).toHaveBeenCalledWith('a');
+    expect(appendChild).toHaveBeenCalledWith(link);
+    expect(click).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledOnce();
   });
 
   it('supports MIME detection fallbacks', () => {

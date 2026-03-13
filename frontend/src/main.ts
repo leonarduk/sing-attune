@@ -60,6 +60,7 @@ const recordingEnabledEl = document.getElementById('recording-enabled') as HTMLI
 const btnRecordStart = document.getElementById('btn-record-start') as HTMLButtonElement;
 const btnRecordStop = document.getElementById('btn-record-stop') as HTMLButtonElement;
 const btnRecordPlay = document.getElementById('btn-record-play') as HTMLButtonElement;
+const btnRecordSave = document.getElementById('btn-record-save') as HTMLButtonElement;
 const btnRecordDiscard = document.getElementById('btn-record-discard') as HTMLButtonElement;
 const recordingStatusEl = document.getElementById('recording-status') as HTMLDivElement;
 
@@ -517,6 +518,7 @@ function refreshRecordingControls(): void {
   btnRecordStart.disabled = !enabled || !isSupported || state === 'recording';
   btnRecordStop.disabled = !enabled || !isSupported || state !== 'recording';
   btnRecordPlay.disabled = !enabled || !isSupported || state !== 'recorded';
+  btnRecordSave.disabled = !enabled || !isSupported || state !== 'recorded';
   btnRecordDiscard.disabled = !enabled || !isSupported || state === 'idle';
 
   if (!enabled) {
@@ -763,6 +765,22 @@ btnRecordPlay.addEventListener('click', () => {
   const audio = practiceRecorder.playLastTake();
   if (!audio) {
     setRecordingStatus('No take to play yet.');
+  }
+});
+
+
+btnRecordSave.addEventListener('click', async () => {
+  try {
+    const saved = await practiceRecorder.saveLastTake();
+    if (!saved) setRecordingStatus('No take to save yet.');
+    else setRecordingStatus('Take saved.');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.toLowerCase().includes('abort')) {
+      setRecordingStatus('Save cancelled.');
+      return;
+    }
+    setRecordingStatus(`Could not save take: ${message}`);
   }
 });
 

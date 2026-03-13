@@ -32,6 +32,8 @@ export class PracticeRecorder {
   private stream: MediaStream | null = null;
   private chunks: BlobPart[] = [];
   private takeUrl: string | null = null;
+  private takeBlob: Blob | null = null;
+  private takeMimeType: string | null = null;
   private playbackAudio: HTMLAudioElement | null = null;
   private stopPromise: Promise<void> | null = null;
 
@@ -82,6 +84,8 @@ export class PracticeRecorder {
         if (finished) return;
         finished = true;
         const takeBlob = new Blob(this.chunks, { type: recorder.mimeType || 'audio/webm' });
+        this.takeBlob = takeBlob;
+        this.takeMimeType = takeBlob.type;
         this.takeUrl = URL.createObjectURL(takeBlob);
         this.cleanupStream();
         this.mediaRecorder = null;
@@ -106,6 +110,49 @@ export class PracticeRecorder {
     });
 
     return this.stopPromise;
+  }
+
+  async saveLastTake(): Promise<boolean> {
+    if (!this.takeBlob || this.state !== 'recorded') return false;
+
+    const extension = this.fileExtensionForMimeType(this.takeMimeType);
+    const filename = `practice-take.${extension}`;
+
+    const savePicker = (window as Window & {
+      showSaveFilePicker?: (options: {
+        suggestedName: string;
+        types: Array<{ description: string; accept: Record<string, string[]> }>;
+      }) => Promise<{
+        createWritable: () => Promise<{ write: (blob: Blob) => Promise<void>; close: () => Promise<void> }>;
+      }>;
+    }).showSaveFilePicker;
+
+    if (typeof savePicker === 'function') {
+      const handle = await savePicker({
+        suggestedName: filename,
+        types: [{
+          description: 'Audio recording',
+          accept: {
+            [this.takeMimeType || 'audio/webm']: [`.${extension}`],
+          },
+        }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(this.takeBlob);
+      await writable.close();
+      return true;
+    }
+
+    if (!this.takeUrl) return false;
+    const link = document.createElement('a');
+    link.href = this.takeUrl;
+    link.download = filename;
+    link.rel = 'noopener';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    return true;
   }
 
   playLastTake(): HTMLAudioElement | null {
@@ -133,6 +180,8 @@ export class PracticeRecorder {
       URL.revokeObjectURL(this.takeUrl);
       this.takeUrl = null;
     }
+    this.takeBlob = null;
+    this.takeMimeType = null;
 
     if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
       this.mediaRecorder.stop();
@@ -152,5 +201,13 @@ export class PracticeRecorder {
   private cleanupStream(): void {
     this.stream?.getTracks().forEach((track) => track.stop());
     this.stream = null;
+  }
+
+  private fileExtensionForMimeType(mimeType: string | null): string {
+    if (!mimeType) return 'webm';
+    if (mimeType.includes('mp4')) return 'm4a';
+    if (mimeType.includes('ogg')) return 'ogg';
+    if (mimeType.includes('wav')) return 'wav';
+    return 'webm';
   }
 }
