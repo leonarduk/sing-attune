@@ -318,14 +318,15 @@ function connectPitchSocket(): void {
 
 function scheduleSelectedPart(selectedPart: string): void {
   if (!engine || !renderer?.scoreModel || !selectedPart) return;
+  const partExists = renderer.scoreModel.parts.includes(selectedPart);
+  if (!partExists) return;
 
-  const semitones = parseInt(transposeSelectEl.value, 10);
-  const clampedSemitones = Number.isNaN(semitones) ? 0 : semitones;
+  const semitones = Number(transposeSelectEl.value);
+  const clampedSemitones = Number.isInteger(semitones) ? semitones : 0;
 
   if (engine.state === 'playing') {
     engine.selectPart(selectedPart);
     engine.setTransposeSemitones(clampedSemitones);
-    startCursorRaf();
   } else {
     engine.schedule(
       renderer.scoreModel.notes,
