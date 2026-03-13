@@ -27,8 +27,16 @@ export function expectedNoteAtBeat(beat: number, notes: NoteModel[]): NoteModel 
   return beat >= candidate.beat_start && beat < end ? candidate : null;
 }
 
-export function classifyPitchColor(sungMidi: number, expectedMidi: number | null, conf: number): DotColor {
-  if (conf < 0.6 || expectedMidi === null) return 'grey';
+/**
+ * Classify the dot colour for a voiced pitch frame.
+ *
+ * Precondition: expectedMidi is the MIDI value of the currently active note
+ * (i.e. expectedNoteAtBeat() returned non-null). Callers must not invoke this
+ * function during rests — use the null return from expectedNoteAtBeat() to
+ * suppress the dot entirely before reaching this function.
+ */
+export function classifyPitchColor(sungMidi: number, expectedMidi: number, conf: number): DotColor {
+  if (conf < 0.6) return 'grey';
 
   const cents = Math.abs((sungMidi - expectedMidi) * 100);
   if (cents <= 50) return 'green';
