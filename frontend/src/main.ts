@@ -334,22 +334,16 @@ function connectPitchSocket(): void {
 
 function scheduleSelectedPart(selectedPart: string): void {
   if (!engine || !renderer?.scoreModel || !selectedPart) return;
-  const partExists = renderer.scoreModel.parts.includes(selectedPart);
-  if (!partExists) return;
-
-  const semitones = Number(transposeSelectEl.value);
-  const clampedSemitones = Number.isInteger(semitones) ? semitones : 0;
-  engine.schedule(
-    renderer.scoreModel.notes,
-    renderer.scoreModel.tempo_marks,
-    selectedPart,
-    parseFloat(tempoSliderEl.value) / 100,
-  );
-  engine.setTransposeSemitones(getTransposeSemitones());
+  const partExistsInModel = renderer.scoreModel.parts.includes(selectedPart);
+  const partExistsInNotes = renderer.scoreModel.notes.some((note) => note.part === selectedPart);
+  if (!partExistsInModel || !partExistsInNotes) return;
 
   if (engine.state === 'playing') {
+    // Live switches are handled by the engine's own stop/reschedule flow.
     engine.selectPart(selectedPart);
   } else {
+    const semitones = Number(transposeSelectEl.value);
+    const clampedSemitones = Number.isInteger(semitones) ? Math.max(-24, Math.min(24, semitones)) : 0;
     engine.schedule(
       renderer.scoreModel.notes,
       renderer.scoreModel.tempo_marks,
