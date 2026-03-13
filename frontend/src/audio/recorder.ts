@@ -34,6 +34,7 @@ export class PracticeRecorder {
   private takeUrl: string | null = null;
   private takeBlob: Blob | null = null;
   private takeMimeType: string | null = null;
+  private playbackAudio: HTMLAudioElement | null = null;
   private stopPromise: Promise<void> | null = null;
 
   static isSupported(): boolean {
@@ -94,12 +95,18 @@ export class PracticeRecorder {
         resolve();
       };
 
-      recorder.onstop = finish;
-      recorder.stop();
+      recorder.addEventListener('stop', finish, { once: true });
 
-      if (recorder.state === 'inactive') {
+      try {
+        recorder.stop();
+      } catch (_error) {
         finish();
+        return;
       }
+
+      queueMicrotask(() => {
+        if (recorder.state === 'inactive') finish();
+      });
     });
 
     return this.stopPromise;
@@ -150,12 +157,25 @@ export class PracticeRecorder {
 
   playLastTake(): HTMLAudioElement | null {
     if (!this.takeUrl || this.state !== 'recorded') return null;
-    const audio = new Audio(this.takeUrl);
+
+    if (!this.playbackAudio) {
+      this.playbackAudio = new Audio();
+    }
+
+    const audio = this.playbackAudio;
+    audio.src = this.takeUrl;
     void audio.play().catch(() => undefined);
     return audio;
   }
 
   discard(): void {
+    if (this.playbackAudio) {
+      this.playbackAudio.pause();
+      this.playbackAudio.removeAttribute('src');
+      this.playbackAudio.load();
+      this.playbackAudio = null;
+    }
+
     if (this.takeUrl) {
       URL.revokeObjectURL(this.takeUrl);
       this.takeUrl = null;

@@ -37,7 +37,7 @@ describe('PracticeRecorder', () => {
     state: RecordingState = 'inactive';
     mimeType = 'audio/webm';
     ondataavailable: ((event: { data: Blob }) => void) | null = null;
-    onstop: (() => void) | null = null;
+    private stopListeners: Array<() => void> = [];
 
     constructor(_stream: MediaStream, options?: { mimeType?: string }) {
       if (options?.mimeType) this.mimeType = options.mimeType;
@@ -51,7 +51,27 @@ describe('PracticeRecorder', () => {
     stop(): void {
       this.state = 'inactive';
       this.ondataavailable?.({ data: new Blob(['fake']) });
-      this.onstop?.();
+      this.stopListeners.forEach((listener) => listener());
+    }
+
+    addEventListener(type: string, listener: () => void, options?: { once?: boolean }): void {
+      if (type !== 'stop') return;
+
+      if (options?.once) {
+        const wrapped = () => {
+          this.removeEventListener('stop', wrapped);
+          listener();
+        };
+        this.stopListeners.push(wrapped);
+        return;
+      }
+
+      this.stopListeners.push(listener);
+    }
+
+    removeEventListener(type: string, listener: () => void): void {
+      if (type !== 'stop') return;
+      this.stopListeners = this.stopListeners.filter((candidate) => candidate !== listener);
     }
   }
 
@@ -85,6 +105,10 @@ describe('PracticeRecorder', () => {
         remove: vi.fn(),
       })),
     } as unknown as Document);
+    const pause = vi.fn();
+    const removeAttribute = vi.fn();
+    const load = vi.fn();
+    vi.stubGlobal('Audio', vi.fn(() => ({ play, pause, removeAttribute, load, src: '' })));
   });
 
   afterEach(() => {
@@ -169,7 +193,7 @@ describe('PracticeRecorder', () => {
       this.state = 'inactive';
       setTimeout(() => {
         this.ondataavailable?.({ data: new Blob(['fake']) });
-        this.onstop?.();
+        (this as unknown as { stopListeners: Array<() => void> }).stopListeners.forEach((listener) => listener());
       }, 0);
     });
 
