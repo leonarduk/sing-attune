@@ -429,9 +429,10 @@ function startPitchGraphLoop(): void {
     pitchGraph?.tick(nowSec);
 
     if (syntheticModeEnabled && engine?.playing) {
-      const elapsedMs = (engine.ctx.currentTime - engine.startAudioTime) * 1000;
+      const elapsedSec = Math.max(0, engine.ctx.currentTime - engine.startAudioTime);
+      const elapsedMs = elapsedSec * 1000;
       const expectedMidi = expectedMidiForFrame(elapsedMs);
-      handleIncomingPitchFrame(syntheticPitchFrameAt(nowSec, expectedMidi));
+      handleIncomingPitchFrame(syntheticPitchFrameAt(elapsedSec, expectedMidi));
     }
 
     pitchGraphRafId = requestAnimationFrame(tick);

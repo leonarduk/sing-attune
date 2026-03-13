@@ -18,7 +18,18 @@ export interface PitchGraphOptions {
 interface GridLine {
   midi: number;
   isOctave: boolean;
+  isBlackKey: boolean;
   label: string | null;
+}
+
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const KEYBOARD_GUTTER_PX = 56;
+
+function midiToScaleLabel(midi: number): string | null {
+  const note = NOTE_NAMES[midi % 12];
+  if (note.includes('#')) return null;
+  const octave = Math.floor(midi / 12) - 1;
+  return `${note}${octave}`;
 }
 
 export function midiToGraphY(midi: number, height: number, minMidi = GRAPH_MIDI_MIN, maxMidi = GRAPH_MIDI_MAX): number {
@@ -41,8 +52,8 @@ export function buildSemitoneGrid(minMidi = GRAPH_MIDI_MIN, maxMidi = GRAPH_MIDI
   const lines: GridLine[] = [];
   for (let midi = minMidi; midi <= maxMidi; midi += 1) {
     const isOctave = midi % 12 === 0;
-    const octave = Math.floor(midi / 12) - 1;
-    lines.push({ midi, isOctave, label: isOctave ? `C${octave}` : null });
+    const isBlackKey = NOTE_NAMES[midi % 12]?.includes('#') ?? false;
+    lines.push({ midi, isOctave, isBlackKey, label: midiToScaleLabel(midi) });
   }
   return lines;
 }
@@ -110,35 +121,60 @@ export class PitchGraphCanvas {
   private redraw(nowSec: number): void {
     const width = this.canvas.clientWidth;
     const height = this.canvas.clientHeight;
+    const plotLeft = Math.min(KEYBOARD_GUTTER_PX, width * 0.2);
+    const plotWidth = Math.max(1, width - plotLeft);
 
     this.ctx.fillStyle = this.opts.backgroundColor;
     this.ctx.fillRect(0, 0, width, height);
 
-    this.drawYGrid(width, height);
-    this.drawXGrid(nowSec, width, height);
-    this.drawTrace(nowSec, width, height);
+    this.drawKeyboardScale(plotLeft, height);
+    this.drawYGrid(plotLeft, plotWidth, height);
+    this.drawXGrid(nowSec, plotLeft, plotWidth, height);
+    this.drawTrace(nowSec, plotLeft, plotWidth, height);
   }
 
-  private drawYGrid(width: number, height: number): void {
+  private drawKeyboardScale(plotLeft: number, height: number): void {
+    this.ctx.fillStyle = '#0a0f1c';
+    this.ctx.fillRect(0, 0, plotLeft, height);
+
+    const lines = buildSemitoneGrid();
+    for (const line of lines) {
+      if (!line.isBlackKey) continue;
+      const topY = midiToGraphY(line.midi + 0.5, height);
+      const bottomY = midiToGraphY(line.midi - 0.5, height);
+      const keyHeight = bottomY - topY;
+      this.ctx.fillStyle = 'rgba(17, 24, 39, 0.95)';
+      this.ctx.fillRect(0, topY, plotLeft * 0.64, keyHeight);
+    }
+
+    this.ctx.strokeStyle = 'rgba(168, 190, 220, 0.3)';
+    this.ctx.lineWidth = 1;
+    this.ctx.beginPath();
+    this.ctx.moveTo(plotLeft, 0);
+    this.ctx.lineTo(plotLeft, height);
+    this.ctx.stroke();
+  }
+
+  private drawYGrid(plotLeft: number, plotWidth: number, height: number): void {
     const lines = buildSemitoneGrid();
     for (const line of lines) {
       const y = midiToGraphY(line.midi, height);
       this.ctx.strokeStyle = line.isOctave ? 'rgba(168, 190, 220, 0.45)' : 'rgba(168, 190, 220, 0.15)';
       this.ctx.lineWidth = line.isOctave ? 1.5 : 1;
       this.ctx.beginPath();
-      this.ctx.moveTo(0, y);
-      this.ctx.lineTo(width, y);
+      this.ctx.moveTo(plotLeft, y);
+      this.ctx.lineTo(plotLeft + plotWidth, y);
       this.ctx.stroke();
 
       if (line.label) {
         this.ctx.fillStyle = '#c6d8f3';
         this.ctx.font = '12px system-ui, sans-serif';
-        this.ctx.fillText(line.label, 6, y - 2);
+        this.ctx.fillText(line.label, 5, y - 2);
       }
     }
   }
 
-  private drawXGrid(nowSec: number, width: number, height: number): void {
+  private drawXGrid(nowSec: number, plotLeft: number, plotWidth: number, height: number): void {
     const newestWhole = Math.floor(nowSec);
     const oldest = nowSec - this.opts.windowSeconds;
 
@@ -146,7 +182,7 @@ export class PitchGraphCanvas {
     this.ctx.lineWidth = 1;
 
     for (let sec = newestWhole; sec >= oldest; sec -= 1) {
-      const x = timeToGraphX(sec, nowSec, width, this.opts.windowSeconds);
+      const x = plotLeft + timeToGraphX(sec, nowSec, plotWidth, this.opts.windowSeconds);
       this.ctx.beginPath();
       this.ctx.moveTo(x, 0);
       this.ctx.lineTo(x, height);
@@ -154,7 +190,7 @@ export class PitchGraphCanvas {
     }
   }
 
-  private drawTrace(nowSec: number, width: number, height: number): void {
+  private drawTrace(nowSec: number, plotLeft: number, plotWidth: number, height: number): void {
     if (this.samples.length < 2) return;
 
     this.ctx.lineWidth = 2;
@@ -163,9 +199,9 @@ export class PitchGraphCanvas {
       const prev = this.samples[i - 1];
       const next = this.samples[i];
 
-      const x1 = timeToGraphX(prev.tSec, nowSec, width, this.opts.windowSeconds);
+      const x1 = plotLeft + timeToGraphX(prev.tSec, nowSec, plotWidth, this.opts.windowSeconds);
       const y1 = midiToGraphY(prev.midi, height);
-      const x2 = timeToGraphX(next.tSec, nowSec, width, this.opts.windowSeconds);
+      const x2 = plotLeft + timeToGraphX(next.tSec, nowSec, plotWidth, this.opts.windowSeconds);
       const y2 = midiToGraphY(next.midi, height);
 
       this.ctx.strokeStyle = this.cssColor(next.color);
