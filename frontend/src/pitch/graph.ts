@@ -84,7 +84,6 @@ export class PitchGraphCanvas {
   }
 
   pushFrame(frame: PitchFrame, expectedMidi: number | null): void {
-    const tSec = frame.t / 1000;
     this.samples.push({
       tSec: frame.t / 1000,
       midi: frame.midi,
