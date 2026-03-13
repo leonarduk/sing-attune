@@ -132,4 +132,60 @@ describe('PlaybackEngine part selection', () => {
     engine.play(0);
     expect(starts).toHaveLength(1);
   });
+
+  it('maintains beat continuity across mid-session part switch offset', () => {
+    class FakeBufferSource {
+      buffer: AudioBuffer | null = null;
+      detune = { value: 0 };
+      connect(): void {}
+      start(): void {}
+      stop(): void {}
+    }
+
+    class FakeAudioContext {
+      currentTime = 0;
+      state: AudioContextState = 'running';
+      destination = {} as AudioDestinationNode;
+      createBufferSource(): AudioBufferSourceNode {
+        return new FakeBufferSource() as unknown as AudioBufferSourceNode;
+      }
+      resume(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+
+    class FakeSoundfont {
+      getBuffer(): AudioBuffer {
+        return {} as AudioBuffer;
+      }
+      getNearestSampledMidi(midi: number): number {
+        return midi;
+      }
+    }
+
+    const ctx = new FakeAudioContext();
+    const engine = new PlaybackEngine(
+      ctx as unknown as AudioContext,
+      new FakeSoundfont() as unknown as import('./soundfont').SoundfontLoader,
+    );
+
+    const notes: import('../score/renderer').NoteModel[] = [
+      { midi: 60, beat_start: 0, duration: 16, measure: 1, part: 'PART I', lyric: null },
+      { midi: 62, beat_start: 0, duration: 16, measure: 1, part: 'PART II', lyric: null },
+    ];
+
+    engine.schedule(notes, BPM120, 'PART I', 1);
+    engine.play(0);
+
+    ctx.currentTime = 2;
+    const beforeSwitchBeat = engine.currentBeat;
+    expect(beforeSwitchBeat).toBeCloseTo(3.8, 2);
+
+    engine.selectPart('PART II');
+
+    ctx.currentTime = 2.03;
+    expect(engine.currentBeat).toBeGreaterThan(beforeSwitchBeat);
+    expect(engine.currentBeat).toBeCloseTo(3.86, 2);
+  });
+
 });

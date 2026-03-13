@@ -125,12 +125,7 @@ export class PlaybackEngine {
    */
   get currentBeat(): number {
     if (this._state !== 'playing') return this._startBeat;
-    const elapsedS = this.ctx.currentTime - this._startAudioTime;
-    if (elapsedS < 0) return this._startBeat;
-    return (
-      this._startBeat +
-      elapsedToBeat(elapsedS * 1000, this._startBeat, this._scaledTempoMarks)
-    );
+    return this._beatAtTime(this.ctx.currentTime);
   }
 
   // ── Public commands ───────────────────────────────────────────────────────────
@@ -166,11 +161,12 @@ export class PlaybackEngine {
 
     if (this._state !== 'playing') return;
 
-    const beat = this.currentBeat;
-    this._stopSources(this.ctx.currentTime + STOP_SAFETY_OFFSET_S);
+    const switchAt = this.ctx.currentTime + Math.max(RESCHEDULE_OFFSET_S, STOP_SAFETY_OFFSET_S);
+    const beat = this._beatAtTime(switchAt);
+    this._stopSources(switchAt);
     this._startBeat = beat;
-    this._startAudioTime = this.ctx.currentTime + RESCHEDULE_OFFSET_S;
-    this._scheduleFrom(beat, this._startAudioTime);
+    this._startAudioTime = switchAt;
+    this._scheduleFrom(beat, switchAt);
   }
 
   /**
@@ -269,6 +265,12 @@ export class PlaybackEngine {
    */
   private get _scaledTempoMarks(): TempoMark[] {
     return this._tempoMarks.map((m) => ({ ...m, bpm: m.bpm * this._tempoMultiplier }));
+  }
+
+  private _beatAtTime(audioTime: number): number {
+    const elapsedS = audioTime - this._startAudioTime;
+    if (elapsedS < 0) return this._startBeat;
+    return this._startBeat + elapsedToBeat(elapsedS * 1000, this._startBeat, this._scaledTempoMarks);
   }
 
   /**
