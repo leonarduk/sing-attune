@@ -17,7 +17,7 @@ import { ScoreCursor } from './score/cursor';
 import { SoundfontLoader } from './playback/soundfont';
 import { PlaybackEngine } from './playback/engine';
 import { getVisiblePartOptions } from './part-options';
-import { beatToMs, postPlayback, seekPlayback } from './transport/controls';
+import { beatToMs, postPlayback, seekPlayback, setPlaybackTempo } from './transport/controls';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -33,6 +33,7 @@ const btnRewind       = document.getElementById('btn-rewind')   as HTMLButtonEle
 const partSelectEl    = document.getElementById('part-select')  as HTMLSelectElement;
 const tempoSliderEl   = document.getElementById('tempo-slider') as HTMLInputElement;
 const tempoLabelEl    = document.getElementById('tempo-label')  as HTMLSpanElement;
+const btnBrowse       = document.getElementById('btn-browse')    as HTMLButtonElement;
 const headphoneWarning = document.getElementById('headphone-warning') as HTMLDivElement;
 const warningDismiss  = document.getElementById('warning-dismiss') as HTMLButtonElement;
 const showAccompanimentEl = document.getElementById('show-accompaniment') as HTMLInputElement;
@@ -181,7 +182,14 @@ async function seekByBeats(delta: number): Promise<void> {
   if (!engine || !cursor || !renderer?.scoreModel) return;
   const totalBeats = renderer.scoreModel.total_beats;
   const targetBeat = Math.max(0, Math.min(totalBeats, engine.currentBeat + delta));
-  await seekPlayback(beatToMs(targetBeat, renderer.scoreModel, engine.tempoMultiplier));
+  try {
+    await seekPlayback(beatToMs(targetBeat, renderer.scoreModel, engine.tempoMultiplier));
+  } catch (err) {
+    setStatus('seek failed', 'error');
+    console.error('Seek failed:', err);
+    return;
+  }
+
   engine.seekToBeat(targetBeat);
   cursor.seekToBeat(targetBeat);
   if (engine.state !== 'playing') stopCursorRaf();
@@ -306,10 +314,26 @@ showAccompanimentEl.addEventListener('change', () => {
 // ── Tempo slider ──────────────────────────────────────────────────────────────
 
 tempoSliderEl.addEventListener('input', () => {
-  const mult = parseFloat(tempoSliderEl.value) / 100;
   tempoLabelEl.textContent = `${tempoSliderEl.value}%`;
-  // setTempoMultiplier() reschedules if playing, or stores for next play()
-  engine?.setTempoMultiplier(mult);
+});
+
+tempoSliderEl.addEventListener('change', async () => {
+  if (!engine) return;
+
+  const previousMultiplier = engine.tempoMultiplier;
+  const nextMultiplier = parseFloat(tempoSliderEl.value) / 100;
+
+  engine.setTempoMultiplier(nextMultiplier);
+
+  try {
+    await setPlaybackTempo(nextMultiplier);
+  } catch (err) {
+    engine.setTempoMultiplier(previousMultiplier);
+    tempoSliderEl.value = String(Math.round(previousMultiplier * 100));
+    tempoLabelEl.textContent = `${tempoSliderEl.value}%`;
+    setStatus('tempo update failed', 'error');
+    console.error('Tempo update failed:', err);
+  }
 });
 
 // ── Transpose selector ───────────────────────────────────────────────────────
@@ -351,19 +375,13 @@ window.addEventListener('keydown', (e) => {
 
   if (e.key === 'ArrowLeft') {
     e.preventDefault();
-    void seekByBeats(-SEEK_STEP_BEATS).catch((err) => {
-      setStatus('seek failed', 'error');
-      console.error('Seek failed:', err);
-    });
+    void seekByBeats(-SEEK_STEP_BEATS);
     return;
   }
 
   if (e.key === 'ArrowRight') {
     e.preventDefault();
-    void seekByBeats(SEEK_STEP_BEATS).catch((err) => {
-      setStatus('seek failed', 'error');
-      console.error('Seek failed:', err);
-    });
+    void seekByBeats(SEEK_STEP_BEATS);
   }
 });
 
@@ -386,6 +404,7 @@ dropZoneEl.addEventListener('drop', (e) => {
 });
 
 dropZoneEl.addEventListener('click', () => fileInputEl.click());
+btnBrowse.addEventListener('click', () => fileInputEl.click());
 
 fileInputEl.addEventListener('change', () => {
   const file = fileInputEl.files?.[0];
@@ -402,6 +421,7 @@ function setTransportEnabled(enabled: boolean): void {
   partSelectEl.disabled = !enabled;
   tempoSliderEl.disabled = !enabled;
   transposeSelectEl.disabled = !enabled;
+  btnBrowse.disabled = !enabled;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

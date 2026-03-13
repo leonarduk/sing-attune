@@ -128,6 +128,17 @@ async def playback_seek(t_ms: float) -> JSONResponse:
     return JSONResponse({"state": _pipeline.state.name, "t_ms": _pipeline.elapsed_ms})
 
 
+@app.post("/playback/tempo")
+async def playback_tempo(multiplier: float) -> JSONResponse:
+    """Set playback tempo multiplier used for elapsed-time calculations."""
+    if multiplier <= 0:
+        raise HTTPException(status_code=400, detail="multiplier must be > 0")
+    _pipeline.set_tempo_multiplier(multiplier)
+    return JSONResponse(
+        {"state": _pipeline.state.name, "t_ms": _pipeline.elapsed_ms, "multiplier": _pipeline.tempo_multiplier}
+    )
+
+
 # ── WebSocket pitch stream ─────────────────────────────────────────────────────
 
 

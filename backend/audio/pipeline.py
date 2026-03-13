@@ -78,6 +78,7 @@ class PlaybackPipeline:
         # Timing
         self._play_monotonic: float = 0.0   # time.monotonic() at last play/resume
         self._elapsed_ms: float = 0.0       # accumulated ms before last pause
+        self._tempo_multiplier: float = 1.0
 
         # Hardware objects — created on start, destroyed on stop
         self._capture: MicCapture | None = None
@@ -108,6 +109,7 @@ class PlaybackPipeline:
             # STOPPED → PLAYING
             self._loop = loop
             self._elapsed_ms = 0.0
+            self._tempo_multiplier = 1.0
             self._play_monotonic = time.monotonic()
 
             self._pitch = PitchPipeline(
@@ -129,7 +131,7 @@ class PlaybackPipeline:
             if self._state != PlaybackState.PLAYING:
                 return
             # Accumulate elapsed time before suspending capture
-            self._elapsed_ms += (time.monotonic() - self._play_monotonic) * 1000.0
+            self._elapsed_ms += (time.monotonic() - self._play_monotonic) * 1000.0 * self._tempo_multiplier
             if self._capture:
                 self._capture.stop()
             self._state = PlaybackState.PAUSED
@@ -147,6 +149,7 @@ class PlaybackPipeline:
                 return
             self._teardown_locked()
             self._elapsed_ms = 0.0
+            self._tempo_multiplier = 1.0
             self._state = PlaybackState.STOPPED
             log.info("PlaybackPipeline stopped")
 
@@ -160,6 +163,23 @@ class PlaybackPipeline:
                 self._play_monotonic = time.monotonic()
             log.info("PlaybackPipeline seeked to t=%.1f ms (state=%s)", self._elapsed_ms, self._state.name)
 
+
+    def set_tempo_multiplier(self, multiplier: float) -> None:
+        with self._lock:
+            if multiplier <= 0:
+                raise ValueError("multiplier must be > 0")
+
+            if self._state == PlaybackState.PLAYING:
+                self._elapsed_ms += (time.monotonic() - self._play_monotonic) * 1000.0 * self._tempo_multiplier
+                self._play_monotonic = time.monotonic()
+
+            self._tempo_multiplier = multiplier
+
+    @property
+    def tempo_multiplier(self) -> float:
+        with self._lock:
+            return self._tempo_multiplier
+
     @property
     def state(self) -> PlaybackState:
         with self._lock:
@@ -170,7 +190,7 @@ class PlaybackPipeline:
         """Current playback position in ms. Safe to call from any thread."""
         with self._lock:
             if self._state == PlaybackState.PLAYING:
-                return self._elapsed_ms + (time.monotonic() - self._play_monotonic) * 1000.0
+                return self._elapsed_ms + (time.monotonic() - self._play_monotonic) * 1000.0 * self._tempo_multiplier
             return self._elapsed_ms
 
     # ── WebSocket client management ────────────────────────────────────────────
@@ -212,7 +232,7 @@ class PlaybackPipeline:
         with self._lock:
             if self._state != PlaybackState.PLAYING:
                 return
-            t_ms = self._elapsed_ms + (time.monotonic() - self._play_monotonic) * 1000.0
+            t_ms = self._elapsed_ms + (time.monotonic() - self._play_monotonic) * 1000.0 * self._tempo_multiplier
 
         payload = {
             "t": round(t_ms, 1),

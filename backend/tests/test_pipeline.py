@@ -146,6 +146,17 @@ class TestPlaybackStateMachine:
         assert p.state == PlaybackState.STOPPED
         assert p.elapsed_ms == 0.0
 
+    def test_tempo_multiplier_scales_elapsed_while_playing(self):
+        p = self._pipeline()
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+        p._elapsed_ms = 0.0
+
+        p.set_tempo_multiplier(1.5)
+        time.sleep(0.03)
+
+        assert p.elapsed_ms >= 40.0
+
     def test_double_start_is_safe(self):
         p = self._pipeline()
         p._capture = _MockCapture()
@@ -331,6 +342,16 @@ class TestPlaybackEndpoints:
 
     def test_playback_seek_rejects_negative_t(self, client):
         resp = client.post('/playback/seek?t_ms=-1')
+        assert resp.status_code == 400
+
+    def test_playback_tempo_returns_200(self, client):
+        resp = client.post('/playback/tempo?multiplier=1.25')
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data['multiplier'] == pytest.approx(1.25)
+
+    def test_playback_tempo_rejects_invalid_multiplier(self, client):
+        resp = client.post('/playback/tempo?multiplier=0')
         assert resp.status_code == 400
 
     def test_state_schema(self, client):
