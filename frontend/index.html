@@ -263,6 +263,19 @@
       font-size: 0.75rem;
     }
 
+    .recording-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #recording-status {
+      color: #aaa;
+      font-size: 0.75rem;
+      min-height: 1em;
+    }
+
     @media (max-width: 900px) {
       #toolbar {
         gap: 8px;
@@ -373,6 +386,20 @@
       <input id="settings-trail" type="range" min="0.5" max="5" step="0.5" value="2" />
     </div>
 
+
+    <div class="settings-row">
+      <label>
+        <input id="recording-enabled" type="checkbox" />
+        Enable session recording
+      </label>
+      <div class="recording-controls">
+        <button id="btn-record-start" class="transport-btn" disabled>⏺ Start</button>
+        <button id="btn-record-stop" class="transport-btn" disabled>⏹ Stop</button>
+        <button id="btn-record-play" class="transport-btn" disabled>▶ Play take</button>
+        <button id="btn-record-discard" class="transport-btn" disabled>🗑 Discard</button>
+      </div>
+      <div id="recording-status" aria-live="polite"></div>
+    </div>
     <div id="settings-engine">Pitch engine: loading…</div>
   </aside>
 
