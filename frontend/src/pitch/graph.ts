@@ -63,7 +63,6 @@ export class PitchGraphCanvas {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly opts: Required<PitchGraphOptions>;
   private samples: GraphSample[] = [];
-  private timeOffsetSec: number | null = null;
 
   constructor(container: HTMLElement, opts: PitchGraphOptions = {}) {
     this.opts = {
@@ -84,14 +83,8 @@ export class PitchGraphCanvas {
   }
 
   pushFrame(frame: PitchFrame, expectedMidi: number | null): void {
-    const nowSec = performance.now() / 1000;
-    if (this.timeOffsetSec === null) {
-      this.timeOffsetSec = nowSec - (frame.t / 1000);
-    }
-
-    const tSec = (frame.t / 1000) + this.timeOffsetSec;
     this.samples.push({
-      tSec,
+      tSec: frame.t / 1000,
       midi: frame.midi,
       color: classifyGraphTraceColor(frame.midi, expectedMidi),
     });
@@ -109,7 +102,6 @@ export class PitchGraphCanvas {
 
   clear(): void {
     this.samples = [];
-    this.timeOffsetSec = null;
     this.redraw(performance.now() / 1000);
   }
 
