@@ -16,6 +16,8 @@ import { ScoreRenderer } from './score/renderer';
 import { ScoreCursor } from './score/cursor';
 import { SoundfontLoader } from './playback/soundfont';
 import { PlaybackEngine } from './playback/engine';
+import { PitchOverlay } from './pitch/overlay';
+import { parsePitchFrame, reconnectDelayMs } from './pitch/socket';
 import { getVisiblePartOptions } from './part-options';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
@@ -50,6 +52,11 @@ let soundfontLoadPromise: Promise<void> | null = null;
 
 // External cursor RAF (replaces ScoreCursor's internal wall-clock loop)
 let cursorRafId: number | null = null;
+let pitchOverlay: PitchOverlay | null = null;
+let pitchWs: WebSocket | null = null;
+let pitchReconnectTimer: number | null = null;
+let shouldReconnectPitchSocket = false;
+let pitchReconnectAttempts = 0;
 
 // ── Backend health ────────────────────────────────────────────────────────────
 
@@ -128,6 +135,9 @@ async function loadScore(file: File): Promise<void> {
   cursor?.stop();
   engine = null;
   cursor = null;
+  closePitchSocket();
+  pitchOverlay?.destroy();
+  pitchOverlay = null;
   scoreContainerEl.innerHTML = '';
 
   // Start soundfont loading in background (idempotent)
@@ -163,6 +173,8 @@ async function loadScore(file: File): Promise<void> {
     );
 
     cursor = new ScoreCursor(renderer.osmd, model);
+    pitchOverlay = new PitchOverlay(scoreContainerEl, model, model.parts[0] ?? '');
+    connectPitchSocket();
     setTransportEnabled(true);
     setStatus('score loaded', 'ok');
   } catch (err) {
@@ -198,6 +210,92 @@ function stopCursorRaf(): void {
   if (cursorRafId !== null) {
     cancelAnimationFrame(cursorRafId);
     cursorRafId = null;
+  }
+}
+
+function cursorXPosition(): number {
+  const cursorEl = cursor?.osmd.cursor.cursorElement;
+  if (!cursorEl) return 0;
+
+  const scoreRect = scoreContainerEl.getBoundingClientRect();
+  const cursorRect = cursorEl.getBoundingClientRect();
+  return cursorRect.left - scoreRect.left + scoreContainerEl.scrollLeft;
+}
+
+function closePitchSocket(): void {
+  shouldReconnectPitchSocket = false;
+  pitchReconnectAttempts = 0;
+  if (pitchReconnectTimer !== null) {
+    window.clearTimeout(pitchReconnectTimer);
+    pitchReconnectTimer = null;
+  }
+
+  if (pitchWs) {
+    pitchWs.close();
+    pitchWs = null;
+  }
+}
+
+function connectPitchSocket(): void {
+  if (!pitchOverlay) return;
+  shouldReconnectPitchSocket = true;
+
+  if (pitchReconnectTimer !== null) {
+    window.clearTimeout(pitchReconnectTimer);
+    pitchReconnectTimer = null;
+  }
+
+  if (pitchWs && (pitchWs.readyState === WebSocket.OPEN || pitchWs.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  pitchWs = new WebSocket(`${protocol}://${window.location.host}/ws/pitch`);
+
+  pitchWs.onopen = () => {
+    pitchReconnectAttempts = 0;
+  };
+
+  pitchWs.onerror = () => {
+    pitchWs?.close();
+  };
+
+  pitchWs.onclose = () => {
+    pitchWs = null;
+    if (!shouldReconnectPitchSocket || !pitchOverlay) return;
+
+    pitchReconnectAttempts += 1;
+    const delayMs = reconnectDelayMs(pitchReconnectAttempts);
+
+    pitchReconnectTimer = window.setTimeout(() => {
+      pitchReconnectTimer = null;
+      connectPitchSocket();
+    }, delayMs);
+  };
+
+  pitchWs.onmessage = (event) => {
+    if (!pitchOverlay) return;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(event.data) as unknown;
+    } catch {
+      return;
+    }
+
+    const frame = parsePitchFrame(payload);
+    if (!frame) return;
+
+    pitchOverlay.pushFrame(
+      frame,
+      cursorXPosition(),
+    );
+  };
+}
+
+async function callPlayback(path: 'start' | 'pause' | 'resume' | 'stop'): Promise<void> {
+  const res = await fetch(`/playback/${path}`, { method: 'POST' });
+  if (!res.ok) {
+    throw new Error(`playback ${path} failed (HTTP ${res.status})`);
   }
 }
 
@@ -239,41 +337,78 @@ function refreshPartSelector(): void {
 
 // ── Transport controls ────────────────────────────────────────────────────────
 
-btnPlay.addEventListener('click', () => {
+btnPlay.addEventListener('click', async () => {
   if (!engine || !cursor || !renderer?.scoreModel) return;
+  if (engine.state === 'playing') return;
 
   // Show headphone warning on every play
   headphoneWarning.classList.remove('hidden');
 
-  const fromBeat = engine.state === 'paused' ? engine.startBeat : 0;
-
-  if (fromBeat === 0) {
-    // Full reset: reposition cursor to start
-    cursor.stop(); // resets OSMD cursor to beat 0 and hides it
-    cursor.osmd.cursor.show();
+  try {
+    if (engine.state === 'paused') {
+      await callPlayback('resume');
+      engine.play(engine.startBeat);
+    } else {
+      await callPlayback('start');
+      cursor.stop();
+      cursor.osmd.cursor.show();
+      pitchOverlay?.clear();
+      engine.play(0);
+    }
+    startCursorRaf();
+  } catch (err) {
+    setStatus(String(err), 'error');
   }
-
-  engine.play(fromBeat);
-  startCursorRaf();
 });
 
-btnPause.addEventListener('click', () => {
+btnPause.addEventListener('click', async () => {
   if (!engine) return;
-  engine.pause();
-  stopCursorRaf();
+  try {
+    await callPlayback('pause');
+    engine.pause();
+    stopCursorRaf();
+  } catch (err) {
+    setStatus(String(err), 'error');
+  }
 });
 
-btnStop.addEventListener('click', () => {
+btnStop.addEventListener('click', async () => {
   if (!engine || !cursor) return;
-  engine.stop();
-  stopCursorRaf();
-  cursor.stop();
-  headphoneWarning.classList.add('hidden');
+  try {
+    await callPlayback('stop');
+    engine.stop();
+    stopCursorRaf();
+    cursor.stop();
+    pitchOverlay?.clear();
+    headphoneWarning.classList.add('hidden');
+  } catch (err) {
+    setStatus(String(err), 'error');
+  }
 });
 
 // ── Part selector ─────────────────────────────────────────────────────────────
 
 partSelectEl.addEventListener('change', () => {
+  if (!engine || !renderer?.scoreModel) return;
+  const model = renderer.scoreModel;
+  engine.schedule(
+    model.notes,
+    model.tempo_marks,
+    partSelectEl.value,
+    parseFloat(tempoSliderEl.value) / 100,
+  );
+  // If playing, restart from beat 0 with the new part
+  pitchOverlay?.updatePart(partSelectEl.value);
+
+  if (engine.state === 'playing') {
+    engine.stop();
+    stopCursorRaf();
+    cursor?.stop();
+    cursor?.osmd.cursor.show();
+    pitchOverlay?.clear();
+    engine.play(0);
+    startCursorRaf();
+  }
   scheduleSelectedPart(partSelectEl.value);
 });
 
@@ -330,6 +465,11 @@ function setTransportEnabled(enabled: boolean): void {
   partSelectEl.disabled = !enabled;
   tempoSliderEl.disabled = !enabled;
 }
+
+window.addEventListener('beforeunload', () => {
+  closePitchSocket();
+  pitchOverlay?.destroy();
+});
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 

@@ -1,0 +1,38 @@
+import { describe, expect, it } from 'vitest';
+import { classifyPitchColor, expectedNoteAtBeat } from './accuracy';
+import type { NoteModel } from '../score/renderer';
+
+const notes: NoteModel[] = [
+  { midi: 60, beat_start: 0, duration: 1, measure: 1, part: 'S', lyric: null },
+  { midi: 62, beat_start: 1, duration: 2, measure: 1, part: 'S', lyric: null },
+  { midi: 64, beat_start: 3, duration: 1, measure: 2, part: 'S', lyric: null },
+];
+
+describe('expectedNoteAtBeat', () => {
+  it('returns null before first note', () => {
+    expect(expectedNoteAtBeat(-0.1, notes)).toBeNull();
+  });
+
+  it('finds active note at exact start and interior beats', () => {
+    expect(expectedNoteAtBeat(0, notes)?.midi).toBe(60);
+    expect(expectedNoteAtBeat(1.5, notes)?.midi).toBe(62);
+  });
+
+  it('returns null in a gap or at note end boundary', () => {
+    expect(expectedNoteAtBeat(4, notes)).toBeNull();
+    expect(expectedNoteAtBeat(3, notes)?.midi).toBe(64);
+  });
+});
+
+describe('classifyPitchColor', () => {
+  it('returns grey for low confidence or missing expected note', () => {
+    expect(classifyPitchColor(60, 60, 0.59)).toBe('grey');
+    expect(classifyPitchColor(60, null, 0.99)).toBe('grey');
+  });
+
+  it('applies cents thresholds for green/amber/red', () => {
+    expect(classifyPitchColor(60.49, 60, 0.8)).toBe('green');
+    expect(classifyPitchColor(60.75, 60, 0.8)).toBe('amber');
+    expect(classifyPitchColor(61.2, 60, 0.8)).toBe('red');
+  });
+});
