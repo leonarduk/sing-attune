@@ -18,6 +18,9 @@
 const SOUNDFONT_URL =
   'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_grand_piano-mp3.js';
 
+const SOUNDFONT_ASSIGNMENT_RE =
+  /MIDI\.Soundfont\.[A-Za-z0-9_]+\s*=\s*(\{[\s\S]*?\})\s*;?/;
+
 // Flat-notation names matching the gleitz soundfont key names exactly.
 // MIDI 0 = C-1, MIDI 60 = C4, MIDI 69 = A4.
 const NOTE_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'] as const;
@@ -67,9 +70,7 @@ export class SoundfontLoader {
 
     // 2. Extract the embedded JSON object
     // File structure: MIDI.Soundfont.acoustic_grand_piano = { "A0": "data:…", … }
-    const match = js.match(/=\s*(\{[\s\S]*\})/);
-    if (!match) throw new Error('Could not parse soundfont JS: no JSON object found');
-    const noteMap = JSON.parse(match[1]) as Record<string, string>;
+    const noteMap = SoundfontLoader.parseNoteMap(js);
 
     // 3. Decode all samples concurrently
     const entries = Object.entries(noteMap);
@@ -136,4 +137,9 @@ export class SoundfontLoader {
   // Exposed for tests
   static midiToNoteName = midiToNoteName;
   static noteNameToMidi = noteNameToMidi;
+  static parseNoteMap(js: string): Record<string, string> {
+    const match = js.match(SOUNDFONT_ASSIGNMENT_RE);
+    if (!match) throw new Error('Could not parse soundfont JS: no JSON object found');
+    return JSON.parse(match[1]) as Record<string, string>;
+  }
 }

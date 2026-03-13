@@ -69,6 +69,7 @@ export interface ScoreModel {
 export class ScoreRenderer {
   readonly osmd: OpenSheetMusicDisplay;
   private _loaded = false;
+  private visualTransposeSemitones = 0;
   public scoreModel: ScoreModel | null = null;
 
   constructor(container: HTMLElement) {
@@ -124,6 +125,7 @@ export class ScoreRenderer {
     // Commit state only after both phases succeed
     this.scoreModel = model;
     this._loaded = true;
+    this.applyVisualTranspose(this.visualTransposeSemitones);
     return model;
   }
 
@@ -141,5 +143,19 @@ export class ScoreRenderer {
    */
   setHighlightedPart(_partName: string): void {
     // Intentionally a no-op due to current OSMD public API limitations.
+  }
+
+  /** Apply visual transposition to score notation and re-render the sheet. */
+  applyVisualTranspose(semitones: number): void {
+    const roundedSemitones = Math.round(semitones);
+    const clampedSemitones = Math.max(-24, Math.min(24, roundedSemitones));
+    this.visualTransposeSemitones = clampedSemitones;
+
+    if (!this._loaded || !this.osmd.Sheet) return;
+    if (this.osmd.Sheet.Transpose === clampedSemitones) return;
+
+    this.osmd.Sheet.Transpose = clampedSemitones;
+    this.osmd.updateGraphic();
+    this.osmd.render();
   }
 }

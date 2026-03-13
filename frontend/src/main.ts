@@ -24,6 +24,7 @@ import { elapsedToBeat } from './score/timing';
 import { beatToMs, startPlayback, postPlayback, seekPlayback, setPlaybackTempo, setPlaybackTranspose } from './transport/controls';
 import { resolveSelectedDeviceId, type AudioInputDevice } from './audio/devices';
 import { PracticeRecorder } from './audio/recorder';
+import { beatFromClick, extractMeasureHitZones } from './score/click-seek';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,7 @@ const recordingEnabledEl = document.getElementById('recording-enabled') as HTMLI
 const btnRecordStart = document.getElementById('btn-record-start') as HTMLButtonElement;
 const btnRecordStop = document.getElementById('btn-record-stop') as HTMLButtonElement;
 const btnRecordPlay = document.getElementById('btn-record-play') as HTMLButtonElement;
+const btnRecordSave = document.getElementById('btn-record-save') as HTMLButtonElement;
 const btnRecordDiscard = document.getElementById('btn-record-discard') as HTMLButtonElement;
 const recordingStatusEl = document.getElementById('recording-status') as HTMLDivElement;
 
@@ -211,6 +213,7 @@ async function loadScore(file: File): Promise<void> {
       parseFloat(tempoSliderEl.value) / 100,
     );
 
+    renderer.applyVisualTranspose(getTransposeSemitones());
     cursor = new ScoreCursor(renderer.osmd, model);
     renderer.setHighlightedPart(selectedPart);
     pitchOverlay = new PitchOverlay(scoreContainerEl, model, selectedPart, overlaySettings);
@@ -324,6 +327,36 @@ function cursorXPosition(): number {
   const scoreRect = scoreContainerEl.getBoundingClientRect();
   const cursorRect = cursorEl.getBoundingClientRect();
   return cursorRect.left - scoreRect.left + scoreContainerEl.scrollLeft;
+}
+
+async function seekToClickedPosition(event: MouseEvent): Promise<void> {
+  if (!renderer || !engine || !cursor || !renderer.scoreModel) return;
+
+  const svg = scoreContainerEl.querySelector('svg');
+  if (!(svg instanceof SVGSVGElement)) return;
+
+  const ctm = svg.getScreenCTM();
+  if (!ctm) return;
+
+  const svgPoint = svg.createSVGPoint();
+  svgPoint.x = event.clientX;
+  svgPoint.y = event.clientY;
+  const local = svgPoint.matrixTransform(ctm.inverse());
+
+  const zones = extractMeasureHitZones(renderer.osmd);
+  const targetBeat = beatFromClick(zones, local.x, local.y);
+  if (targetBeat === null) return;
+
+  try {
+    await seekPlayback(beatToMs(targetBeat, renderer.scoreModel, engine.tempoMultiplier));
+  } catch (err) {
+    setStatus(`seek failed: ${String(err)}`, 'error');
+    console.error('Seek failed:', err);
+    return;
+  }
+
+  engine.seekToBeat(targetBeat);
+  cursor.seekToBeat(targetBeat);
 }
 
 function closePitchSocket(): void {
@@ -517,6 +550,7 @@ function refreshRecordingControls(): void {
   btnRecordStart.disabled = !enabled || !isSupported || state === 'recording';
   btnRecordStop.disabled = !enabled || !isSupported || state !== 'recording';
   btnRecordPlay.disabled = !enabled || !isSupported || state !== 'recorded';
+  btnRecordSave.disabled = !enabled || !isSupported || state !== 'recorded';
   btnRecordDiscard.disabled = !enabled || !isSupported || state === 'idle';
 
   if (!enabled) {
@@ -658,6 +692,7 @@ tempoSliderEl.addEventListener('change', async () => {
 transposeSelectEl.addEventListener('change', async () => {
   const semitones = getTransposeSemitones();
   engine?.setTransposeSemitones(semitones);
+  renderer?.applyVisualTranspose(semitones);
   try {
     await setPlaybackTranspose(semitones);
   } catch (err) {
@@ -766,6 +801,22 @@ btnRecordPlay.addEventListener('click', () => {
   }
 });
 
+
+btnRecordSave.addEventListener('click', async () => {
+  try {
+    const saved = await practiceRecorder.saveLastTake();
+    if (!saved) setRecordingStatus('No take to save yet.');
+    else setRecordingStatus('Take saved.');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.toLowerCase().includes('abort')) {
+      setRecordingStatus('Save cancelled.');
+      return;
+    }
+    setRecordingStatus(`Could not save take: ${message}`);
+  }
+});
+
 btnRecordDiscard.addEventListener('click', () => {
   practiceRecorder.discard();
   recordingError = null;
@@ -832,6 +883,10 @@ btnBrowse.addEventListener('click', () => fileInputEl.click());
 fileInputEl.addEventListener('change', () => {
   const file = fileInputEl.files?.[0];
   if (file) void loadScore(file);
+});
+
+scoreContainerEl.addEventListener('click', (event) => {
+  void seekToClickedPosition(event);
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
