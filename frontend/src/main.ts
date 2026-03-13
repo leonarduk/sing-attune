@@ -19,10 +19,10 @@ import { PlaybackEngine } from './playback/engine';
 import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from './pitch/overlay';
 import { parsePitchFrame, reconnectDelayMs } from './pitch/socket';
 import { getVisiblePartOptions } from './part-options';
-import { beatToMs, postPlayback, seekPlayback, setPlaybackTempo, setPlaybackTranspose } from './transport/controls';
 import { elapsedToBeat } from './score/timing';
 import { beatToMs, startPlayback, postPlayback, seekPlayback, setPlaybackTempo, setPlaybackTranspose } from './transport/controls';
 import { resolveSelectedDeviceId, type AudioInputDevice } from './audio/devices';
+import { PracticeRecorder } from './audio/recorder';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -53,6 +53,12 @@ const settingsConfidenceLabelEl = document.getElementById('settings-confidence-l
 const settingsTrailEl = document.getElementById('settings-trail') as HTMLInputElement;
 const settingsTrailLabelEl = document.getElementById('settings-trail-label') as HTMLSpanElement;
 const settingsEngineEl = document.getElementById('settings-engine') as HTMLDivElement;
+const recordingEnabledEl = document.getElementById('recording-enabled') as HTMLInputElement;
+const btnRecordStart = document.getElementById('btn-record-start') as HTMLButtonElement;
+const btnRecordStop = document.getElementById('btn-record-stop') as HTMLButtonElement;
+const btnRecordPlay = document.getElementById('btn-record-play') as HTMLButtonElement;
+const btnRecordDiscard = document.getElementById('btn-record-discard') as HTMLButtonElement;
+const recordingStatusEl = document.getElementById('recording-status') as HTMLDivElement;
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
@@ -80,6 +86,8 @@ const overlaySettings: OverlaySettings = {
   trailMs: 2000,
 };
 let selectedDeviceId: number | null = null;
+const practiceRecorder = new PracticeRecorder();
+let recordingError: string | null = null;
 
 // ── Backend health ────────────────────────────────────────────────────────────
 
@@ -469,6 +477,40 @@ function refreshPartSelector(): void {
   scheduleSelectedPart(selectedPart);
 }
 
+function setRecordingStatus(message: string): void {
+  recordingStatusEl.textContent = message;
+}
+
+function refreshRecordingControls(): void {
+  const enabled = recordingEnabledEl.checked;
+  const isSupported = PracticeRecorder.isSupported();
+  const state = practiceRecorder.state;
+
+  btnRecordStart.disabled = !enabled || !isSupported || state === 'recording';
+  btnRecordStop.disabled = !enabled || !isSupported || state !== 'recording';
+  btnRecordPlay.disabled = !enabled || !isSupported || state !== 'recorded';
+  btnRecordDiscard.disabled = !enabled || !isSupported || state === 'idle';
+
+  if (!enabled) {
+    setRecordingStatus('Recording disabled.');
+    return;
+  }
+
+  if (!isSupported) {
+    setRecordingStatus('Recording unsupported in this browser.');
+    return;
+  }
+
+  if (recordingError) {
+    setRecordingStatus(recordingError);
+    return;
+  }
+
+  if (state === 'idle') setRecordingStatus('Ready to record.');
+  if (state === 'recording') setRecordingStatus('Recording…');
+  if (state === 'recorded') setRecordingStatus('Take captured.');
+}
+
 // ── Transport controls ────────────────────────────────────────────────────────
 
 btnPlay.addEventListener('click', async () => {
@@ -648,6 +690,49 @@ settingsTrailEl.addEventListener('input', () => {
   updateSettingsLabels();
 });
 
+recordingEnabledEl.addEventListener('change', () => {
+  if (!recordingEnabledEl.checked) {
+    practiceRecorder.discard();
+  }
+  recordingError = null;
+  refreshRecordingControls();
+});
+
+btnRecordStart.addEventListener('click', async () => {
+  try {
+    await practiceRecorder.start();
+    recordingError = null;
+    refreshRecordingControls();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.toLowerCase().includes('denied') || message.toLowerCase().includes('notallowed')) {
+      recordingError = 'Microphone permission denied. Recording remains off until access is granted.';
+    } else {
+      recordingError = `Could not start recording: ${message}`;
+    }
+    refreshRecordingControls();
+  }
+});
+
+btnRecordStop.addEventListener('click', async () => {
+  await practiceRecorder.stop();
+  recordingError = null;
+  refreshRecordingControls();
+});
+
+btnRecordPlay.addEventListener('click', () => {
+  const audio = practiceRecorder.playLastTake();
+  if (!audio) {
+    setRecordingStatus('No take to play yet.');
+  }
+});
+
+btnRecordDiscard.addEventListener('click', () => {
+  practiceRecorder.discard();
+  recordingError = null;
+  refreshRecordingControls();
+});
+
 // ── Keyboard shortcuts ───────────────────────────────────────────────────────
 
 window.addEventListener('keydown', (e) => {
@@ -725,6 +810,7 @@ function setTransportEnabled(enabled: boolean): void {
 window.addEventListener('beforeunload', () => {
   closePitchSocket();
   pitchOverlay?.destroy();
+  practiceRecorder.destroy();
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -738,4 +824,5 @@ function initializeSettingsPanel(): void {
 setTransportEnabled(false);
 tempoLabelEl.textContent = `${tempoSliderEl.value}%`;
 initializeSettingsPanel();
+refreshRecordingControls();
 void checkBackend();
