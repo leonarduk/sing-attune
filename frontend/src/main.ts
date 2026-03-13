@@ -213,6 +213,7 @@ async function loadScore(file: File): Promise<void> {
       parseFloat(tempoSliderEl.value) / 100,
     );
 
+    renderer.applyVisualTranspose(getTransposeSemitones());
     cursor = new ScoreCursor(renderer.osmd, model);
     renderer.setHighlightedPart(selectedPart);
     pitchOverlay = new PitchOverlay(scoreContainerEl, model, selectedPart, overlaySettings);
@@ -691,6 +692,7 @@ tempoSliderEl.addEventListener('change', async () => {
 transposeSelectEl.addEventListener('change', async () => {
   const semitones = getTransposeSemitones();
   engine?.setTransposeSemitones(semitones);
+  renderer?.applyVisualTranspose(semitones);
   try {
     await setPlaybackTranspose(semitones);
   } catch (err) {
