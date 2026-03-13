@@ -6,7 +6,7 @@
  * tempo-multiplier cases without requiring an AudioContext mock.
  */
 import { describe, it, expect } from 'vitest';
-import { beatToSeconds } from './engine';
+import { beatToSeconds, PlaybackEngine } from './engine';
 import { elapsedToBeat } from '../score/timing';
 
 const BPM120: import('../score/renderer').TempoMark[] = [{ beat: 0, bpm: 120 }];
@@ -76,4 +76,60 @@ describe('beatToSeconds / elapsedToBeat round-trip', () => {
       expect(recovered).toBeCloseTo(beat, 4);
     });
   }
+});
+
+describe('PlaybackEngine part selection', () => {
+  it('selectPart filters notes used by the scheduler', () => {
+    const starts: number[] = [];
+
+    class FakeBufferSource {
+      buffer: AudioBuffer | null = null;
+      detune = { value: 0 };
+      connect(): void {}
+      start(): void { starts.push(1); }
+      stop(): void {}
+    }
+
+    class FakeAudioContext {
+      currentTime = 0;
+      state: AudioContextState = 'running';
+      destination = {} as AudioDestinationNode;
+      createBufferSource(): AudioBufferSourceNode {
+        return new FakeBufferSource() as unknown as AudioBufferSourceNode;
+      }
+      resume(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+
+    class FakeSoundfont {
+      getBuffer(): AudioBuffer {
+        return {} as AudioBuffer;
+      }
+      getNearestSampledMidi(midi: number): number {
+        return midi;
+      }
+    }
+
+    const engine = new PlaybackEngine(
+      new FakeAudioContext() as unknown as AudioContext,
+      new FakeSoundfont() as unknown as import('./soundfont').SoundfontLoader,
+    );
+
+    const notes: import('../score/renderer').NoteModel[] = [
+      { midi: 60, beat_start: 0, duration: 1, measure: 1, part: 'PART I', lyric: null },
+      { midi: 62, beat_start: 1, duration: 1, measure: 1, part: 'Piano', lyric: null },
+      { midi: 64, beat_start: 2, duration: 1, measure: 1, part: 'PART I', lyric: null },
+    ];
+
+    engine.schedule(notes, BPM120, 'PART I', 1);
+    engine.play(0);
+    expect(starts).toHaveLength(2);
+
+    starts.length = 0;
+    engine.stop();
+    engine.selectPart('Piano');
+    engine.play(0);
+    expect(starts).toHaveLength(1);
+  });
 });

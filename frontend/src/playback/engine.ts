@@ -91,6 +91,8 @@ export class PlaybackEngine {
   private _startBeat = 0;
 
   // Cached schedule parameters
+  private _allNotes: NoteModel[] = [];
+  private _selectedPart = '';
   private _notes: NoteModel[] = [];
   private _tempoMarks: TempoMark[] = [];
   private _tempoMultiplier = 1;
@@ -142,9 +144,30 @@ export class PlaybackEngine {
     partName: string,
     tempoMultiplier = 1,
   ): void {
-    this._notes = notes.filter((n) => n.part === partName);
+    this._allNotes = notes;
+    this._selectedPart = partName;
+    this._notes = this._allNotes.filter((n) => n.part === this._selectedPart);
     this._tempoMarks = tempoMarks;
     this._tempoMultiplier = tempoMultiplier;
+  }
+
+  /**
+   * Change the selected part without reloading the page.
+   *
+   * If currently playing, pending sources are cancelled and the queue is
+   * rebuilt from the current AudioContext.currentTime-aligned beat position.
+   */
+  selectPart(partName: string): void {
+    this._selectedPart = partName;
+    this._notes = this._allNotes.filter((n) => n.part === this._selectedPart);
+
+    if (this._state !== 'playing') return;
+
+    const beat = this.currentBeat;
+    this._stopSources(this.ctx.currentTime + 0.005);
+    this._startBeat = beat;
+    this._startAudioTime = this.ctx.currentTime + RESCHEDULE_OFFSET_S;
+    this._scheduleFrom(beat, this._startAudioTime);
   }
 
   /**
@@ -166,7 +189,7 @@ export class PlaybackEngine {
   pause(): void {
     if (this._state !== 'playing') return;
     const beat = this.currentBeat;
-    this._stopSources();
+    this._stopSources(this.ctx.currentTime + 0.005);
     this._startBeat = beat;
     this._state = 'paused';
   }
@@ -263,10 +286,9 @@ export class PlaybackEngine {
   }
 
   /** Stop all scheduled sources immediately. */
-  private _stopSources(): void {
-    const now = this.ctx.currentTime;
+  private _stopSources(stopAt = this.ctx.currentTime): void {
     for (const src of this._sources) {
-      try { src.stop(now); } catch { /* already stopped or never started */ }
+      try { src.stop(stopAt); } catch { /* already stopped or never started */ }
     }
     this._sources = [];
   }

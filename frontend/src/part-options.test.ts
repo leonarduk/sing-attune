@@ -5,6 +5,7 @@ describe('isAccompanimentPart', () => {
   it('matches common accompaniment aliases case-insensitively', () => {
     expect(isAccompanimentPart('Piano')).toBe(true);
     expect(isAccompanimentPart('Keyboard 1')).toBe(true);
+    expect(isAccompanimentPart('Pianoforte RH')).toBe(true);
     expect(isAccompanimentPart('Accomp Track')).toBe(true);
     expect(isAccompanimentPart('pno')).toBe(true);
     expect(isAccompanimentPart('KBD')).toBe(true);

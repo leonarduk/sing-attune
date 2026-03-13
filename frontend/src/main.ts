@@ -173,7 +173,8 @@ async function loadScore(file: File): Promise<void> {
     );
 
     cursor = new ScoreCursor(renderer.osmd, model);
-    pitchOverlay = new PitchOverlay(scoreContainerEl, model, model.parts[0] ?? '');
+    renderer.setHighlightedPart(selectedPart);
+    pitchOverlay = new PitchOverlay(scoreContainerEl, model, selectedPart);
     connectPitchSocket();
     setTransportEnabled(true);
     setStatus('score loaded', 'ok');
@@ -309,14 +310,7 @@ function scheduleSelectedPart(selectedPart: string): void {
     parseFloat(tempoSliderEl.value) / 100,
   );
 
-  if (engine.state === 'playing') {
-    engine.stop();
-    stopCursorRaf();
-    cursor?.stop();
-    cursor?.osmd.cursor.show();
-    engine.play(0);
-    startCursorRaf();
-  }
+  renderer.setHighlightedPart(selectedPart);
 }
 
 function refreshPartSelector(): void {
@@ -389,27 +383,10 @@ btnStop.addEventListener('click', async () => {
 // ── Part selector ─────────────────────────────────────────────────────────────
 
 partSelectEl.addEventListener('change', () => {
-  if (!engine || !renderer?.scoreModel) return;
-  const model = renderer.scoreModel;
-  engine.schedule(
-    model.notes,
-    model.tempo_marks,
-    partSelectEl.value,
-    parseFloat(tempoSliderEl.value) / 100,
-  );
-  // If playing, restart from beat 0 with the new part
+  if (!engine) return;
+  engine.selectPart(partSelectEl.value);
   pitchOverlay?.updatePart(partSelectEl.value);
-
-  if (engine.state === 'playing') {
-    engine.stop();
-    stopCursorRaf();
-    cursor?.stop();
-    cursor?.osmd.cursor.show();
-    pitchOverlay?.clear();
-    engine.play(0);
-    startCursorRaf();
-  }
-  scheduleSelectedPart(partSelectEl.value);
+  renderer?.setHighlightedPart(partSelectEl.value);
 });
 
 showAccompanimentEl.addEventListener('change', () => {

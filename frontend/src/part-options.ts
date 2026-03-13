@@ -5,7 +5,7 @@ export type PartOption = {
 
 export function isAccompanimentPart(partName: string): boolean {
   const normalized = partName.toLowerCase();
-  return ['piano', 'keyboard', 'accompaniment', 'accomp', 'pno', 'kbd']
+  return ['piano', 'keyboard', 'pianoforte', 'accomp', 'accompaniment', 'pno', 'kbd']
     .some((alias) => normalized.includes(alias));
 }
 
