@@ -139,6 +139,28 @@ async def playback_tempo(multiplier: float) -> JSONResponse:
     )
 
 
+@app.post("/playback/transpose")
+async def playback_transpose(semitones: int) -> JSONResponse:
+    """
+    Set the active transposition offset in semitones.
+
+    The frontend applies the same offset to Web Audio detune so the audio
+    played back is shifted. This endpoint stores the offset so the pitch
+    interpretation layer (Day 9) can shift expected MIDI targets when
+    comparing detected f0 against score notes.
+
+    Range clamped to [-12, +12] on the pipeline side.
+    """
+    _pipeline.set_transpose_semitones(semitones)
+    return JSONResponse(
+        {
+            "state": _pipeline.state.name,
+            "t_ms": _pipeline.elapsed_ms,
+            "transpose_semitones": _pipeline.transpose_semitones,
+        }
+    )
+
+
 # ── WebSocket pitch stream ─────────────────────────────────────────────────────
 
 

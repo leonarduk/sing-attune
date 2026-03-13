@@ -189,7 +189,15 @@ export class PlaybackEngine {
    * If not playing: stores the multiplier for the next play() call.
    */
 
-  /** Seek to a beat position; if playing, reschedule immediately from that beat. */
+  /**
+   * Seek to a beat position.
+   *
+   * If playing, cancels all future scheduled sources and immediately reschedules
+   * from `beat` with a short `RESCHEDULE_OFFSET_S` gap to avoid audible overlap.
+   * If paused or idle, stores the beat for the next `play()` call.
+   *
+   * @param beat - Target beat number. Values below 0 are clamped to 0.
+   */
   seekToBeat(beat: number): void {
     const targetBeat = Math.max(0, beat);
     if (this._state === 'playing') {
