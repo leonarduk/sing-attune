@@ -10,6 +10,9 @@
 backend-dir := "backend"
 frontend-dir := "frontend"
 
+# Use PowerShell when running recipes on Windows so `just` doesn't depend on `sh`.
+set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
+
 # Install all dependencies
 install:
     uv sync
