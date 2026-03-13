@@ -11,6 +11,32 @@
  */
 import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 
+const OSMD_SKY_BOTTOM_LINE_WARNING = 'Not enough lines for SkyBottomLine calculation';
+
+/**
+ * OSMD emits this warning for some valid scores/parts in compact layout.
+ * It is noisy and currently non-actionable for our app, so we suppress only
+ * this exact warning while OSMD load/render work is in progress.
+ */
+export async function withSuppressedOsmdWarnings<T>(fn: () => Promise<T>): Promise<T> {
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]): void => {
+    const hasKnownNoise = args.some(
+      (arg) => typeof arg === 'string' && arg.includes(OSMD_SKY_BOTTOM_LINE_WARNING),
+    );
+    if (hasKnownNoise) {
+      return;
+    }
+    originalWarn(...args);
+  };
+
+  try {
+    return await fn();
+  } finally {
+    console.warn = originalWarn;
+  }
+}
+
 export interface NoteModel {
   midi: number;
   beat_start: number;
@@ -91,8 +117,10 @@ export class ScoreRenderer {
     // File extends Blob; osmd.load() accepts Blob and handles both .xml and
     // .mxl internally (JSZip detects the ZIP magic bytes automatically).
     // Do NOT pass ArrayBuffer — it is not in the osmd.load() type signature.
-    await this.osmd.load(file);
-    this.osmd.render();
+    await withSuppressedOsmdWarnings(async () => {
+      await this.osmd.load(file);
+      this.osmd.render();
+    });
 
     // Commit state only after both phases succeed
     this.scoreModel = model;
