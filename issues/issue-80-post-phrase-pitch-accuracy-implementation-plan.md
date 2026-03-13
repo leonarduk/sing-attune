@@ -10,6 +10,13 @@ After each phrase ends, compute and show a phrase-level pitch summary that inclu
 2. Per-note feedback badges (🟢 / 🟡 / 🔴).
 3. Directional diagnostics for consistently **flat** or **sharp** notes.
 
+## Scope clarification for this PR
+- This PR intentionally delivers a **file-level implementation plan only** and does **not** ship runtime feature code.
+- The acceptance criteria from issue #80 remain the implementation target; they are mapped below so the follow-up implementation PR can be validated directly against them.
+- To avoid ambiguity in review:
+  - Planning done in this PR.
+  - Feature implementation + tests to be completed in a follow-up PR that references this plan.
+
 ## Current-state assessment (relevant architecture)
 - Frontend already computes real-time note matching and color classification (`expectedNoteAtBeat`, `classifyPitchColor`) from incoming raw pitch frames.
 - Frontend overlays dot colors but does not persist frame history into phrase/note analytics.
@@ -58,6 +65,10 @@ For each completed phrase:
 - Compute weighted time-in-tolerance percentage:
   - Green range (`|cents| <= 50`) counts as in tolerance.
   - Only samples above confidence threshold included in denominator.
+  - Weight each sample by `deltaMs * confidenceWeight`, where:
+    - `deltaMs` = elapsed time to next frame (or median frame interval for terminal sample).
+    - `confidenceWeight` = `clamp(conf / confRef, 0, 1)`.
+    - `confRef` default: `0.8` (configurable constant).
 - Compute per-note rollups:
   - Distribution of sample classifications (green/amber/red).
   - Mean signed cents + consistency score to infer flat/sharp tendency.
@@ -67,6 +78,17 @@ For each completed phrase:
   - 🔴 significant deviation or persistent out-of-tolerance
 - Attach directional marker for stable bias:
   - `flat`, `sharp`, or `neutral`.
+
+Recommended default thresholds (single shared constants module):
+- `MIN_CONFIDENCE = 0.55`
+- `MIN_NOTE_SAMPLES_FOR_STRONG_BADGE = 5`
+- `MIN_NOTE_SAMPLES_FOR_BIAS = 8`
+- `BIAS_MEAN_CENTS_THRESHOLD = 15`
+- `BIAS_CONSISTENCY_THRESHOLD = 0.7` (same-sign sample ratio)
+
+Behavior with low sample count:
+- If note samples < `MIN_NOTE_SAMPLES_FOR_STRONG_BADGE`, cap at 🟡 unless all samples are extreme outliers.
+- If note samples < `MIN_NOTE_SAMPLES_FOR_BIAS`, force directional marker to `neutral`.
 
 ### 4) Add a phrase summary UI below the score
 Create a dedicated panel below the score container:
@@ -80,6 +102,14 @@ Display behavior:
 - Replace panel contents when a newer phrase completes.
 - Keep lightweight phrase history (optional expandable list) if space permits.
 - Clear summaries on score reload/part change/stop.
+
+Suggested compact layout (ASCII wireframe):
+```text
+┌ Phrase 3 · 78% in tolerance ──────────────────────────────┐
+│ Notes:  [C4 🟢] [D4 🟡 sharp +18c] [E4 🔴 flat -31c]      │
+│ Legend: 🟢 ≤50c   🟡 51–100c   🔴 >100c                   │
+└───────────────────────────────────────────────────────────┘
+```
 
 ### 5) Keep overlay and summary thresholds consistent
 Centralize thresholds in one shared frontend module for:
