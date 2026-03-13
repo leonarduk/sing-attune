@@ -38,15 +38,17 @@ export class ScoreCursor {
   private _playing = false;
   private startWallMs = 0;
   private startBeat = 0;
-  /**
-   * Last beat position the OSMD cursor was advanced to.
-   * Lets us skip the O(n) reset+replay on each RAF tick.
-   */
-  private _lastAdvancedBeat = 0;
+  /** Last requested beat; used to detect backward seeks. */
+  private _lastRequestedBeat = 0;
+  /** Sorted unique note onsets in beat units. */
+  private readonly noteStarts: number[];
+  /** Index of the next note onset that should trigger cursor.next(). */
+  private _nextNoteStartIndex = 1;
 
   constructor(osmd: OpenSheetMusicDisplay, model: ScoreModel) {
     this.osmd = osmd;
     this.model = model;
+    this.noteStarts = Array.from(new Set(model.notes.map((note) => note.beat_start))).sort((a, b) => a - b);
   }
 
   /** Begin advancing the cursor from `fromBeat` using the internal wall clock. */
@@ -56,9 +58,10 @@ export class ScoreCursor {
     this.startWallMs = performance.now();
     this._playing = true;
 
-    if (fromBeat === 0 || fromBeat < this._lastAdvancedBeat) {
+    if (fromBeat === 0 || fromBeat < this._lastRequestedBeat) {
       this.osmd.cursor.reset();
-      this._lastAdvancedBeat = 0;
+      this._lastRequestedBeat = 0;
+      this._nextNoteStartIndex = 1;
     }
     this.osmd.cursor.show();
     this._tick();
@@ -74,7 +77,8 @@ export class ScoreCursor {
 
   stop(): void {
     this.pause();
-    this._lastAdvancedBeat = 0;
+    this._lastRequestedBeat = 0;
+    this._nextNoteStartIndex = 1;
     this.startBeat = 0;
     this.osmd.cursor.reset();
     this.osmd.cursor.hide();
@@ -92,11 +96,13 @@ export class ScoreCursor {
    * OSMD's CursorType.CurrentArea variant which supports independent scrolling.
    */
   seekToBeat(beat: number): void {
-    if (beat < this._lastAdvancedBeat) {
+    if (beat < this._lastRequestedBeat) {
       this.osmd.cursor.reset();
-      this._lastAdvancedBeat = 0;
+      this._lastRequestedBeat = 0;
+      this._nextNoteStartIndex = 1;
     }
     this._advanceTo(beat);
+    this._lastRequestedBeat = beat;
   }
 
   get playing(): boolean {
@@ -127,11 +133,13 @@ export class ScoreCursor {
    * a 4/4 assumption — see file-level note).
    */
   private _advanceTo(targetBeat: number): void {
-    while (!this.osmd.cursor.Iterator.EndReached) {
-      const cursorBeat = this.osmd.cursor.Iterator.currentTimeStamp.RealValue * 4;
-      if (cursorBeat >= targetBeat) break;
+    while (
+      !this.osmd.cursor.Iterator.EndReached
+      && this._nextNoteStartIndex < this.noteStarts.length
+      && this.noteStarts[this._nextNoteStartIndex] <= targetBeat
+    ) {
       this.osmd.cursor.next();
-      this._lastAdvancedBeat = cursorBeat;
+      this._nextNoteStartIndex += 1;
     }
     this._scrollToCursor();
   }
