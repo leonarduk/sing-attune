@@ -18,10 +18,10 @@ import { SoundfontLoader } from './playback/soundfont';
 import { PlaybackEngine } from './playback/engine';
 import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from './pitch/overlay';
 import { parsePitchFrame, reconnectDelayMs } from './pitch/socket';
+import { midiToFrequencyHz, midiToNoteName } from './pitch/note';
 import { getVisiblePartOptions } from './part-options';
-import { beatToMs, postPlayback, seekPlayback, setPlaybackTempo, setPlaybackTranspose } from './transport/controls';
+import { beatToMs, postPlayback, seekPlayback, setPlaybackTempo, setPlaybackTranspose, startPlayback } from './transport/controls';
 import { elapsedToBeat } from './score/timing';
-import { beatToMs, startPlayback, postPlayback, seekPlayback, setPlaybackTempo, setPlaybackTranspose } from './transport/controls';
 import { resolveSelectedDeviceId, type AudioInputDevice } from './audio/devices';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
@@ -52,7 +52,9 @@ const settingsConfidenceEl = document.getElementById('settings-confidence') as H
 const settingsConfidenceLabelEl = document.getElementById('settings-confidence-label') as HTMLSpanElement;
 const settingsTrailEl = document.getElementById('settings-trail') as HTMLInputElement;
 const settingsTrailLabelEl = document.getElementById('settings-trail-label') as HTMLSpanElement;
+const settingsShowNoteNamesEl = document.getElementById('settings-show-note-names') as HTMLInputElement;
 const settingsEngineEl = document.getElementById('settings-engine') as HTMLDivElement;
+const pitchReadoutEl = document.getElementById('pitch-readout') as HTMLSpanElement;
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
@@ -79,6 +81,8 @@ const overlaySettings: OverlaySettings = {
   confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
   trailMs: 2000,
 };
+let showNoteNames = false;
+let lastDetectedMidi: number | null = null;
 let selectedDeviceId: number | null = null;
 
 // ── Backend health ────────────────────────────────────────────────────────────
@@ -374,11 +378,23 @@ function connectPitchSocket(): void {
     const frame = parsePitchFrame(payload);
     if (!frame) return;
 
+    lastDetectedMidi = frame.midi;
+    updatePitchReadout(frame.midi);
+
     pitchOverlay.pushFrame(
       frame,
       frameXPosition(frame.t),
     );
   };
+}
+
+function updatePitchReadout(midi: number): void {
+  const frequency = midiToFrequencyHz(midi);
+  if (!Number.isFinite(frequency)) return;
+  const frequencyLabel = `${Math.round(frequency)} Hz`;
+  pitchReadoutEl.textContent = showNoteNames
+    ? `Pitch: ${frequencyLabel} → ${midiToNoteName(midi)}`
+    : `Pitch: ${frequencyLabel}`;
 }
 
 function scheduleSelectedPart(selectedPart: string): void {
@@ -732,8 +748,16 @@ window.addEventListener('beforeunload', () => {
 function initializeSettingsPanel(): void {
   settingsConfidenceEl.value = String(overlaySettings.confidenceThreshold);
   settingsTrailEl.value = String(overlaySettings.trailMs / 1000);
+  settingsShowNoteNamesEl.checked = showNoteNames;
   updateSettingsLabels();
 }
+
+settingsShowNoteNamesEl.addEventListener('change', () => {
+  showNoteNames = settingsShowNoteNamesEl.checked;
+  if (lastDetectedMidi !== null) {
+    updatePitchReadout(lastDetectedMidi);
+  }
+});
 
 setTransportEnabled(false);
 tempoLabelEl.textContent = `${tempoSliderEl.value}%`;
