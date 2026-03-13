@@ -651,6 +651,7 @@ btnPlay.addEventListener('click', async () => {
       cursor.stop();
       cursor.osmd.cursor.show();
       pitchOverlay?.clear();
+      pitchGraph?.clear();
       pitchGraphNowSec = 0;
       lastPitchFrame = null;
       updatePitchReadout();
@@ -684,6 +685,8 @@ btnStop.addEventListener('click', async () => {
     stopCursorRaf();
     cursor.stop();
     pitchOverlay?.clear();
+    pitchGraph?.clear();
+    pitchGraphNowSec = 0;
     lastPitchFrame = null;
     updatePitchReadout();
     headphoneWarning.classList.add('hidden');
@@ -705,6 +708,9 @@ btnRewind.addEventListener('click', async () => {
   stopCursorRaf();
   cursor.stop();
   cursor.osmd.cursor.show();
+  pitchOverlay?.clear();
+  pitchGraph?.clear();
+  pitchGraphNowSec = 0;
   lastPitchFrame = null;
   updatePitchReadout();
   headphoneWarning.classList.add('hidden');
