@@ -16,10 +16,10 @@ import { ScoreRenderer } from './score/renderer';
 import { ScoreCursor } from './score/cursor';
 import { SoundfontLoader } from './playback/soundfont';
 import { PlaybackEngine } from './playback/engine';
-import { PitchOverlay } from './pitch/overlay';
+import { PitchOverlay, type OverlaySettings } from './pitch/overlay';
 import { parsePitchFrame, reconnectDelayMs } from './pitch/socket';
 import { getVisiblePartOptions } from './part-options';
-import { beatToMs, postPlayback, seekPlayback, setPlaybackTempo, setPlaybackTranspose } from './transport/controls';
+import { beatToMs, startPlayback, postPlayback, seekPlayback, setPlaybackTempo, setPlaybackTranspose } from './transport/controls';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -42,6 +42,14 @@ const scoreLoadingEl  = document.getElementById('score-loading') as HTMLDivEleme
 const errorBannerEl   = document.getElementById('error-banner') as HTMLDivElement;
 const showAccompanimentEl = document.getElementById('show-accompaniment') as HTMLInputElement;
 const transposeSelectEl = document.getElementById('transpose-select') as HTMLSelectElement;
+const btnSettings = document.getElementById('btn-settings') as HTMLButtonElement;
+const settingsPanelEl = document.getElementById('settings-panel') as HTMLDivElement;
+const settingsDeviceEl = document.getElementById('settings-device') as HTMLSelectElement;
+const settingsConfidenceEl = document.getElementById('settings-confidence') as HTMLInputElement;
+const settingsConfidenceLabelEl = document.getElementById('settings-confidence-label') as HTMLSpanElement;
+const settingsTrailEl = document.getElementById('settings-trail') as HTMLInputElement;
+const settingsTrailLabelEl = document.getElementById('settings-trail-label') as HTMLSpanElement;
+const settingsEngineEl = document.getElementById('settings-engine') as HTMLDivElement;
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
@@ -61,6 +69,12 @@ let pitchWs: WebSocket | null = null;
 let pitchReconnectTimer: number | null = null;
 let shouldReconnectPitchSocket = false;
 let pitchReconnectAttempts = 0;
+
+const overlaySettings: OverlaySettings = {
+  confidenceThreshold: 0.6,
+  trailMs: 2000,
+};
+let selectedDeviceId: number | null = null;
 
 // ── Backend health ────────────────────────────────────────────────────────────
 
@@ -179,7 +193,7 @@ async function loadScore(file: File): Promise<void> {
 
     cursor = new ScoreCursor(renderer.osmd, model);
     renderer.setHighlightedPart(selectedPart);
-    pitchOverlay = new PitchOverlay(scoreContainerEl, model, selectedPart);
+    pitchOverlay = new PitchOverlay(scoreContainerEl, model, selectedPart, overlaySettings);
     connectPitchSocket();
     setTransportEnabled(true);
     setStatus('score loaded', 'ok');
@@ -356,6 +370,45 @@ function scheduleSelectedPart(selectedPart: string): void {
   renderer.setHighlightedPart(selectedPart);
 }
 
+
+
+function updateSettingsLabels(): void {
+  settingsConfidenceLabelEl.textContent = overlaySettings.confidenceThreshold.toFixed(2);
+  settingsTrailLabelEl.textContent = `${(overlaySettings.trailMs / 1000).toFixed(1)}s`;
+}
+
+async function refreshAudioSettings(): Promise<void> {
+  try {
+    const [devicesRes, engineRes] = await Promise.all([
+      fetch('/audio/devices'),
+      fetch('/audio/engine'),
+    ]);
+
+    if (!devicesRes.ok) throw new Error(`/audio/devices HTTP ${devicesRes.status}`);
+    const devicesPayload = (await devicesRes.json()) as {
+      default_device_id: number | null;
+      devices: Array<{ id: number; name: string }>;
+    };
+
+    settingsDeviceEl.innerHTML = devicesPayload.devices
+      .map((device) => `<option value="${device.id}">${device.name}</option>`)
+      .join('');
+
+    if (selectedDeviceId === null) selectedDeviceId = devicesPayload.default_device_id;
+    if (selectedDeviceId !== null) settingsDeviceEl.value = String(selectedDeviceId);
+
+    if (engineRes.ok) {
+      const enginePayload = (await engineRes.json()) as { active_engine: string; mode: string };
+      settingsEngineEl.textContent = `Pitch engine: ${enginePayload.active_engine} (${enginePayload.mode})`;
+    } else {
+      settingsEngineEl.textContent = 'Pitch engine: unavailable';
+    }
+  } catch (err) {
+    settingsEngineEl.textContent = 'Pitch engine: unavailable';
+    console.error('Failed to load settings data:', err);
+  }
+}
+
 function refreshPartSelector(): void {
   if (!renderer?.scoreModel) return;
   const allParts = renderer.scoreModel.parts;
@@ -387,7 +440,7 @@ btnPlay.addEventListener('click', async () => {
     if (fromBeat > 0) {
       await postPlayback('/playback/resume');
     } else {
-      await postPlayback('/playback/start');
+      await startPlayback(selectedDeviceId);
       cursor.stop();
       cursor.osmd.cursor.show();
       pitchOverlay?.clear();
@@ -499,6 +552,31 @@ warningDismiss.addEventListener('click', () => {
   headphoneWarning.classList.add('hidden');
 });
 
+
+
+btnSettings.addEventListener('click', async () => {
+  const visible = settingsPanelEl.classList.toggle('visible');
+  if (!visible) return;
+  await refreshAudioSettings();
+});
+
+settingsDeviceEl.addEventListener('change', () => {
+  const parsed = Number.parseInt(settingsDeviceEl.value, 10);
+  selectedDeviceId = Number.isNaN(parsed) ? null : parsed;
+});
+
+settingsConfidenceEl.addEventListener('input', () => {
+  overlaySettings.confidenceThreshold = parseFloat(settingsConfidenceEl.value);
+  pitchOverlay?.applySettings(overlaySettings);
+  updateSettingsLabels();
+});
+
+settingsTrailEl.addEventListener('input', () => {
+  overlaySettings.trailMs = parseFloat(settingsTrailEl.value) * 1000;
+  pitchOverlay?.applySettings(overlaySettings);
+  updateSettingsLabels();
+});
+
 // ── Keyboard shortcuts ───────────────────────────────────────────────────────
 
 window.addEventListener('keydown', (e) => {
@@ -583,4 +661,7 @@ window.addEventListener('beforeunload', () => {
 
 setTransportEnabled(false);
 tempoLabelEl.textContent = `${tempoSliderEl.value}%`;
+settingsConfidenceEl.value = String(overlaySettings.confidenceThreshold);
+settingsTrailEl.value = String(overlaySettings.trailMs / 1000);
+updateSettingsLabels();
 void checkBackend();

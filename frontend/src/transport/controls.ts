@@ -1,6 +1,13 @@
 import { beatToSeconds } from '../playback/engine';
 import type { ScoreModel } from '../score/renderer';
 
+
+export async function startPlayback(deviceId: number | null): Promise<void> {
+  const query = deviceId === null ? '' : `?device_id=${encodeURIComponent(String(deviceId))}`;
+  const res = await fetch(`/playback/start${query}`, { method: 'POST' });
+  if (!res.ok) throw new Error(`Playback command failed: /playback/start (HTTP ${res.status})`);
+}
+
 export async function postPlayback(path: string): Promise<void> {
   const res = await fetch(path, { method: 'POST' });
   if (!res.ok) throw new Error(`Playback command failed: ${path} (HTTP ${res.status})`);
