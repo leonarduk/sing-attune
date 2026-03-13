@@ -252,7 +252,13 @@ class PlaybackPipeline:
         with self._lock:
             if self._state != PlaybackState.PLAYING:
                 return
-            t_ms = self._elapsed_ms + (time.monotonic() - self._play_monotonic) * 1000.0 * self._tempo_multiplier
+
+            # Use the frame's capture timestamp to avoid adding inference/
+            # queue latency to `t`. This keeps note matching aligned with
+            # the audio that actually produced the detected pitch.
+            play_anchor_ms = self._play_monotonic * 1000.0
+            frame_elapsed_ms = max(0.0, frame.time_ms - play_anchor_ms)
+            t_ms = self._elapsed_ms + (frame_elapsed_ms * self._tempo_multiplier)
 
         payload = {
             "t": round(t_ms, 1),
