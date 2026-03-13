@@ -571,7 +571,6 @@ function setTransportEnabled(enabled: boolean): void {
   partSelectEl.disabled = !enabled;
   tempoSliderEl.disabled = !enabled;
   transposeSelectEl.disabled = !enabled;
-  btnBrowse.disabled = !enabled;
 }
 
 window.addEventListener('beforeunload', () => {
