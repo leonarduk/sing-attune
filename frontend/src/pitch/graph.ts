@@ -7,6 +7,7 @@ export const GRAPH_MIDI_MAX = 84; // C6
 interface GraphSample {
   tSec: number;
   midi: number;
+  expectedMidi: number | null;
   color: GraphTraceColor;
 }
 
@@ -63,7 +64,6 @@ export class PitchGraphCanvas {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly opts: Required<PitchGraphOptions>;
   private samples: GraphSample[] = [];
-  private timeOffsetSec: number | null = null;
 
   constructor(container: HTMLElement, opts: PitchGraphOptions = {}) {
     this.opts = {
@@ -84,15 +84,11 @@ export class PitchGraphCanvas {
   }
 
   pushFrame(frame: PitchFrame, expectedMidi: number | null): void {
-    const nowSec = performance.now() / 1000;
-    if (this.timeOffsetSec === null) {
-      this.timeOffsetSec = nowSec - (frame.t / 1000);
-    }
-
-    const tSec = (frame.t / 1000) + this.timeOffsetSec;
+    const tSec = frame.t / 1000;
     this.samples.push({
       tSec,
       midi: frame.midi,
+      expectedMidi,
       color: classifyGraphTraceColor(frame.midi, expectedMidi),
     });
   }
@@ -109,7 +105,6 @@ export class PitchGraphCanvas {
 
   clear(): void {
     this.samples = [];
-    this.timeOffsetSec = null;
     this.redraw(performance.now() / 1000);
   }
 
@@ -130,7 +125,31 @@ export class PitchGraphCanvas {
     this.drawKeyboardScale(plotLeft, height);
     this.drawYGrid(plotLeft, plotWidth, height);
     this.drawXGrid(nowSec, plotLeft, plotWidth, height);
+    this.drawExpectedTrace(nowSec, plotLeft, plotWidth, height);
     this.drawTrace(nowSec, plotLeft, plotWidth, height);
+  }
+
+  private drawExpectedTrace(nowSec: number, plotLeft: number, plotWidth: number, height: number): void {
+    if (this.samples.length < 2) return;
+
+    this.ctx.lineWidth = 1.5;
+    this.ctx.strokeStyle = 'rgba(117, 196, 255, 0.9)';
+
+    for (let i = 1; i < this.samples.length; i += 1) {
+      const prev = this.samples[i - 1];
+      const next = this.samples[i];
+      if (prev?.expectedMidi === null || next?.expectedMidi === null) continue;
+
+      const x1 = plotLeft + timeToGraphX(prev.tSec, nowSec, plotWidth, this.opts.windowSeconds);
+      const y1 = midiToGraphY(prev.expectedMidi, height);
+      const x2 = plotLeft + timeToGraphX(next.tSec, nowSec, plotWidth, this.opts.windowSeconds);
+      const y2 = midiToGraphY(next.expectedMidi, height);
+
+      this.ctx.beginPath();
+      this.ctx.moveTo(x1, y1);
+      this.ctx.lineTo(x2, y2);
+      this.ctx.stroke();
+    }
   }
 
   private drawKeyboardScale(plotLeft: number, height: number): void {

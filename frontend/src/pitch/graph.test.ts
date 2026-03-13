@@ -15,8 +15,8 @@ describe('graph coordinate helpers', () => {
 
   it('prunes samples older than cutoff', () => {
     const remaining = pruneSamples([
-      { tSec: 10, midi: 60, color: 'grey' },
-      { tSec: 15, midi: 61, color: 'green' },
+      { tSec: 10, midi: 60, expectedMidi: null, color: 'grey' },
+      { tSec: 15, midi: 61, expectedMidi: 60, color: 'green' },
     ], 12);
 
     expect(remaining).toHaveLength(1);
