@@ -346,6 +346,29 @@ class TestFrameFanout:
 
         asyncio.run(_run())
 
+    def test_frame_timestamp_uses_capture_time_not_emit_time(self):
+        """Frame `t` should be anchored to PitchFrame.time_ms to avoid lag."""
+        async def _run():
+            loop = asyncio.get_event_loop()
+            p = PlaybackPipeline()
+            p._loop = loop
+            p._state = PlaybackState.PLAYING
+            p._play_monotonic = 10.0
+            p._elapsed_ms = 250.0
+            p._tempo_multiplier = 1.0
+
+            q: asyncio.Queue = asyncio.Queue()
+            p.add_client(q)
+
+            frame = PitchFrame(time_ms=10250.0, midi=60.0, confidence=0.8)
+            await loop.run_in_executor(None, p._on_pitch_frame, frame)
+            await asyncio.sleep(0)
+
+            payload = q.get_nowait()
+            assert payload["t"] == pytest.approx(500.0)
+
+        asyncio.run(_run())
+
 
 # ── HTTP endpoints ─────────────────────────────────────────────────────────────
 
