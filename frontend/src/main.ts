@@ -326,7 +326,6 @@ function scheduleSelectedPart(selectedPart: string): void {
 
   if (engine.state === 'playing') {
     engine.selectPart(selectedPart);
-    engine.setTransposeSemitones(clampedSemitones);
   } else {
     engine.schedule(
       renderer.scoreModel.notes,
