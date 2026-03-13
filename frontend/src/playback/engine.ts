@@ -345,17 +345,18 @@ export class PlaybackEngine {
       const attack = 0.01;
       const release = 0.08;
       const peak = 0.12;
-      const releaseStart = Math.max(safeStart + attack, safeStart + noteDurS - release);
+      const noteEnd = safeStart + noteDurS;
+      const releaseStart = Math.min(noteEnd, Math.max(safeStart + attack, noteEnd - release));
 
       gain.gain.setValueAtTime(0.0001, safeStart);
       gain.gain.linearRampToValueAtTime(peak, safeStart + attack);
       gain.gain.setValueAtTime(peak, releaseStart);
-      gain.gain.linearRampToValueAtTime(0.0001, safeStart + noteDurS);
+      gain.gain.linearRampToValueAtTime(0.0001, noteEnd);
 
       osc.connect(gain);
       gain.connect(this.ctx.destination);
       osc.start(safeStart);
-      osc.stop(safeStart + noteDurS);
+      osc.stop(noteEnd);
       this._sources.push(osc);
     }
   }

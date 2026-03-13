@@ -238,6 +238,82 @@ describe('PlaybackEngine part selection', () => {
     expect(engine.currentBeat).toBeCloseTo(3.87, 2);
   });
 
+
+  it('caps fallback envelope release to note end', () => {
+    const gainEvents: Array<{ kind: 'set' | 'ramp'; value: number; time: number }> = [];
+    let stopTime = 0;
+
+    class FakeOscillator {
+      type: OscillatorType = 'sine';
+      frequency = { value: 0 };
+      connect(): void {}
+      start(): void {}
+      stop(when?: number): void {
+        stopTime = when ?? 0;
+      }
+    }
+
+    class FakeGain {
+      gain = {
+        setValueAtTime(value: number, time: number): void {
+          gainEvents.push({ kind: 'set', value, time });
+        },
+        linearRampToValueAtTime(value: number, time: number): void {
+          gainEvents.push({ kind: 'ramp', value, time });
+        },
+      };
+      connect(): void {}
+    }
+
+    class FakeAudioContext {
+      currentTime = 0;
+      state: AudioContextState = 'running';
+      destination = {} as AudioDestinationNode;
+      createBufferSource(): AudioBufferSourceNode {
+        throw new Error('Buffer source should not be used in fallback mode');
+      }
+      createOscillator(): OscillatorNode {
+        return new FakeOscillator() as unknown as OscillatorNode;
+      }
+      createGain(): GainNode {
+        return new FakeGain() as unknown as GainNode;
+      }
+      resume(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+
+    class MissingSoundfont {
+      getBuffer(): AudioBuffer | null {
+        return null;
+      }
+      getNearestSampledMidi(): number | null {
+        return null;
+      }
+    }
+
+    const engine = new PlaybackEngine(
+      new FakeAudioContext() as unknown as AudioContext,
+      new MissingSoundfont() as unknown as import('./soundfont').SoundfontLoader,
+    );
+
+    engine.schedule(
+      [{ midi: 60, beat_start: 0, duration: 1, measure: 1, part: 'PART I', lyric: null }],
+      BPM120,
+      'PART I',
+      1,
+    );
+    engine.play(0);
+
+    const releaseHolds = gainEvents.filter((e) => e.kind === 'set' && e.value === 0.12);
+    const releaseRamp = gainEvents.find((e) => e.kind === 'ramp' && e.value === 0.0001);
+    const finalReleaseHold = releaseHolds[releaseHolds.length - 1];
+
+    expect(finalReleaseHold).toBeDefined();
+    expect(releaseRamp).toBeDefined();
+    expect(finalReleaseHold?.time).toBeLessThanOrEqual(stopTime);
+    expect(releaseRamp?.time).toBeCloseTo(stopTime, 6);
+  });
   it('uses oscillator fallback when soundfont samples are unavailable', () => {
     const starts: number[] = [];
 
