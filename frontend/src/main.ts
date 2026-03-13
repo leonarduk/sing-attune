@@ -23,6 +23,7 @@ import { elapsedToBeat } from './score/timing';
 import { beatToMs, startPlayback, postPlayback, seekPlayback, setPlaybackTempo, setPlaybackTranspose } from './transport/controls';
 import { resolveSelectedDeviceId, type AudioInputDevice } from './audio/devices';
 import { PracticeRecorder } from './audio/recorder';
+import { beatFromClick, extractMeasureHitZones } from './score/click-seek';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -317,6 +318,36 @@ function cursorXPosition(): number {
   const scoreRect = scoreContainerEl.getBoundingClientRect();
   const cursorRect = cursorEl.getBoundingClientRect();
   return cursorRect.left - scoreRect.left + scoreContainerEl.scrollLeft;
+}
+
+async function seekToClickedPosition(event: MouseEvent): Promise<void> {
+  if (!renderer || !engine || !cursor || !renderer.scoreModel) return;
+
+  const svg = scoreContainerEl.querySelector('svg');
+  if (!(svg instanceof SVGSVGElement)) return;
+
+  const ctm = svg.getScreenCTM();
+  if (!ctm) return;
+
+  const svgPoint = svg.createSVGPoint();
+  svgPoint.x = event.clientX;
+  svgPoint.y = event.clientY;
+  const local = svgPoint.matrixTransform(ctm.inverse());
+
+  const zones = extractMeasureHitZones(renderer.osmd);
+  const targetBeat = beatFromClick(zones, local.x, local.y);
+  if (targetBeat === null) return;
+
+  try {
+    await seekPlayback(beatToMs(targetBeat, renderer.scoreModel, engine.tempoMultiplier));
+  } catch (err) {
+    setStatus(`seek failed: ${String(err)}`, 'error');
+    console.error('Seek failed:', err);
+    return;
+  }
+
+  engine.seekToBeat(targetBeat);
+  cursor.seekToBeat(targetBeat);
 }
 
 function closePitchSocket(): void {
@@ -793,6 +824,10 @@ btnBrowse.addEventListener('click', () => fileInputEl.click());
 fileInputEl.addEventListener('change', () => {
   const file = fileInputEl.files?.[0];
   if (file) void loadScore(file);
+});
+
+scoreContainerEl.addEventListener('click', (event) => {
+  void seekToClickedPosition(event);
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
