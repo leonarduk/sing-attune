@@ -139,6 +139,7 @@ export class PitchOverlay {
   private redraw = (): void => {
     this.resize();
     const now = performance.now();
+    const scrollLeft = this.container.scrollLeft;
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
     for (const dot of this.dots) {
@@ -149,7 +150,10 @@ export class PitchOverlay {
       this.ctx.globalAlpha = alpha;
       this.ctx.fillStyle = this.colorToCss(dot.color);
       this.ctx.beginPath();
-      this.ctx.arc(dot.x, dot.y, 4, 0, Math.PI * 2);
+      // Dot x is recorded in score-content coordinates. Convert back to
+      // viewport coordinates each redraw so dots stay attached to notes while
+      // the score container auto-scrolls.
+      this.ctx.arc(dot.x - scrollLeft, dot.y, 4, 0, Math.PI * 2);
       this.ctx.fill();
     }
     this.ctx.globalAlpha = 1;
