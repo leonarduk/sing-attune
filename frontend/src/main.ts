@@ -132,8 +132,8 @@ function ensureSoundfont(): void {
   soundfont = new SoundfontLoader();
   soundfontLoadPromise = soundfont.load(audioCtx).catch((err: unknown) => {
     console.error('[Soundfont] load failed:', err);
-    showErrorBanner('Soundfont failed to load; playback is unavailable.');
-    setStatus('soundfont load failed — no audio', 'error');
+    showErrorBanner('Soundfont failed to load; using synth fallback audio.');
+    setStatus('soundfont load failed — synth fallback active', 'error');
   });
 }
 
