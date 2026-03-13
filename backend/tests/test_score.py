@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from music21 import bar, meter, note, stream
 
-from backend.score.parser import parse_musicxml
+from backend.score.parser import _expand_repeats, parse_musicxml
 from backend.score.model import ScoreModel
 from backend.score.timeline import Timeline
 
@@ -207,6 +207,32 @@ class TestRepeatExpansion:
         assert parsed.total_beats == pytest.approx(16.0)
         assert [n.beat_start for n in parsed.notes] == pytest.approx([0.0, 4.0, 8.0, 12.0])
         assert [n.midi for n in parsed.notes] == [60, 62, 60, 62]
+
+    def test_expand_repeats_falls_back_on_exception(self):
+        score = stream.Score()
+
+        class ExplodingScore:
+            def expandRepeats(self):
+                raise RuntimeError("boom")
+
+        fallback = _expand_repeats(ExplodingScore())
+        assert isinstance(fallback, ExplodingScore)
+
+        # Sanity check: normal score still works and returns a Score-like object.
+        assert _expand_repeats(score) is not None
+
+    def test_expand_repeats_falls_back_when_return_type_is_not_score(self):
+        score = stream.Score()
+
+        class WrongTypeScore:
+            def __init__(self, original):
+                self.original = original
+
+            def expandRepeats(self):
+                return "not-a-score"
+
+        wrapper = WrongTypeScore(score)
+        assert _expand_repeats(wrapper) is wrapper
 
 
 # ---------------------------------------------------------------------------
