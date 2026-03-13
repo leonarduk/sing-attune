@@ -41,11 +41,13 @@ def parse_musicxml(path: Path) -> ScoreModel:
     except Exception as exc:
         raise ValueError(f"music21 could not parse {path.name}: {exc}") from exc
 
+    expanded_score = _expand_repeats(score)
+
     title = _extract_title(score)
-    tempo_marks = _extract_tempo_marks(score, path)
-    time_sigs = _extract_time_signatures(score)
-    parts_data, part_names = _extract_parts(score)
-    total_beats = float(score.duration.quarterLength)
+    tempo_marks = _extract_tempo_marks(expanded_score, path)
+    time_sigs = _extract_time_signatures(expanded_score)
+    parts_data, part_names = _extract_parts(expanded_score)
+    total_beats = float(expanded_score.duration.quarterLength)
 
     if not parts_data:
         raise ValueError(f"No usable parts found in {path.name}")
@@ -72,6 +74,19 @@ def _extract_title(score: Score) -> str:
     if hasattr(score, "movementName") and score.movementName:
         return score.movementName
     return "Untitled"
+
+
+def _expand_repeats(score: Score) -> Score:
+    """
+    Expand repeat directives (repeat barlines, D.S., D.C. al Fine) when possible.
+
+    If expansion fails, fall back to the original parsed score so upload does not fail.
+    """
+    try:
+        expanded = score.expandRepeats()
+    except Exception:
+        return score
+    return expanded if isinstance(expanded, Score) else score
 
 
 def _extract_tempo_marks(score: Score, path: Path) -> list[TempoMark]:
