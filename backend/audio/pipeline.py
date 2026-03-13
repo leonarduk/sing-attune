@@ -80,6 +80,11 @@ class PlaybackPipeline:
         self._elapsed_ms: float = 0.0       # accumulated ms before last pause
         self._tempo_multiplier: float = 1.0
 
+        # Transposition — semitones offset kept in sync with the frontend Web Audio
+        # detune value; used by the pitch interpretation layer (Day 9) to shift
+        # expected MIDI targets when comparing detected f0 against score notes.
+        self._transpose_semitones: int = 0
+
         # Hardware objects — created on start, destroyed on stop
         self._capture: MicCapture | None = None
         self._pitch: PitchPipeline | None = None
@@ -163,6 +168,17 @@ class PlaybackPipeline:
                 self._play_monotonic = time.monotonic()
             log.info("PlaybackPipeline seeked to t=%.1f ms (state=%s)", self._elapsed_ms, self._state.name)
 
+
+    def set_transpose_semitones(self, semitones: int) -> None:
+        """Set the active transposition offset in semitones (clamped to ±12)."""
+        with self._lock:
+            self._transpose_semitones = max(-12, min(12, int(semitones)))
+            log.info("PlaybackPipeline transpose set to %d semitones", self._transpose_semitones)
+
+    @property
+    def transpose_semitones(self) -> int:
+        with self._lock:
+            return self._transpose_semitones
 
     def set_tempo_multiplier(self, multiplier: float) -> None:
         with self._lock:
