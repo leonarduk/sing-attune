@@ -313,3 +313,19 @@ class TestAudioSession:
 
         assert not errors
         assert session.device_id in {0, 1, 2, 3}
+
+
+class TestAudioEngineEndpoint:
+    @pytest.fixture
+    def client(self):
+        return TestClient(app)
+
+    def test_endpoint_returns_200(self, client):
+        resp = client.get("/audio/engine")
+        assert resp.status_code == 200
+
+    def test_endpoint_shape(self, client):
+        data = client.get("/audio/engine").json()
+        assert data["active_engine"] in {"pyin", "torchcrepe"}
+        assert data["mode"] == "auto"
+        assert data["switchable"] is False

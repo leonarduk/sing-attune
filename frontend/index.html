@@ -217,6 +217,52 @@
       to { transform: rotate(360deg); }
     }
 
+
+
+    #btn-settings {
+      margin-left: auto;
+    }
+
+    #settings-panel {
+      position: fixed;
+      right: 20px;
+      top: 64px;
+      width: min(360px, calc(100vw - 40px));
+      background: #0f3460;
+      border: 1px solid #1a5276;
+      border-radius: 8px;
+      padding: 14px;
+      z-index: 40;
+      display: none;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+    }
+
+    #settings-panel.visible { display: block; }
+
+    .settings-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 12px;
+      font-size: 0.82rem;
+      color: #d4d7df;
+    }
+
+    .settings-row input,
+    .settings-row select {
+      background: #16213e;
+      color: #eee;
+      border: 1px solid #1a5276;
+      border-radius: 4px;
+      padding: 6px;
+      font-size: 0.82rem;
+    }
+
+    #settings-engine {
+      color: #aaa;
+      font-size: 0.75rem;
+    }
+
     @media (max-width: 900px) {
       #toolbar {
         gap: 8px;
@@ -306,9 +352,29 @@
     </div>
 
     <button id="btn-browse" class="transport-btn">Browse…</button>
+    <button id="btn-settings" class="transport-btn">⚙ Settings</button>
 
     <span id="score-info"></span>
   </div>
+
+  <aside id="settings-panel" aria-label="Settings panel">
+    <div class="settings-row">
+      <label for="settings-device">Mic device</label>
+      <select id="settings-device"></select>
+    </div>
+
+    <div class="settings-row">
+      <label for="settings-confidence">Confidence threshold: <span id="settings-confidence-label">0.60</span></label>
+      <input id="settings-confidence" type="range" min="0.6" max="0.95" step="0.05" value="0.6" />
+    </div>
+
+    <div class="settings-row">
+      <label for="settings-trail">Pitch trail length: <span id="settings-trail-label">2.0s</span></label>
+      <input id="settings-trail" type="range" min="0.5" max="5" step="0.5" value="2" />
+    </div>
+
+    <div id="settings-engine">Pitch engine: loading…</div>
+  </aside>
 
   <main>
     <div id="score-loading" aria-live="polite">Loading score…</div>

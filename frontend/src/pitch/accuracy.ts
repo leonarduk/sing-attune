@@ -35,8 +35,13 @@ export function expectedNoteAtBeat(beat: number, notes: NoteModel[]): NoteModel 
  * function during rests — use the null return from expectedNoteAtBeat() to
  * suppress the dot entirely before reaching this function.
  */
-export function classifyPitchColor(sungMidi: number, expectedMidi: number, conf: number): DotColor {
-  if (conf < 0.6) return 'grey';
+export function classifyPitchColor(
+  sungMidi: number,
+  expectedMidi: number,
+  conf: number,
+  confidenceThreshold = 0.6,
+): DotColor {
+  if (conf < confidenceThreshold) return 'grey';
 
   const cents = Math.abs((sungMidi - expectedMidi) * 100);
   if (cents <= 50) return 'green';

@@ -33,6 +33,12 @@ describe('classifyPitchColor', () => {
   // expectedNoteAtBeat() and returns early when null — classifyPitchColor
   // is never called during rests and no longer accepts null as expectedMidi.
 
+
+  it('accepts a custom confidence threshold', () => {
+    expect(classifyPitchColor(60, 60, 0.74, 0.75)).toBe('grey');
+    expect(classifyPitchColor(60, 60, 0.75, 0.75)).toBe('green');
+  });
+
   it('applies cents thresholds for green/amber/red', () => {
     expect(classifyPitchColor(60.49, 60, 0.8)).toBe('green');
     expect(classifyPitchColor(60.75, 60, 0.8)).toBe('amber');

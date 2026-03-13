@@ -35,9 +35,22 @@ That's it.
 - **Score scrolls with you** — the view follows the playback cursor so you never lose your place
 - **Part selector** — choose your voice part from a multi-part score
 - **Tempo and transposition controls** — slow it down, shift the key
+- **Settings panel** — mic device picker, confidence threshold, trail length, and active engine display
 - **Octave compensation** — for male voices singing parts notated an octave higher
 - **Session recording and review** — replay your pitch trace over the score after you finish
 - **Runs locally** — no cloud, no subscription, no account
+
+---
+
+
+## Pitch interpretation boundary
+
+In v0.2, backend and frontend responsibilities are explicit:
+
+- Backend emits **raw** pitch frames only: `{t,midi,conf}` via `/ws/pitch`
+- Frontend computes expected-note matching and overlay colour decisions
+
+This keeps the backend real-time pipeline simple while score-aware interpretation stays in the UI layer where the rendered score context already exists.
 
 ---
 
