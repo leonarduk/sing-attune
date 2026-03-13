@@ -321,6 +321,7 @@ function scheduleSelectedPart(selectedPart: string): void {
 
   if (engine.state === 'playing') {
     engine.selectPart(selectedPart);
+    startCursorRaf();
   } else {
     engine.schedule(
       renderer.scoreModel.notes,
@@ -329,7 +330,6 @@ function scheduleSelectedPart(selectedPart: string): void {
       parseFloat(tempoSliderEl.value) / 100,
     );
   }
-  engine.setTransposeSemitones(parseInt(transposeSelectEl.value, 10) || 0);
 
   renderer.setHighlightedPart(selectedPart);
 }
