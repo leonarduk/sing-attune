@@ -317,10 +317,14 @@ function connectPitchSocket(): void {
 }
 
 function scheduleSelectedPart(selectedPart: string): void {
-  if (!engine || !renderer?.scoreModel) return;
+  if (!engine || !renderer?.scoreModel || !selectedPart) return;
+
+  const semitones = parseInt(transposeSelectEl.value, 10);
+  const clampedSemitones = Number.isNaN(semitones) ? 0 : semitones;
 
   if (engine.state === 'playing') {
     engine.selectPart(selectedPart);
+    engine.setTransposeSemitones(clampedSemitones);
     startCursorRaf();
   } else {
     engine.schedule(
@@ -329,6 +333,7 @@ function scheduleSelectedPart(selectedPart: string): void {
       selectedPart,
       parseFloat(tempoSliderEl.value) / 100,
     );
+    engine.setTransposeSemitones(clampedSemitones);
   }
 
   renderer.setHighlightedPart(selectedPart);

@@ -133,6 +133,56 @@ describe('PlaybackEngine part selection', () => {
     expect(starts).toHaveLength(1);
   });
 
+
+  it('ignores non-existent part names and keeps current selection', () => {
+    const starts: number[] = [];
+
+    class FakeBufferSource {
+      buffer: AudioBuffer | null = null;
+      detune = { value: 0 };
+      connect(): void {}
+      start(): void { starts.push(1); }
+      stop(): void {}
+    }
+
+    class FakeAudioContext {
+      currentTime = 0;
+      state: AudioContextState = 'running';
+      destination = {} as AudioDestinationNode;
+      createBufferSource(): AudioBufferSourceNode {
+        return new FakeBufferSource() as unknown as AudioBufferSourceNode;
+      }
+      resume(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+
+    class FakeSoundfont {
+      getBuffer(): AudioBuffer {
+        return {} as AudioBuffer;
+      }
+      getNearestSampledMidi(midi: number): number {
+        return midi;
+      }
+    }
+
+    const engine = new PlaybackEngine(
+      new FakeAudioContext() as unknown as AudioContext,
+      new FakeSoundfont() as unknown as import('./soundfont').SoundfontLoader,
+    );
+
+    const notes: import('../score/renderer').NoteModel[] = [
+      { midi: 60, beat_start: 0, duration: 1, measure: 1, part: 'PART I', lyric: null },
+      { midi: 62, beat_start: 1, duration: 1, measure: 1, part: 'PART II', lyric: null },
+    ];
+
+    engine.schedule(notes, BPM120, 'PART I', 1);
+    engine.selectPart('DOES NOT EXIST');
+    engine.play(0);
+
+    expect(starts).toHaveLength(1);
+  });
+
   it('maintains beat continuity across mid-session part switch offset', () => {
     class FakeBufferSource {
       buffer: AudioBuffer | null = null;
@@ -185,7 +235,7 @@ describe('PlaybackEngine part selection', () => {
 
     ctx.currentTime = 2.03;
     expect(engine.currentBeat).toBeGreaterThan(beforeSwitchBeat);
-    expect(engine.currentBeat).toBeCloseTo(3.86, 2);
+    expect(engine.currentBeat).toBeCloseTo(3.87, 2);
   });
 
 });

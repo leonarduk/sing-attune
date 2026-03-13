@@ -156,12 +156,15 @@ export class PlaybackEngine {
    * rebuilt from the current AudioContext.currentTime-aligned beat position.
    */
   selectPart(partName: string): void {
+    const partExists = this._allNotes.some((n) => n.part === partName);
+    if (!partExists) return;
+
     this._selectedPart = partName;
     this._notes = this._allNotes.filter((n) => n.part === this._selectedPart);
 
     if (this._state !== 'playing') return;
 
-    const switchAt = this.ctx.currentTime + Math.max(RESCHEDULE_OFFSET_S, STOP_SAFETY_OFFSET_S);
+    const switchAt = this.ctx.currentTime + STOP_SAFETY_OFFSET_S + RESCHEDULE_OFFSET_S;
     const beat = this._beatAtTime(switchAt);
     this._stopSources(switchAt);
     this._startBeat = beat;
