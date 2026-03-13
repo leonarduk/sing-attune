@@ -96,6 +96,7 @@ let lastPitchFrame: { midi: number } | null = null;
 let pitchGraphRafId: number | null = null;
 let syntheticModeEnabled = false;
 let activePartNotes: NoteModel[] = [];
+let pitchGraphNowSec = 0;
 
 const overlaySettings: OverlaySettings = {
   confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
@@ -421,12 +422,20 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
   pitchGraph?.pushFrame(frame, expectedMidi);
 }
 
+function playbackElapsedSec(): number | null {
+  if (!engine?.playing) return null;
+  return Math.max(0, engine.ctx.currentTime - engine.startAudioTime);
+}
+
 function startPitchGraphLoop(): void {
   if (pitchGraphRafId !== null) return;
 
   const tick = (): void => {
-    const nowSec = performance.now() / 1000;
-    pitchGraph?.tick(nowSec);
+    const playbackSec = playbackElapsedSec();
+    if (playbackSec !== null) {
+      pitchGraphNowSec = playbackSec;
+    }
+    pitchGraph?.tick(pitchGraphNowSec);
 
     if (syntheticModeEnabled && engine?.playing) {
       const elapsedSec = Math.max(0, engine.ctx.currentTime - engine.startAudioTime);
@@ -642,6 +651,7 @@ btnPlay.addEventListener('click', async () => {
       cursor.stop();
       cursor.osmd.cursor.show();
       pitchOverlay?.clear();
+      pitchGraphNowSec = 0;
       lastPitchFrame = null;
       updatePitchReadout();
     }
