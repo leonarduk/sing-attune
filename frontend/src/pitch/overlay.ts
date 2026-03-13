@@ -71,7 +71,11 @@ export class PitchOverlay {
   pushFrame(frame: PitchFrame, cursorX: number): void {
     const beat = elapsedToBeat(frame.t, 0, this.model.tempo_marks);
     const expected = expectedNoteAtBeat(beat, this.notesForPart);
-    const color = classifyPitchColor(frame.midi, expected?.midi ?? null, frame.conf);
+
+    // No dot during rests or before the selected part's first note.
+    if (expected === null) return;
+
+    const color = classifyPitchColor(frame.midi, expected.midi, frame.conf);
     const y = this.midiToY(frame.midi);
 
     this.dots.push({ x: cursorX, y, color, wallMs: performance.now() });

@@ -27,8 +27,8 @@ export function expectedNoteAtBeat(beat: number, notes: NoteModel[]): NoteModel 
   return beat >= candidate.beat_start && beat < end ? candidate : null;
 }
 
-export function classifyPitchColor(sungMidi: number, expectedMidi: number | null, conf: number): DotColor {
-  if (conf < 0.6 || expectedMidi === null) return 'grey';
+export function classifyPitchColor(sungMidi: number, expectedMidi: number, conf: number): DotColor {
+  if (conf < 0.6) return 'grey';
 
   const cents = Math.abs((sungMidi - expectedMidi) * 100);
   if (cents <= 50) return 'green';
