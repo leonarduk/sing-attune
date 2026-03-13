@@ -9,7 +9,9 @@ Test scores (in musescore/):
 """
 
 from pathlib import Path
+
 import pytest
+from music21 import bar, meter, note, stream
 
 from backend.score.parser import parse_musicxml
 from backend.score.model import ScoreModel
@@ -177,6 +179,34 @@ class TestParserErrors:
         bad.write_text("this is not xml")
         with pytest.raises(ValueError):
             parse_musicxml(bad)
+
+
+class TestRepeatExpansion:
+
+    def test_repeat_barlines_are_expanded(self, tmp_path):
+        score = stream.Score()
+        part = stream.Part()
+        part.partName = "Test Part"
+        part.append(meter.TimeSignature("4/4"))
+
+        m1 = stream.Measure(number=1)
+        m1.append(note.Note("C4", quarterLength=4))
+
+        m2 = stream.Measure(number=2)
+        m2.append(note.Note("D4", quarterLength=4))
+        m2.rightBarline = bar.Repeat(direction="end")
+
+        part.append([m1, m2])
+        score.append(part)
+
+        path = tmp_path / "repeat_test.musicxml"
+        score.write("musicxml", fp=path)
+
+        parsed = parse_musicxml(path)
+
+        assert parsed.total_beats == pytest.approx(16.0)
+        assert [n.beat_start for n in parsed.notes] == pytest.approx([0.0, 4.0, 8.0, 12.0])
+        assert [n.midi for n in parsed.notes] == [60, 62, 60, 62]
 
 
 # ---------------------------------------------------------------------------
