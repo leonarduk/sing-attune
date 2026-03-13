@@ -68,9 +68,26 @@ That's it.
 - Python 3.12+
 - Node 18+
 - [uv](https://github.com/astral-sh/uv) — `winget install astral-sh.uv`
-- [just](https://github.com/casey/just) — `winget install Casey.Just`
+- [just](https://github.com/casey/just)
 - NVIDIA GPU with CUDA 12.x recommended (for torchcrepe pitch detection; librosa pYIN works on CPU)
 - **Headphones** — essential during practice to prevent mic picking up the playback
+
+### Install `just`
+
+Use the package manager that matches your system:
+
+- **Windows (winget)**: `winget install Casey.Just`
+- **Windows (Scoop)**: `scoop install just`
+- **Windows (Chocolatey)**: `choco install just`
+- **macOS (Homebrew)**: `brew install just`
+- **Ubuntu/Debian**: `sudo apt install just`
+- **Cross-platform via Cargo**: `cargo install just`
+
+Verify install:
+
+```powershell
+just --version
+```
 
 ---
 
