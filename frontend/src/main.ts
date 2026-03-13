@@ -564,10 +564,32 @@ warningDismiss.addEventListener('click', () => {
 
 
 
-btnSettings.addEventListener('click', async () => {
+btnSettings.addEventListener('click', async (event) => {
+  // Keep this click from immediately triggering the outside-click handler.
+  event.stopPropagation();
   const visible = settingsPanelEl.classList.toggle('visible');
   if (!visible) return;
   await refreshAudioSettings();
+});
+
+settingsPanelEl.addEventListener('click', (event) => {
+  // Interacting with controls inside the panel should not close it.
+  event.stopPropagation();
+});
+
+window.addEventListener('click', (event) => {
+  if (!settingsPanelEl.classList.contains('visible')) return;
+
+  const target = event.target;
+  if (!(target instanceof Node)) return;
+
+  if (settingsPanelEl.contains(target) || btnSettings.contains(target)) return;
+  settingsPanelEl.classList.remove('visible');
+});
+
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  settingsPanelEl.classList.remove('visible');
 });
 
 settingsDeviceEl.addEventListener('change', () => {
