@@ -25,14 +25,27 @@ describe('expectedNoteAtBeat', () => {
 });
 
 describe('classifyPitchColor', () => {
-  it('returns grey for low confidence or missing expected note', () => {
+  it('returns grey for low confidence (conf < 0.6)', () => {
     expect(classifyPitchColor(60, 60, 0.59)).toBe('grey');
-    expect(classifyPitchColor(60, null, 0.99)).toBe('grey');
   });
+
+  // Rest suppression is enforced by PitchOverlay.pushFrame() which checks
+  // expectedNoteAtBeat() and returns early when null — classifyPitchColor
+  // is never called during rests and no longer accepts null as expectedMidi.
 
   it('applies cents thresholds for green/amber/red', () => {
     expect(classifyPitchColor(60.49, 60, 0.8)).toBe('green');
     expect(classifyPitchColor(60.75, 60, 0.8)).toBe('amber');
     expect(classifyPitchColor(61.2, 60, 0.8)).toBe('red');
+  });
+
+  it('classifies a note exactly on the green boundary (50 cents inclusive)', () => {
+    // 0.50 semitones = exactly 50 cents — boundary is inclusive for green
+    expect(classifyPitchColor(60.50, 60, 0.8)).toBe('green');
+  });
+
+  it('classifies a note just inside amber (51 cents)', () => {
+    // 0.51 semitones = 51 cents — just above green threshold
+    expect(classifyPitchColor(60.51, 60, 0.8)).toBe('amber');
   });
 });
