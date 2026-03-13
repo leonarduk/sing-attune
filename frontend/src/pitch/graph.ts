@@ -86,7 +86,7 @@ export class PitchGraphCanvas {
   pushFrame(frame: PitchFrame, expectedMidi: number | null): void {
     const tSec = frame.t / 1000;
     this.samples.push({
-      tSec,
+      tSec: frame.t / 1000,
       midi: frame.midi,
       expectedMidi,
       color: classifyGraphTraceColor(frame.midi, expectedMidi),
