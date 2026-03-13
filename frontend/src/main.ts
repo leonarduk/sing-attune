@@ -19,6 +19,8 @@ import { PlaybackEngine } from './playback/engine';
 import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from './pitch/overlay';
 import { parsePitchFrame, reconnectDelayMs } from './pitch/socket';
 import { getVisiblePartOptions } from './part-options';
+import { beatToMs, postPlayback, seekPlayback, setPlaybackTempo, setPlaybackTranspose } from './transport/controls';
+import { elapsedToBeat } from './score/timing';
 import { beatToMs, startPlayback, postPlayback, seekPlayback, setPlaybackTempo, setPlaybackTranspose } from './transport/controls';
 import { resolveSelectedDeviceId, type AudioInputDevice } from './audio/devices';
 
@@ -70,6 +72,8 @@ let pitchWs: WebSocket | null = null;
 let pitchReconnectTimer: number | null = null;
 let shouldReconnectPitchSocket = false;
 let pitchReconnectAttempts = 0;
+let cursorBeatSample: { beat: number; x: number } | null = null;
+let pxPerBeatEstimate = 0;
 
 const overlaySettings: OverlaySettings = {
   confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
@@ -220,7 +224,22 @@ function startCursorRaf(): void {
   stopCursorRaf();
   function tick(): void {
     if (engine?.playing && cursor) {
-      cursor.seekToBeat(engine.currentBeat);
+      const beat = engine.currentBeat;
+      cursor.seekToBeat(beat);
+      const x = cursorXPosition();
+      if (cursorBeatSample !== null) {
+        const beatDelta = beat - cursorBeatSample.beat;
+        if (Math.abs(beatDelta) > 0.001) {
+          const nextEstimate = (x - cursorBeatSample.x) / beatDelta;
+          if (Number.isFinite(nextEstimate)) {
+            // Light smoothing avoids jitter from cursor's stepwise movement.
+            pxPerBeatEstimate = pxPerBeatEstimate === 0
+              ? nextEstimate
+              : (pxPerBeatEstimate * 0.7) + (nextEstimate * 0.3);
+          }
+        }
+      }
+      cursorBeatSample = { beat, x };
       cursorRafId = requestAnimationFrame(tick);
     }
   }
@@ -232,6 +251,21 @@ function stopCursorRaf(): void {
     cancelAnimationFrame(cursorRafId);
     cursorRafId = null;
   }
+  cursorBeatSample = null;
+  pxPerBeatEstimate = 0;
+}
+
+function frameXPosition(frameTMs: number): number {
+  if (!renderer?.scoreModel) return cursorXPosition();
+  const frameBeat = elapsedToBeat(frameTMs, 0, renderer.scoreModel.tempo_marks);
+
+  if (!cursorBeatSample || pxPerBeatEstimate === 0) {
+    return cursorXPosition();
+  }
+
+  const projected = cursorBeatSample.x + ((frameBeat - cursorBeatSample.beat) * pxPerBeatEstimate);
+  if (!Number.isFinite(projected)) return cursorXPosition();
+  return projected;
 }
 
 /**
@@ -342,7 +376,7 @@ function connectPitchSocket(): void {
 
     pitchOverlay.pushFrame(
       frame,
-      cursorXPosition(),
+      frameXPosition(frame.t),
     );
   };
 }
