@@ -16,7 +16,7 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 # Install all dependencies
 install:
     uv sync
-    cd {{frontend-dir}} && npm install
+    cd {{frontend-dir}}; npm install
 
 # Start FastAPI backend (reload on change)
 dev-backend:
@@ -24,7 +24,7 @@ dev-backend:
 
 # Start Vite frontend dev server
 dev-frontend:
-    cd {{frontend-dir}} && npm run dev
+    cd {{frontend-dir}}; npm run dev
 
 # Run backend tests
 test:
@@ -32,4 +32,4 @@ test:
 
 # Build frontend for production
 build-frontend:
-    cd {{frontend-dir}} && npm run build
+    cd {{frontend-dir}}; npm run build
