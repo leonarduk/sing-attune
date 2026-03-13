@@ -69,6 +69,8 @@ export type PlaybackState = 'idle' | 'playing' | 'paused';
 const SCHEDULE_OFFSET_S = 0.1;
 /** Gap between tempo change and rescheduled notes — avoids audible overlap. */
 const RESCHEDULE_OFFSET_S = 0.03;
+/** Small stop/start guard to avoid edge scheduling races at currentTime. */
+const STOP_SAFETY_OFFSET_S = 0.005;
 /** Extra release time appended to each note's stop time for natural decay. */
 const RELEASE_TAIL_S = 0.5;
 /** Ignore notes whose scheduled start time is already in the past by this margin. */
@@ -91,6 +93,8 @@ export class PlaybackEngine {
   private _startBeat = 0;
 
   // Cached schedule parameters
+  private _allNotes: NoteModel[] = [];
+  private _selectedPart = '';
   private _notes: NoteModel[] = [];
   private _tempoMarks: TempoMark[] = [];
   private _tempoMultiplier = 1;
@@ -121,12 +125,7 @@ export class PlaybackEngine {
    */
   get currentBeat(): number {
     if (this._state !== 'playing') return this._startBeat;
-    const elapsedS = this.ctx.currentTime - this._startAudioTime;
-    if (elapsedS < 0) return this._startBeat;
-    return (
-      this._startBeat +
-      elapsedToBeat(elapsedS * 1000, this._startBeat, this._scaledTempoMarks)
-    );
+    return this._beatAtTime(this.ctx.currentTime);
   }
 
   // ── Public commands ───────────────────────────────────────────────────────────
@@ -143,9 +142,34 @@ export class PlaybackEngine {
     partName: string,
     tempoMultiplier = 1,
   ): void {
-    this._notes = notes.filter((n) => n.part === partName);
+    this._allNotes = notes;
+    this._selectedPart = partName;
+    this._notes = this._allNotes.filter((n) => n.part === this._selectedPart);
     this._tempoMarks = tempoMarks;
     this._tempoMultiplier = tempoMultiplier;
+  }
+
+  /**
+   * Change the selected part without reloading the page.
+   *
+   * If currently playing, pending sources are cancelled and the queue is
+   * rebuilt from the current AudioContext.currentTime-aligned beat position.
+   */
+  selectPart(partName: string): void {
+    const partExists = this._allNotes.some((n) => n.part === partName);
+    if (!partExists) return;
+
+    this._selectedPart = partName;
+    this._notes = this._allNotes.filter((n) => n.part === this._selectedPart);
+
+    if (this._state !== 'playing') return;
+
+    const switchAt = this.ctx.currentTime + STOP_SAFETY_OFFSET_S + RESCHEDULE_OFFSET_S;
+    const beat = this._beatAtTime(switchAt);
+    this._stopSources(switchAt);
+    this._startBeat = beat;
+    this._startAudioTime = switchAt;
+    this._scheduleFrom(beat, switchAt);
   }
 
   /**
@@ -167,7 +191,7 @@ export class PlaybackEngine {
   pause(): void {
     if (this._state !== 'playing') return;
     const beat = this.currentBeat;
-    this._stopSources();
+    this._stopSources(this.ctx.currentTime + STOP_SAFETY_OFFSET_S);
     this._startBeat = beat;
     this._state = 'paused';
   }
@@ -254,6 +278,12 @@ export class PlaybackEngine {
     return this._tempoMarks.map((m) => ({ ...m, bpm: m.bpm * this._tempoMultiplier }));
   }
 
+  private _beatAtTime(audioTime: number): number {
+    const elapsedS = audioTime - this._startAudioTime;
+    if (elapsedS < 0) return this._startBeat;
+    return this._startBeat + elapsedToBeat(elapsedS * 1000, this._startBeat, this._scaledTempoMarks);
+  }
+
   /**
    * Schedule all notes that start at or after fromBeat.
    * Each note becomes one AudioBufferSourceNode event anchored to originTime.
@@ -298,7 +328,7 @@ export class PlaybackEngine {
         beatToSeconds(note.beat_start, this._tempoMarks, this._tempoMultiplier) +
         RELEASE_TAIL_S;
 
-      const safeStart = Math.max(startAt, this.ctx.currentTime + 0.005);
+      const safeStart = Math.max(startAt, this.ctx.currentTime + STOP_SAFETY_OFFSET_S);
       src.start(safeStart);
       src.stop(safeStart + noteDurS);
 
@@ -307,10 +337,9 @@ export class PlaybackEngine {
   }
 
   /** Stop all scheduled sources immediately. */
-  private _stopSources(): void {
-    const now = this.ctx.currentTime;
+  private _stopSources(stopAt = this.ctx.currentTime): void {
     for (const src of this._sources) {
-      try { src.stop(now); } catch { /* already stopped or never started */ }
+      try { src.stop(stopAt); } catch { /* already stopped or never started */ }
     }
     this._sources = [];
   }

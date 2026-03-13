@@ -5,6 +5,7 @@ describe('isAccompanimentPart', () => {
   it('matches common accompaniment aliases case-insensitively', () => {
     expect(isAccompanimentPart('Piano')).toBe(true);
     expect(isAccompanimentPart('Keyboard 1')).toBe(true);
+    expect(isAccompanimentPart('Pianoforte RH')).toBe(true);
     expect(isAccompanimentPart('Accomp Track')).toBe(true);
     expect(isAccompanimentPart('pno')).toBe(true);
     expect(isAccompanimentPart('KBD')).toBe(true);
@@ -19,6 +20,21 @@ describe('isAccompanimentPart', () => {
 });
 
 describe('getVisiblePartOptions', () => {
+  it('keeps both choir parts visible when accompaniment is hidden', () => {
+    expect(getVisiblePartOptions(['PART I', 'Piano', 'PART II'], false)).toEqual([
+      { name: 'PART I', hiddenByDefault: false },
+      { name: 'PART II', hiddenByDefault: false },
+    ]);
+  });
+
+  it('includes accompaniment entries when show-all is enabled', () => {
+    expect(getVisiblePartOptions(['PART I', 'Piano', 'PART II'], true)).toEqual([
+      { name: 'PART I', hiddenByDefault: false },
+      { name: 'Piano', hiddenByDefault: true },
+      { name: 'PART II', hiddenByDefault: false },
+    ]);
+  });
+
   it('hides accompaniment parts by default', () => {
     expect(getVisiblePartOptions(['Soprano', 'Piano'], false)).toEqual([
       { name: 'Soprano', hiddenByDefault: false },

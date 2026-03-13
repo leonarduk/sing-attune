@@ -102,4 +102,16 @@ export class ScoreRenderer {
   get loaded(): boolean {
     return this._loaded;
   }
+
+  /**
+   * Best-effort part highlighting hook.
+   *
+   * OSMD 1.8 does not expose a stable public API to recolor or isolate one
+   * rendered part/voice after render() completes. The cursor can highlight the
+   * current time position, but not persistently style a selected part.
+   * Keep this hook so app.ts can call it if OSMD gains such API later.
+   */
+  setHighlightedPart(_partName: string): void {
+    // Intentionally a no-op due to current OSMD public API limitations.
+  }
 }

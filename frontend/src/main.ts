@@ -178,7 +178,8 @@ async function loadScore(file: File): Promise<void> {
     );
 
     cursor = new ScoreCursor(renderer.osmd, model);
-    pitchOverlay = new PitchOverlay(scoreContainerEl, model, model.parts[0] ?? '');
+    renderer.setHighlightedPart(selectedPart);
+    pitchOverlay = new PitchOverlay(scoreContainerEl, model, selectedPart);
     connectPitchSocket();
     setTransportEnabled(true);
     setStatus('score loaded', 'ok');
@@ -332,24 +333,27 @@ function connectPitchSocket(): void {
 }
 
 function scheduleSelectedPart(selectedPart: string): void {
-  if (!engine || !renderer?.scoreModel) return;
-
-  engine.schedule(
-    renderer.scoreModel.notes,
-    renderer.scoreModel.tempo_marks,
-    selectedPart,
-    parseFloat(tempoSliderEl.value) / 100,
-  );
-  engine.setTransposeSemitones(getTransposeSemitones());
+  if (!engine || !renderer?.scoreModel || !selectedPart) return;
+  const partExistsInModel = renderer.scoreModel.parts.includes(selectedPart);
+  const partExistsInNotes = renderer.scoreModel.notes.some((note) => note.part === selectedPart);
+  if (!partExistsInModel || !partExistsInNotes) return;
 
   if (engine.state === 'playing') {
-    engine.stop();
-    stopCursorRaf();
-    cursor?.stop();
-    cursor?.osmd.cursor.show();
-    engine.play(0);
-    startCursorRaf();
+    // Live switches are handled by the engine's own stop/reschedule flow.
+    engine.selectPart(selectedPart);
+  } else {
+    const semitones = Number(transposeSelectEl.value);
+    const clampedSemitones = Number.isInteger(semitones) ? Math.max(-24, Math.min(24, semitones)) : 0;
+    engine.schedule(
+      renderer.scoreModel.notes,
+      renderer.scoreModel.tempo_marks,
+      selectedPart,
+      parseFloat(tempoSliderEl.value) / 100,
+    );
+    engine.setTransposeSemitones(clampedSemitones);
   }
+
+  renderer.setHighlightedPart(selectedPart);
 }
 
 function refreshPartSelector(): void {
