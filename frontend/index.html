@@ -283,6 +283,31 @@
       min-height: 1em;
     }
 
+    #pitch-graph-panel {
+      flex-shrink: 0;
+      height: 180px;
+      background: #0d162a;
+      border-bottom: 1px solid #0f3460;
+      padding: 8px 20px 10px;
+    }
+
+    #pitch-graph-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.78rem;
+      color: #a8b7cf;
+      margin-bottom: 6px;
+    }
+
+    #pitch-graph-canvas {
+      width: 100%;
+      height: calc(100% - 22px);
+      border: 1px solid #1a5276;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
     @media (max-width: 900px) {
       #toolbar {
         gap: 8px;
@@ -399,6 +424,10 @@
         <input id="settings-show-note-names" type="checkbox" />
         Show note names in pitch readout
       </label>
+      <label>
+        <input id="settings-synthetic-mode" type="checkbox" />
+        Synthetic pitch input (no WebSocket)
+      </label>
     </div>
 
 
@@ -418,6 +447,14 @@
     </div>
     <div id="settings-engine">Pitch engine: loading…</div>
   </aside>
+
+    <section id="pitch-graph-panel" aria-label="Pitch graph panel">
+    <div id="pitch-graph-header">
+      <span>Pitch graph (C2–C6, 10s window)</span>
+      <span>Green: ±25 cents · Red: out of tune · Grey: no target</span>
+    </div>
+    <div id="pitch-graph-canvas"></div>
+  </section>
 
   <main>
     <div id="score-loading" aria-live="polite">Loading score…</div>
