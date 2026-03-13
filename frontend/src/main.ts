@@ -19,6 +19,7 @@ import { PlaybackEngine } from './playback/engine';
 import { PitchOverlay } from './pitch/overlay';
 import { parsePitchFrame, reconnectDelayMs } from './pitch/socket';
 import { getVisiblePartOptions } from './part-options';
+import { beatToMs, postPlayback, seekPlayback, setPlaybackTempo } from './transport/controls';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -30,14 +31,17 @@ const scoreInfoEl     = document.getElementById('score-info')   as HTMLDivElemen
 const btnPlay         = document.getElementById('btn-play')     as HTMLButtonElement;
 const btnPause        = document.getElementById('btn-pause')    as HTMLButtonElement;
 const btnStop         = document.getElementById('btn-stop')     as HTMLButtonElement;
+const btnRewind       = document.getElementById('btn-rewind')   as HTMLButtonElement;
 const partSelectEl    = document.getElementById('part-select')  as HTMLSelectElement;
 const tempoSliderEl   = document.getElementById('tempo-slider') as HTMLInputElement;
 const tempoLabelEl    = document.getElementById('tempo-label')  as HTMLSpanElement;
+const btnBrowse       = document.getElementById('btn-browse')    as HTMLButtonElement;
 const headphoneWarning = document.getElementById('headphone-warning') as HTMLDivElement;
 const warningDismiss  = document.getElementById('warning-dismiss') as HTMLButtonElement;
 const scoreLoadingEl  = document.getElementById('score-loading') as HTMLDivElement;
 const errorBannerEl   = document.getElementById('error-banner') as HTMLDivElement;
 const showAccompanimentEl = document.getElementById('show-accompaniment') as HTMLInputElement;
+const transposeSelectEl = document.getElementById('transpose-select') as HTMLSelectElement;
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
@@ -52,6 +56,7 @@ let soundfontLoadPromise: Promise<void> | null = null;
 
 // External cursor RAF (replaces ScoreCursor's internal wall-clock loop)
 let cursorRafId: number | null = null;
+const SEEK_STEP_BEATS = 4;
 let pitchOverlay: PitchOverlay | null = null;
 let pitchWs: WebSocket | null = null;
 let pitchReconnectTimer: number | null = null;
@@ -165,6 +170,7 @@ async function loadScore(file: File): Promise<void> {
     if (!audioCtx || !soundfont) throw new Error('AudioContext not available');
 
     engine = new PlaybackEngine(audioCtx, soundfont);
+    engine.setTransposeSemitones(parseInt(transposeSelectEl.value, 10) || 0);
     engine.schedule(
       model.notes,
       model.tempo_marks,
@@ -212,6 +218,23 @@ function stopCursorRaf(): void {
     cancelAnimationFrame(cursorRafId);
     cursorRafId = null;
   }
+}
+
+async function seekByBeats(delta: number): Promise<void> {
+  if (!engine || !cursor || !renderer?.scoreModel) return;
+  const totalBeats = renderer.scoreModel.total_beats;
+  const targetBeat = Math.max(0, Math.min(totalBeats, engine.currentBeat + delta));
+  try {
+    await seekPlayback(beatToMs(targetBeat, renderer.scoreModel, engine.tempoMultiplier));
+  } catch (err) {
+    setStatus('seek failed', 'error');
+    console.error('Seek failed:', err);
+    return;
+  }
+
+  engine.seekToBeat(targetBeat);
+  cursor.seekToBeat(targetBeat);
+  if (engine.state !== 'playing') stopCursorRaf();
 }
 
 function cursorXPosition(): number {
@@ -293,13 +316,6 @@ function connectPitchSocket(): void {
   };
 }
 
-async function callPlayback(path: 'start' | 'pause' | 'resume' | 'stop'): Promise<void> {
-  const res = await fetch(`/playback/${path}`, { method: 'POST' });
-  if (!res.ok) {
-    throw new Error(`playback ${path} failed (HTTP ${res.status})`);
-  }
-}
-
 function scheduleSelectedPart(selectedPart: string): void {
   if (!engine || !renderer?.scoreModel) return;
 
@@ -309,6 +325,7 @@ function scheduleSelectedPart(selectedPart: string): void {
     selectedPart,
     parseFloat(tempoSliderEl.value) / 100,
   );
+  engine.setTransposeSemitones(parseInt(transposeSelectEl.value, 10) || 0);
 
   renderer.setHighlightedPart(selectedPart);
 }
@@ -338,55 +355,74 @@ btnPlay.addEventListener('click', async () => {
   // Show headphone warning on every play
   headphoneWarning.classList.remove('hidden');
 
+  const fromBeat = engine.state === 'paused' ? engine.startBeat : 0;
+
   try {
-    if (engine.state === 'paused') {
-      await callPlayback('resume');
-      engine.play(engine.startBeat);
+    if (fromBeat > 0) {
+      await postPlayback('/playback/resume');
     } else {
-      await callPlayback('start');
+      await postPlayback('/playback/start');
       cursor.stop();
       cursor.osmd.cursor.show();
       pitchOverlay?.clear();
-      engine.play(0);
     }
+
+    engine.play(fromBeat);
     startCursorRaf();
   } catch (err) {
-    setStatus(String(err), 'error');
+    setStatus('playback start failed', 'error');
+    console.error('Play failed:', err);
   }
 });
 
 btnPause.addEventListener('click', async () => {
   if (!engine) return;
   try {
-    await callPlayback('pause');
+    await postPlayback('/playback/pause');
     engine.pause();
     stopCursorRaf();
   } catch (err) {
-    setStatus(String(err), 'error');
+    setStatus('pause failed', 'error');
+    console.error('Pause failed:', err);
   }
 });
 
 btnStop.addEventListener('click', async () => {
   if (!engine || !cursor) return;
   try {
-    await callPlayback('stop');
+    await postPlayback('/playback/stop');
     engine.stop();
     stopCursorRaf();
     cursor.stop();
     pitchOverlay?.clear();
     headphoneWarning.classList.add('hidden');
   } catch (err) {
-    setStatus(String(err), 'error');
+    setStatus('stop failed', 'error');
+    console.error('Stop failed:', err);
   }
+});
+
+btnRewind.addEventListener('click', async () => {
+  if (!engine || !cursor) return;
+  try {
+    await postPlayback('/playback/stop');
+  } catch (err) {
+    setStatus('rewind failed', 'error');
+    console.error('Rewind failed:', err);
+  }
+  engine.stop();
+  stopCursorRaf();
+  cursor.stop();
+  cursor.osmd.cursor.show();
+  headphoneWarning.classList.add('hidden');
 });
 
 // ── Part selector ─────────────────────────────────────────────────────────────
 
 partSelectEl.addEventListener('change', () => {
-  if (!engine) return;
-  engine.selectPart(partSelectEl.value);
+  if (!engine || !renderer?.scoreModel) return;
   pitchOverlay?.updatePart(partSelectEl.value);
-  renderer?.setHighlightedPart(partSelectEl.value);
+  scheduleSelectedPart(partSelectEl.value);
 });
 
 showAccompanimentEl.addEventListener('change', () => {
@@ -396,16 +432,75 @@ showAccompanimentEl.addEventListener('change', () => {
 // ── Tempo slider ──────────────────────────────────────────────────────────────
 
 tempoSliderEl.addEventListener('input', () => {
-  const mult = parseFloat(tempoSliderEl.value) / 100;
   tempoLabelEl.textContent = `${tempoSliderEl.value}%`;
-  // setTempoMultiplier() reschedules if playing, or stores for next play()
-  engine?.setTempoMultiplier(mult);
+});
+
+tempoSliderEl.addEventListener('change', async () => {
+  if (!engine) return;
+
+  const previousMultiplier = engine.tempoMultiplier;
+  const nextMultiplier = parseFloat(tempoSliderEl.value) / 100;
+
+  engine.setTempoMultiplier(nextMultiplier);
+
+  try {
+    await setPlaybackTempo(nextMultiplier);
+  } catch (err) {
+    engine.setTempoMultiplier(previousMultiplier);
+    tempoSliderEl.value = String(Math.round(previousMultiplier * 100));
+    tempoLabelEl.textContent = `${tempoSliderEl.value}%`;
+    setStatus('tempo update failed', 'error');
+    console.error('Tempo update failed:', err);
+  }
+});
+
+// ── Transpose selector ───────────────────────────────────────────────────────
+
+transposeSelectEl.addEventListener('change', () => {
+  const semitones = parseInt(transposeSelectEl.value, 10);
+  engine?.setTransposeSemitones(Number.isNaN(semitones) ? 0 : semitones);
 });
 
 // ── Headphone warning dismiss ─────────────────────────────────────────────────
 
 warningDismiss.addEventListener('click', () => {
   headphoneWarning.classList.add('hidden');
+});
+
+// ── Keyboard shortcuts ───────────────────────────────────────────────────────
+
+window.addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  const tag = (e.target as HTMLElement | null)?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (btnPlay.disabled) return;
+    if (engine?.state === 'playing') {
+      btnPause.click();
+    } else {
+      btnPlay.click();
+    }
+    return;
+  }
+
+  if (e.key.toLowerCase() === 'r') {
+    e.preventDefault();
+    if (!btnRewind.disabled) btnRewind.click();
+    return;
+  }
+
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    void seekByBeats(-SEEK_STEP_BEATS);
+    return;
+  }
+
+  if (e.key === 'ArrowRight') {
+    e.preventDefault();
+    void seekByBeats(SEEK_STEP_BEATS);
+  }
 });
 
 // ── Drag-and-drop / file picker ───────────────────────────────────────────────
@@ -427,6 +522,7 @@ dropZoneEl.addEventListener('drop', (e) => {
 });
 
 dropZoneEl.addEventListener('click', () => fileInputEl.click());
+btnBrowse.addEventListener('click', () => fileInputEl.click());
 
 fileInputEl.addEventListener('change', () => {
   const file = fileInputEl.files?.[0];
@@ -439,8 +535,11 @@ function setTransportEnabled(enabled: boolean): void {
   btnPlay.disabled = !enabled;
   btnPause.disabled = !enabled;
   btnStop.disabled = !enabled;
+  btnRewind.disabled = !enabled;
   partSelectEl.disabled = !enabled;
   tempoSliderEl.disabled = !enabled;
+  transposeSelectEl.disabled = !enabled;
+  btnBrowse.disabled = !enabled;
 }
 
 window.addEventListener('beforeunload', () => {

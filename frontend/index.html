@@ -107,7 +107,8 @@
     }
 
     /* Part selector */
-    #part-select {
+    #part-select,
+    #transpose-select {
       background: #0f3460;
       color: #eee;
       border: 1px solid #0f3460;
@@ -116,7 +117,8 @@
       font-size: 0.85rem;
       cursor: pointer;
     }
-    #part-select:disabled { opacity: 0.4; cursor: default; }
+    #part-select:disabled,
+    #transpose-select:disabled { opacity: 0.4; cursor: default; }
 
     /* Tempo slider */
     .tempo-group {
@@ -250,6 +252,7 @@
     <button id="btn-play"  class="transport-btn">▶ Play</button>
     <button id="btn-pause" class="transport-btn">⏸ Pause</button>
     <button id="btn-stop"  class="transport-btn">⏹ Stop</button>
+    <button id="btn-rewind" class="transport-btn">⏮ Rewind</button>
 
     <div class="toolbar-divider"></div>
 
@@ -262,11 +265,45 @@
 
     <div class="toolbar-divider"></div>
 
+
+    <div class="toolbar-divider"></div>
+
+    <label for="transpose-select" style="font-size:0.8rem;color:#aaa;">Transpose:</label>
+    <select id="transpose-select">
+      <option value="-12">-12</option>
+      <option value="-11">-11</option>
+      <option value="-10">-10</option>
+      <option value="-9">-9</option>
+      <option value="-8">-8</option>
+      <option value="-7">-7</option>
+      <option value="-6">-6</option>
+      <option value="-5">-5</option>
+      <option value="-4">-4</option>
+      <option value="-3">-3</option>
+      <option value="-2">-2</option>
+      <option value="-1">-1</option>
+      <option value="0" selected>0</option>
+      <option value="1">+1</option>
+      <option value="2">+2</option>
+      <option value="3">+3</option>
+      <option value="4">+4</option>
+      <option value="5">+5</option>
+      <option value="6">+6</option>
+      <option value="7">+7</option>
+      <option value="8">+8</option>
+      <option value="9">+9</option>
+      <option value="10">+10</option>
+      <option value="11">+11</option>
+      <option value="12">+12</option>
+    </select>
+
     <div class="tempo-group">
       <label for="tempo-slider">Tempo:</label>
       <input id="tempo-slider" type="range" min="50" max="150" value="100" step="5" />
       <span id="tempo-label">100%</span>
     </div>
+
+    <button id="btn-browse" class="transport-btn">Browse…</button>
 
     <span id="score-info"></span>
   </div>
@@ -280,7 +317,7 @@
     <div id="score-container"></div>
   </main>
 
-  <input type="file" id="file-input" accept=".xml,.mxl" />
+  <input type="file" id="file-input" accept=".mxl,.xml" />
   <script type="module" src="/src/main.ts"></script>
 
 </body>
