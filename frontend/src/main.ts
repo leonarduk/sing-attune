@@ -16,10 +16,11 @@ import { ScoreRenderer } from './score/renderer';
 import { ScoreCursor } from './score/cursor';
 import { SoundfontLoader } from './playback/soundfont';
 import { PlaybackEngine } from './playback/engine';
-import { PitchOverlay, type OverlaySettings } from './pitch/overlay';
+import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from './pitch/overlay';
 import { parsePitchFrame, reconnectDelayMs } from './pitch/socket';
 import { getVisiblePartOptions } from './part-options';
 import { beatToMs, startPlayback, postPlayback, seekPlayback, setPlaybackTempo, setPlaybackTranspose } from './transport/controls';
+import { resolveSelectedDeviceId, type AudioInputDevice } from './audio/devices';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -71,7 +72,7 @@ let shouldReconnectPitchSocket = false;
 let pitchReconnectAttempts = 0;
 
 const overlaySettings: OverlaySettings = {
-  confidenceThreshold: 0.6,
+  confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
   trailMs: 2000,
 };
 let selectedDeviceId: number | null = null;
@@ -387,15 +388,20 @@ async function refreshAudioSettings(): Promise<void> {
     if (!devicesRes.ok) throw new Error(`/audio/devices HTTP ${devicesRes.status}`);
     const devicesPayload = (await devicesRes.json()) as {
       default_device_id: number | null;
-      devices: Array<{ id: number; name: string }>;
+      devices: AudioInputDevice[];
     };
 
     settingsDeviceEl.innerHTML = devicesPayload.devices
       .map((device) => `<option value="${device.id}">${device.name}</option>`)
       .join('');
 
-    if (selectedDeviceId === null) selectedDeviceId = devicesPayload.default_device_id;
-    if (selectedDeviceId !== null) settingsDeviceEl.value = String(selectedDeviceId);
+    selectedDeviceId = resolveSelectedDeviceId({
+      devices: devicesPayload.devices,
+      defaultDeviceId: devicesPayload.default_device_id,
+      persistedDeviceId: selectedDeviceId,
+    });
+    settingsDeviceEl.value = selectedDeviceId === null ? '' : String(selectedDeviceId);
+    settingsDeviceEl.disabled = devicesPayload.devices.length === 0;
 
     if (engineRes.ok) {
       const enginePayload = (await engineRes.json()) as { active_engine: string; mode: string };
@@ -404,7 +410,11 @@ async function refreshAudioSettings(): Promise<void> {
       settingsEngineEl.textContent = 'Pitch engine: unavailable';
     }
   } catch (err) {
+    settingsDeviceEl.innerHTML = '';
+    settingsDeviceEl.disabled = true;
+    selectedDeviceId = null;
     settingsEngineEl.textContent = 'Pitch engine: unavailable';
+    showErrorBanner('Unable to load audio devices. Check backend audio permissions and retry.');
     console.error('Failed to load settings data:', err);
   }
 }
@@ -561,7 +571,12 @@ btnSettings.addEventListener('click', async () => {
 });
 
 settingsDeviceEl.addEventListener('change', () => {
-  const parsed = Number.parseInt(settingsDeviceEl.value, 10);
+  const value = settingsDeviceEl.value;
+  if (value === '') {
+    selectedDeviceId = null;
+    return;
+  }
+  const parsed = Number.parseInt(value, 10);
   selectedDeviceId = Number.isNaN(parsed) ? null : parsed;
 });
 
@@ -659,9 +674,13 @@ window.addEventListener('beforeunload', () => {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
+function initializeSettingsPanel(): void {
+  settingsConfidenceEl.value = String(overlaySettings.confidenceThreshold);
+  settingsTrailEl.value = String(overlaySettings.trailMs / 1000);
+  updateSettingsLabels();
+}
+
 setTransportEnabled(false);
 tempoLabelEl.textContent = `${tempoSliderEl.value}%`;
-settingsConfidenceEl.value = String(overlaySettings.confidenceThreshold);
-settingsTrailEl.value = String(overlaySettings.trailMs / 1000);
-updateSettingsLabels();
+initializeSettingsPanel();
 void checkBackend();

@@ -2,9 +2,34 @@ import type { ScoreModel, NoteModel } from '../score/renderer';
 import { elapsedToBeat } from '../score/timing';
 import { classifyPitchColor, expectedNoteAtBeat, type DotColor } from './accuracy';
 
+export const MIN_CONFIDENCE_THRESHOLD = 0.6;
+export const MAX_CONFIDENCE_THRESHOLD = 0.95;
+export const MIN_TRAIL_MS = 500;
+export const MAX_TRAIL_MS = 5000;
+
+/**
+ * User-configurable overlay settings.
+ *
+ * - `confidenceThreshold` is a 0-1 confidence cutoff.
+ * - `trailMs` is the visible dot trail length in milliseconds.
+ */
 export interface OverlaySettings {
   confidenceThreshold: number;
   trailMs: number;
+}
+
+export function normalizeOverlaySettings(settings: OverlaySettings): OverlaySettings {
+  const threshold = Number.isFinite(settings.confidenceThreshold)
+    ? settings.confidenceThreshold
+    : MIN_CONFIDENCE_THRESHOLD;
+  const trailMs = Number.isFinite(settings.trailMs)
+    ? settings.trailMs
+    : 2000;
+
+  return {
+    confidenceThreshold: Math.min(MAX_CONFIDENCE_THRESHOLD, Math.max(MIN_CONFIDENCE_THRESHOLD, threshold)),
+    trailMs: Math.min(MAX_TRAIL_MS, Math.max(MIN_TRAIL_MS, trailMs)),
+  };
 }
 
 interface PitchFrame {
@@ -38,7 +63,7 @@ export class PitchOverlay {
     this.midiMin = 48;
     this.midiMax = 84;
     this.setPart(part);
-    this.settings = settings ?? { confidenceThreshold: 0.6, trailMs: 2000 };
+    this.settings = normalizeOverlaySettings(settings ?? { confidenceThreshold: MIN_CONFIDENCE_THRESHOLD, trailMs: 2000 });
 
     this.canvas = document.createElement('canvas');
     this.canvas.style.position = 'absolute';
@@ -63,7 +88,7 @@ export class PitchOverlay {
   }
 
   applySettings(settings: OverlaySettings): void {
-    this.settings = settings;
+    this.settings = normalizeOverlaySettings(settings);
     this.prune();
     this.redraw();
   }
