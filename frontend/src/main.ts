@@ -16,6 +16,8 @@ import { ScoreRenderer } from './score/renderer';
 import { ScoreCursor } from './score/cursor';
 import { SoundfontLoader } from './playback/soundfont';
 import { PlaybackEngine } from './playback/engine';
+import { PitchOverlay } from './pitch/overlay';
+import { parsePitchFrame, reconnectDelayMs } from './pitch/socket';
 import { getVisiblePartOptions } from './part-options';
 import { beatToMs, postPlayback, seekPlayback, setPlaybackTempo } from './transport/controls';
 
@@ -36,6 +38,8 @@ const tempoLabelEl    = document.getElementById('tempo-label')  as HTMLSpanEleme
 const btnBrowse       = document.getElementById('btn-browse')    as HTMLButtonElement;
 const headphoneWarning = document.getElementById('headphone-warning') as HTMLDivElement;
 const warningDismiss  = document.getElementById('warning-dismiss') as HTMLButtonElement;
+const scoreLoadingEl  = document.getElementById('score-loading') as HTMLDivElement;
+const errorBannerEl   = document.getElementById('error-banner') as HTMLDivElement;
 const showAccompanimentEl = document.getElementById('show-accompaniment') as HTMLInputElement;
 const transposeSelectEl = document.getElementById('transpose-select') as HTMLSelectElement;
 
@@ -53,6 +57,11 @@ let soundfontLoadPromise: Promise<void> | null = null;
 // External cursor RAF (replaces ScoreCursor's internal wall-clock loop)
 let cursorRafId: number | null = null;
 const SEEK_STEP_BEATS = 4;
+let pitchOverlay: PitchOverlay | null = null;
+let pitchWs: WebSocket | null = null;
+let pitchReconnectTimer: number | null = null;
+let shouldReconnectPitchSocket = false;
+let pitchReconnectAttempts = 0;
 
 // ── Backend health ────────────────────────────────────────────────────────────
 
@@ -61,8 +70,10 @@ async function checkBackend(): Promise<void> {
     const res = await fetch('/health');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = (await res.json()) as { version: string };
+    clearErrorBanner();
     setStatus(`backend ok (v${data.version})`, 'ok');
   } catch (err) {
+    showErrorBanner('Cannot reach backend. Start backend and refresh the page.');
     setStatus('backend unreachable', 'error');
     console.error('Backend health check failed:', err);
   }
@@ -71,6 +82,25 @@ async function checkBackend(): Promise<void> {
 function setStatus(msg: string, cls: 'ok' | 'error' | 'loading' | ''): void {
   statusEl.textContent = msg;
   statusEl.className = cls;
+}
+
+function showLoading(message: string): void {
+  scoreLoadingEl.textContent = message;
+  scoreLoadingEl.classList.add('visible');
+}
+
+function hideLoading(): void {
+  scoreLoadingEl.classList.remove('visible');
+}
+
+function showErrorBanner(message: string): void {
+  errorBannerEl.textContent = message;
+  errorBannerEl.classList.add('visible');
+}
+
+function clearErrorBanner(): void {
+  errorBannerEl.textContent = '';
+  errorBannerEl.classList.remove('visible');
 }
 
 // ── Soundfont ─────────────────────────────────────────────────────────────────
@@ -88,6 +118,7 @@ function ensureSoundfont(): void {
   soundfont = new SoundfontLoader();
   soundfontLoadPromise = soundfont.load(audioCtx).catch((err: unknown) => {
     console.error('[Soundfont] load failed:', err);
+    showErrorBanner('Soundfont failed to load; playback is unavailable.');
     setStatus('soundfont load failed — no audio', 'error');
   });
 }
@@ -95,6 +126,8 @@ function ensureSoundfont(): void {
 // ── Score loading ─────────────────────────────────────────────────────────────
 
 async function loadScore(file: File): Promise<void> {
+  clearErrorBanner();
+  showLoading(`Loading ${file.name}…`);
   setStatus(`Loading ${file.name}…`, 'loading');
   dropZoneEl.classList.add('hidden');
   scoreInfoEl.textContent = '';
@@ -107,6 +140,9 @@ async function loadScore(file: File): Promise<void> {
   cursor?.stop();
   engine = null;
   cursor = null;
+  closePitchSocket();
+  pitchOverlay?.destroy();
+  pitchOverlay = null;
   scoreContainerEl.innerHTML = '';
 
   // Start soundfont loading in background (idempotent)
@@ -143,12 +179,17 @@ async function loadScore(file: File): Promise<void> {
     );
 
     cursor = new ScoreCursor(renderer.osmd, model);
+    pitchOverlay = new PitchOverlay(scoreContainerEl, model, model.parts[0] ?? '');
+    connectPitchSocket();
     setTransportEnabled(true);
     setStatus('score loaded', 'ok');
   } catch (err) {
+    showErrorBanner('Could not load this MusicXML file. Try exporting again from notation software.');
     setStatus(String(err), 'error');
     console.error('Score load failed:', err);
     dropZoneEl.classList.remove('hidden');
+  } finally {
+    hideLoading();
   }
 }
 
@@ -195,6 +236,85 @@ async function seekByBeats(delta: number): Promise<void> {
   if (engine.state !== 'playing') stopCursorRaf();
 }
 
+function cursorXPosition(): number {
+  const cursorEl = cursor?.osmd.cursor.cursorElement;
+  if (!cursorEl) return 0;
+
+  const scoreRect = scoreContainerEl.getBoundingClientRect();
+  const cursorRect = cursorEl.getBoundingClientRect();
+  return cursorRect.left - scoreRect.left + scoreContainerEl.scrollLeft;
+}
+
+function closePitchSocket(): void {
+  shouldReconnectPitchSocket = false;
+  pitchReconnectAttempts = 0;
+  if (pitchReconnectTimer !== null) {
+    window.clearTimeout(pitchReconnectTimer);
+    pitchReconnectTimer = null;
+  }
+
+  if (pitchWs) {
+    pitchWs.close();
+    pitchWs = null;
+  }
+}
+
+function connectPitchSocket(): void {
+  if (!pitchOverlay) return;
+  shouldReconnectPitchSocket = true;
+
+  if (pitchReconnectTimer !== null) {
+    window.clearTimeout(pitchReconnectTimer);
+    pitchReconnectTimer = null;
+  }
+
+  if (pitchWs && (pitchWs.readyState === WebSocket.OPEN || pitchWs.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  pitchWs = new WebSocket(`${protocol}://${window.location.host}/ws/pitch`);
+
+  pitchWs.onopen = () => {
+    pitchReconnectAttempts = 0;
+  };
+
+  pitchWs.onerror = () => {
+    pitchWs?.close();
+  };
+
+  pitchWs.onclose = () => {
+    pitchWs = null;
+    if (!shouldReconnectPitchSocket || !pitchOverlay) return;
+
+    pitchReconnectAttempts += 1;
+    const delayMs = reconnectDelayMs(pitchReconnectAttempts);
+
+    pitchReconnectTimer = window.setTimeout(() => {
+      pitchReconnectTimer = null;
+      connectPitchSocket();
+    }, delayMs);
+  };
+
+  pitchWs.onmessage = (event) => {
+    if (!pitchOverlay) return;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(event.data) as unknown;
+    } catch {
+      return;
+    }
+
+    const frame = parsePitchFrame(payload);
+    if (!frame) return;
+
+    pitchOverlay.pushFrame(
+      frame,
+      cursorXPosition(),
+    );
+  };
+}
+
 function scheduleSelectedPart(selectedPart: string): void {
   if (!engine || !renderer?.scoreModel) return;
 
@@ -236,6 +356,7 @@ function refreshPartSelector(): void {
 
 btnPlay.addEventListener('click', async () => {
   if (!engine || !cursor || !renderer?.scoreModel) return;
+  if (engine.state === 'playing') return;
 
   // Show headphone warning on every play
   headphoneWarning.classList.remove('hidden');
@@ -247,9 +368,9 @@ btnPlay.addEventListener('click', async () => {
       await postPlayback('/playback/resume');
     } else {
       await postPlayback('/playback/start');
-      // Full reset: reposition cursor to start
-      cursor.stop(); // resets OSMD cursor to beat 0 and hides it
+      cursor.stop();
       cursor.osmd.cursor.show();
+      pitchOverlay?.clear();
     }
 
     engine.play(fromBeat);
@@ -276,14 +397,15 @@ btnStop.addEventListener('click', async () => {
   if (!engine || !cursor) return;
   try {
     await postPlayback('/playback/stop');
+    engine.stop();
+    stopCursorRaf();
+    cursor.stop();
+    pitchOverlay?.clear();
+    headphoneWarning.classList.add('hidden');
   } catch (err) {
     setStatus('stop failed', 'error');
     console.error('Stop failed:', err);
   }
-  engine.stop();
-  stopCursorRaf();
-  cursor.stop();
-  headphoneWarning.classList.add('hidden');
 });
 
 btnRewind.addEventListener('click', async () => {
@@ -304,6 +426,8 @@ btnRewind.addEventListener('click', async () => {
 // ── Part selector ─────────────────────────────────────────────────────────────
 
 partSelectEl.addEventListener('change', () => {
+  if (!engine || !renderer?.scoreModel) return;
+  pitchOverlay?.updatePart(partSelectEl.value);
   scheduleSelectedPart(partSelectEl.value);
 });
 
@@ -423,6 +547,11 @@ function setTransportEnabled(enabled: boolean): void {
   transposeSelectEl.disabled = !enabled;
   btnBrowse.disabled = !enabled;
 }
+
+window.addEventListener('beforeunload', () => {
+  closePitchSocket();
+  pitchOverlay?.destroy();
+});
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 

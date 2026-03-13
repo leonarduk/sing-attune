@@ -56,7 +56,7 @@ That's it.
 | Backend integration tests | ✅ Done |
 | Score renderer (OSMD) | ✅ Done (Day 8a) |
 | Score playback (Web Audio) | 🔲 Day 9 |
-| Real-time pitch overlay | 🔲 Day 10 |
+| Real-time pitch overlay | ✅ Done (Day 10) |
 | Transport controls | 🔲 Day 11 |
 | Electron packaging | 🔲 Day 16 |
 
