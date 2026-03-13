@@ -38,12 +38,20 @@ describe('graph color classification', () => {
 });
 
 describe('semitone grid derivation', () => {
-  it('includes C2..C6 and octave labels', () => {
+  it('includes C2..C6 with natural-note labels and black-key flags', () => {
     const lines = buildSemitoneGrid();
     expect(lines[0]?.midi).toBe(GRAPH_MIDI_MIN);
     expect(lines.at(-1)?.midi).toBe(GRAPH_MIDI_MAX);
 
-    const octaveLabels = lines.filter((line) => line.label !== null).map((line) => line.label);
-    expect(octaveLabels).toEqual(['C2', 'C3', 'C4', 'C5', 'C6']);
+    const labels = lines.filter((line) => line.label !== null).map((line) => line.label);
+    expect(labels).toContain('C2');
+    expect(labels).toContain('A4');
+    expect(labels).toContain('C6');
+
+    const sharpLabels = lines.filter((line) => line.label?.includes('#'));
+    expect(sharpLabels).toHaveLength(0);
+
+    const firstSharp = lines.find((line) => line.midi === 37);
+    expect(firstSharp?.isBlackKey).toBe(true);
   });
 });
