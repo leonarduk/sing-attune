@@ -2,6 +2,36 @@ import type { ScoreModel, NoteModel } from '../score/renderer';
 import { elapsedToBeat } from '../score/timing';
 import { classifyPitchColor, expectedNoteAtBeat, type DotColor } from './accuracy';
 
+export const MIN_CONFIDENCE_THRESHOLD = 0.6;
+export const MAX_CONFIDENCE_THRESHOLD = 0.95;
+export const MIN_TRAIL_MS = 500;
+export const MAX_TRAIL_MS = 5000;
+
+/**
+ * User-configurable overlay settings.
+ *
+ * - `confidenceThreshold` is a 0-1 confidence cutoff.
+ * - `trailMs` is the visible dot trail length in milliseconds.
+ */
+export interface OverlaySettings {
+  confidenceThreshold: number;
+  trailMs: number;
+}
+
+export function normalizeOverlaySettings(settings: OverlaySettings): OverlaySettings {
+  const threshold = Number.isFinite(settings.confidenceThreshold)
+    ? settings.confidenceThreshold
+    : MIN_CONFIDENCE_THRESHOLD;
+  const trailMs = Number.isFinite(settings.trailMs)
+    ? settings.trailMs
+    : 2000;
+
+  return {
+    confidenceThreshold: Math.min(MAX_CONFIDENCE_THRESHOLD, Math.max(MIN_CONFIDENCE_THRESHOLD, threshold)),
+    trailMs: Math.min(MAX_TRAIL_MS, Math.max(MIN_TRAIL_MS, trailMs)),
+  };
+}
+
 interface PitchFrame {
   t: number;
   midi: number;
@@ -15,8 +45,6 @@ interface Dot {
   wallMs: number;
 }
 
-const TRAIL_MS = 2000;
-
 export class PitchOverlay {
   private readonly container: HTMLDivElement;
   private readonly canvas: HTMLCanvasElement;
@@ -26,14 +54,16 @@ export class PitchOverlay {
   private midiMin: number;
   private midiMax: number;
   private dots: Dot[] = [];
+  private settings: OverlaySettings;
 
-  constructor(container: HTMLDivElement, model: ScoreModel, part: string) {
+  constructor(container: HTMLDivElement, model: ScoreModel, part: string, settings?: OverlaySettings) {
     this.container = container;
     this.model = model;
     this.notesForPart = [];
     this.midiMin = 48;
     this.midiMax = 84;
     this.setPart(part);
+    this.settings = normalizeOverlaySettings(settings ?? { confidenceThreshold: MIN_CONFIDENCE_THRESHOLD, trailMs: 2000 });
 
     this.canvas = document.createElement('canvas');
     this.canvas.style.position = 'absolute';
@@ -57,6 +87,12 @@ export class PitchOverlay {
     this.redraw();
   }
 
+  applySettings(settings: OverlaySettings): void {
+    this.settings = normalizeOverlaySettings(settings);
+    this.prune();
+    this.redraw();
+  }
+
   destroy(): void {
     window.removeEventListener('resize', this.resize);
     this.container.removeEventListener('scroll', this.redraw);
@@ -75,7 +111,7 @@ export class PitchOverlay {
     // No dot during rests or before the selected part's first note
     if (expected === null) return;
 
-    const color = classifyPitchColor(frame.midi, expected.midi, frame.conf);
+    const color = classifyPitchColor(frame.midi, expected.midi, frame.conf, this.settings.confidenceThreshold);
     const y = this.midiToY(frame.midi);
 
     this.dots.push({ x: cursorX, y, color, wallMs: performance.now() });
@@ -96,7 +132,7 @@ export class PitchOverlay {
   }
 
   private prune(): void {
-    const cutoff = performance.now() - TRAIL_MS;
+    const cutoff = performance.now() - this.settings.trailMs;
     this.dots = this.dots.filter((d) => d.wallMs >= cutoff);
   }
 
@@ -107,7 +143,7 @@ export class PitchOverlay {
 
     for (const dot of this.dots) {
       const age = now - dot.wallMs;
-      const alpha = Math.max(0, 1 - age / TRAIL_MS);
+      const alpha = Math.max(0, 1 - age / this.settings.trailMs);
       if (alpha <= 0) continue;
 
       this.ctx.globalAlpha = alpha;

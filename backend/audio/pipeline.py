@@ -180,6 +180,10 @@ class PlaybackPipeline:
         with self._lock:
             return self._transpose_semitones
 
+    @property
+    def engine(self) -> Engine:
+        return self._engine
+
     def set_tempo_multiplier(self, multiplier: float) -> None:
         with self._lock:
             if multiplier <= 0:

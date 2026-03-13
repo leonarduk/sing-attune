@@ -338,3 +338,7 @@ electron-builder
 - [ ] Tempo and transposition controls work
 - [ ] Installs as a Windows desktop app without requiring Python pre-installed
 - [ ] Tested against Homeward Bound Parts I and II
+
+## Milestone 2 closure note (issue #48)
+
+Interpretation boundary for v0.2 is now explicit: backend remains raw pitch-frame transport (`{t,midi,conf}`), while expected-note lookup and colour classification are frontend responsibilities.

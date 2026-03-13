@@ -74,6 +74,17 @@ async def list_audio_devices() -> JSONResponse:
     )
 
 
+@app.get("/audio/engine")
+async def audio_engine() -> JSONResponse:
+    return JSONResponse(
+        {
+            "active_engine": _pipeline.engine.name.lower(),
+            "mode": "auto",
+            "switchable": False,
+        }
+    )
+
+
 # ── Playback state machine ─────────────────────────────────────────────────────
 
 
