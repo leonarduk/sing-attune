@@ -82,7 +82,7 @@ export class PlaybackEngine {
   private readonly sf: SoundfontLoader;
 
   private _state: PlaybackState = 'idle';
-  private _sources: AudioBufferSourceNode[] = [];
+  private _sources: AudioScheduledSourceNode[] = [];
 
   /**
    * AudioContext.currentTime value that corresponds to _startBeat.
@@ -308,19 +308,6 @@ export class PlaybackEngine {
 
       const targetMidi = note.midi + this._transposeSemitones;
       const buf = this.sf.getBuffer(targetMidi);
-      if (!buf) continue;
-
-      const src = this.ctx.createBufferSource();
-      src.buffer = buf;
-
-      // Pitch-correct: detune by the cent difference between desired MIDI note
-      // and the sampled MIDI note (100 cents per semitone).
-      const sampledMidi = this.sf.getNearestSampledMidi(targetMidi);
-      if (sampledMidi !== null) {
-        src.detune.value = (targetMidi - sampledMidi) * 100;
-      }
-
-      src.connect(this.ctx.destination);
 
       // Duration in seconds + release tail for natural piano decay
       const noteDurS =
@@ -329,10 +316,47 @@ export class PlaybackEngine {
         RELEASE_TAIL_S;
 
       const safeStart = Math.max(startAt, this.ctx.currentTime + STOP_SAFETY_OFFSET_S);
-      src.start(safeStart);
-      src.stop(safeStart + noteDurS);
 
-      this._sources.push(src);
+      if (buf) {
+        const src = this.ctx.createBufferSource();
+        src.buffer = buf;
+
+        // Pitch-correct: detune by the cent difference between desired MIDI note
+        // and the sampled MIDI note (100 cents per semitone).
+        const sampledMidi = this.sf.getNearestSampledMidi(targetMidi);
+        if (sampledMidi !== null) {
+          src.detune.value = (targetMidi - sampledMidi) * 100;
+        }
+
+        src.connect(this.ctx.destination);
+        src.start(safeStart);
+        src.stop(safeStart + noteDurS);
+        this._sources.push(src);
+        continue;
+      }
+
+      // Soundfont unavailable fallback: synthesize note with a short envelope
+      // so playback remains audible even when sample loading fails.
+      const osc = this.ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = 440 * Math.pow(2, (targetMidi - 69) / 12);
+
+      const gain = this.ctx.createGain();
+      const attack = 0.01;
+      const release = 0.08;
+      const peak = 0.12;
+      const releaseStart = Math.max(safeStart + attack, safeStart + noteDurS - release);
+
+      gain.gain.setValueAtTime(0.0001, safeStart);
+      gain.gain.linearRampToValueAtTime(peak, safeStart + attack);
+      gain.gain.setValueAtTime(peak, releaseStart);
+      gain.gain.linearRampToValueAtTime(0.0001, safeStart + noteDurS);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(safeStart);
+      osc.stop(safeStart + noteDurS);
+      this._sources.push(osc);
     }
   }
 

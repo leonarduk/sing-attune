@@ -238,4 +238,65 @@ describe('PlaybackEngine part selection', () => {
     expect(engine.currentBeat).toBeCloseTo(3.87, 2);
   });
 
+  it('uses oscillator fallback when soundfont samples are unavailable', () => {
+    const starts: number[] = [];
+
+    class FakeOscillator {
+      type: OscillatorType = 'sine';
+      frequency = { value: 0 };
+      connect(): void {}
+      start(): void { starts.push(1); }
+      stop(): void {}
+    }
+
+    class FakeGain {
+      gain = {
+        setValueAtTime(): void {},
+        linearRampToValueAtTime(): void {},
+      };
+      connect(): void {}
+    }
+
+    class FakeAudioContext {
+      currentTime = 0;
+      state: AudioContextState = 'running';
+      destination = {} as AudioDestinationNode;
+      createBufferSource(): AudioBufferSourceNode {
+        throw new Error('Buffer source should not be used in fallback mode');
+      }
+      createOscillator(): OscillatorNode {
+        return new FakeOscillator() as unknown as OscillatorNode;
+      }
+      createGain(): GainNode {
+        return new FakeGain() as unknown as GainNode;
+      }
+      resume(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+
+    class MissingSoundfont {
+      getBuffer(): AudioBuffer | null {
+        return null;
+      }
+      getNearestSampledMidi(): number | null {
+        return null;
+      }
+    }
+
+    const engine = new PlaybackEngine(
+      new FakeAudioContext() as unknown as AudioContext,
+      new MissingSoundfont() as unknown as import('./soundfont').SoundfontLoader,
+    );
+
+    engine.schedule(
+      [{ midi: 60, beat_start: 0, duration: 1, measure: 1, part: 'PART I', lyric: null }],
+      BPM120,
+      'PART I',
+      1,
+    );
+    engine.play(0);
+    expect(starts).toHaveLength(1);
+  });
+
 });
