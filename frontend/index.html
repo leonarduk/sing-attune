@@ -141,6 +141,13 @@
       margin-left: 4px;
     }
 
+    #pitch-readout {
+      font-size: 0.8rem;
+      color: #c5d9ff;
+      margin-left: 8px;
+      min-width: 120px;
+    }
+
     /* ── Main content area ── */
     main {
       flex: 1;
@@ -367,6 +374,7 @@
     <button id="btn-browse" class="transport-btn">Browse…</button>
     <button id="btn-settings" class="transport-btn">⚙ Settings</button>
 
+    <span id="pitch-readout" aria-live="polite">Detected: —</span>
     <span id="score-info"></span>
   </div>
 
@@ -384,6 +392,13 @@
     <div class="settings-row">
       <label for="settings-trail">Pitch trail length: <span id="settings-trail-label">2.0s</span></label>
       <input id="settings-trail" type="range" min="0.5" max="5" step="0.5" value="2" />
+    </div>
+
+    <div class="settings-row">
+      <label>
+        <input id="settings-show-note-names" type="checkbox" />
+        Show note names in pitch readout
+      </label>
     </div>
 
 

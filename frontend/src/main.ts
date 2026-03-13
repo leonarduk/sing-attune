@@ -18,6 +18,7 @@ import { SoundfontLoader } from './playback/soundfont';
 import { PlaybackEngine } from './playback/engine';
 import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from './pitch/overlay';
 import { parsePitchFrame, reconnectDelayMs } from './pitch/socket';
+import { midiToFrequency, midiToNoteName } from './pitch/note-name';
 import { getVisiblePartOptions } from './part-options';
 import { elapsedToBeat } from './score/timing';
 import { beatToMs, startPlayback, postPlayback, seekPlayback, setPlaybackTempo, setPlaybackTranspose } from './transport/controls';
@@ -46,12 +47,14 @@ const errorBannerEl   = document.getElementById('error-banner') as HTMLDivElemen
 const showAccompanimentEl = document.getElementById('show-accompaniment') as HTMLInputElement;
 const transposeSelectEl = document.getElementById('transpose-select') as HTMLSelectElement;
 const btnSettings = document.getElementById('btn-settings') as HTMLButtonElement;
+const pitchReadoutEl = document.getElementById('pitch-readout') as HTMLSpanElement;
 const settingsPanelEl = document.getElementById('settings-panel') as HTMLDivElement;
 const settingsDeviceEl = document.getElementById('settings-device') as HTMLSelectElement;
 const settingsConfidenceEl = document.getElementById('settings-confidence') as HTMLInputElement;
 const settingsConfidenceLabelEl = document.getElementById('settings-confidence-label') as HTMLSpanElement;
 const settingsTrailEl = document.getElementById('settings-trail') as HTMLInputElement;
 const settingsTrailLabelEl = document.getElementById('settings-trail-label') as HTMLSpanElement;
+const settingsShowNoteNamesEl = document.getElementById('settings-show-note-names') as HTMLInputElement;
 const settingsEngineEl = document.getElementById('settings-engine') as HTMLDivElement;
 const recordingEnabledEl = document.getElementById('recording-enabled') as HTMLInputElement;
 const btnRecordStart = document.getElementById('btn-record-start') as HTMLButtonElement;
@@ -80,6 +83,8 @@ let shouldReconnectPitchSocket = false;
 let pitchReconnectAttempts = 0;
 let cursorBeatSample: { beat: number; x: number } | null = null;
 let pxPerBeatEstimate = 0;
+let showNoteNames = false;
+let lastPitchFrame: { midi: number } | null = null;
 
 const overlaySettings: OverlaySettings = {
   confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
@@ -169,6 +174,8 @@ async function loadScore(file: File): Promise<void> {
   closePitchSocket();
   pitchOverlay?.destroy();
   pitchOverlay = null;
+  lastPitchFrame = null;
+  updatePitchReadout();
   scoreContainerEl.innerHTML = '';
 
   // Start soundfont loading in background (idempotent)
@@ -333,6 +340,24 @@ function closePitchSocket(): void {
   }
 }
 
+function updatePitchReadout(): void {
+  if (!lastPitchFrame) {
+    pitchReadoutEl.textContent = 'Detected: —';
+    return;
+  }
+
+  const hz = midiToFrequency(lastPitchFrame.midi);
+  const frequencyLabel = `${hz.toFixed(2)} Hz`;
+
+  if (!showNoteNames) {
+    pitchReadoutEl.textContent = `Detected: ${frequencyLabel}`;
+    return;
+  }
+
+  const noteName = midiToNoteName(lastPitchFrame.midi);
+  pitchReadoutEl.textContent = `Detected: ${frequencyLabel} → ${noteName}`;
+}
+
 function connectPitchSocket(): void {
   if (!pitchOverlay) return;
   shouldReconnectPitchSocket = true;
@@ -381,6 +406,9 @@ function connectPitchSocket(): void {
 
     const frame = parsePitchFrame(payload);
     if (!frame) return;
+
+    lastPitchFrame = { midi: frame.midi };
+    updatePitchReadout();
 
     pitchOverlay.pushFrame(
       frame,
@@ -530,6 +558,8 @@ btnPlay.addEventListener('click', async () => {
       cursor.stop();
       cursor.osmd.cursor.show();
       pitchOverlay?.clear();
+      lastPitchFrame = null;
+      updatePitchReadout();
     }
 
     engine.play(fromBeat);
@@ -560,6 +590,8 @@ btnStop.addEventListener('click', async () => {
     stopCursorRaf();
     cursor.stop();
     pitchOverlay?.clear();
+    lastPitchFrame = null;
+    updatePitchReadout();
     headphoneWarning.classList.add('hidden');
   } catch (err) {
     setStatus(`stop failed: ${String(err)}`, 'error');
@@ -579,6 +611,8 @@ btnRewind.addEventListener('click', async () => {
   stopCursorRaf();
   cursor.stop();
   cursor.osmd.cursor.show();
+  lastPitchFrame = null;
+  updatePitchReadout();
   headphoneWarning.classList.add('hidden');
 });
 
@@ -688,6 +722,11 @@ settingsTrailEl.addEventListener('input', () => {
   overlaySettings.trailMs = parseFloat(settingsTrailEl.value) * 1000;
   pitchOverlay?.applySettings(overlaySettings);
   updateSettingsLabels();
+});
+
+settingsShowNoteNamesEl.addEventListener('change', () => {
+  showNoteNames = settingsShowNoteNamesEl.checked;
+  updatePitchReadout();
 });
 
 recordingEnabledEl.addEventListener('change', () => {
@@ -818,7 +857,9 @@ window.addEventListener('beforeunload', () => {
 function initializeSettingsPanel(): void {
   settingsConfidenceEl.value = String(overlaySettings.confidenceThreshold);
   settingsTrailEl.value = String(overlaySettings.trailMs / 1000);
+  settingsShowNoteNamesEl.checked = showNoteNames;
   updateSettingsLabels();
+  updatePitchReadout();
 }
 
 setTransportEnabled(false);
