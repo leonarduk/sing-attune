@@ -15,7 +15,7 @@
  * services/cursor-projection.ts so pitch-overlay can read it without
  * importing from this feature.
  */
-import { onScoreCleared, getSession } from '../../services/score-session';
+import { onScoreCleared, onScoreLoaded, getSession } from '../../services/score-session';
 import { setStatus } from '../../services/backend';
 import { recordBeatSample, resetProjection, getCursorX } from '../../services/cursor-projection';
 import { emitPlaybackSyncEvent } from '../../services/playback-sync';
@@ -91,7 +91,29 @@ function mount(_slot: HTMLElement): void {
   const headphoneWarning = document.getElementById('headphone-warning') as HTMLDivElement;
   const warningDismiss   = document.getElementById('warning-dismiss')   as HTMLButtonElement;
 
-  onScoreCleared(() => { stopCursorRaf(); });
+  function syncPauseButton(): void {
+    const session = getSession();
+    if (!session) {
+      btnPause.disabled = true;
+      btnPause.innerHTML = '&#9646;&#9646; Pause';
+      return;
+    }
+    if (session.engine.state === 'playing') {
+      btnPause.disabled = false;
+      btnPause.innerHTML = '&#9646;&#9646; Pause';
+      return;
+    }
+    if (session.engine.state === 'paused') {
+      btnPause.disabled = false;
+      btnPause.innerHTML = '&#9654; Resume';
+      return;
+    }
+    btnPause.disabled = true;
+    btnPause.innerHTML = '&#9646;&#9646; Pause';
+  }
+
+  onScoreLoaded(() => { syncPauseButton(); });
+  onScoreCleared(() => { stopCursorRaf(); syncPauseButton(); });
 
   btnPlay.addEventListener('click', async () => {
     const session = getSession();
@@ -120,6 +142,7 @@ function mount(_slot: HTMLElement): void {
       }
       engine.play(fromBeat);
       startCursorRaf();
+      syncPauseButton();
     } catch (err) {
       setStatus(`playback start failed: ${String(err)}`, 'error');
       console.error('Play failed:', err);
@@ -129,15 +152,18 @@ function mount(_slot: HTMLElement): void {
   btnPause.addEventListener('click', async () => {
     const session = getSession();
     if (!session) return;
+    const { engine } = session;
     try {
-      const response = await postPlayback('/playback/pause');
-      session.engine.pause();
-      emitPlaybackSyncEvent({
-        type: 'pause',
-        tMs: response.t_ms,
-        audioTimeSec: session.engine.ctx.currentTime,
-      });
-      stopCursorRaf();
+      if (engine.state === 'playing') {
+        await postPlayback('/playback/pause');
+        engine.pause();
+        stopCursorRaf();
+      } else if (engine.state === 'paused') {
+        await postPlayback('/playback/resume');
+        engine.play(engine.startBeat);
+        startCursorRaf();
+      }
+      syncPauseButton();
     } catch (err) {
       setStatus(`pause failed: ${String(err)}`, 'error');
       console.error('Pause failed:', err);
@@ -158,6 +184,7 @@ function mount(_slot: HTMLElement): void {
       stopCursorRaf();
       session.cursor.stop();
       headphoneWarning.classList.add('hidden');
+      syncPauseButton();
     } catch (err) {
       setStatus(`stop failed: ${String(err)}`, 'error');
       console.error('Stop failed:', err);
@@ -183,9 +210,11 @@ function mount(_slot: HTMLElement): void {
     session.cursor.stop();
     session.cursor.osmd.cursor.show();
     headphoneWarning.classList.add('hidden');
+    syncPauseButton();
   });
 
   warningDismiss.addEventListener('click', () => { headphoneWarning.classList.add('hidden'); });
+  syncPauseButton();
 
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
