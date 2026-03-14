@@ -4,15 +4,14 @@
  * Owns:
  *   - WebSocket connection to /ws/pitch
  *   - PitchOverlay (score annotation)
- *   - PitchGraphCanvas (pitch graph panel)
- *   - Settings panel (gear button, all sliders/checkboxes inside it)
- *   - Practice recorder
+ *   - PitchGraphCanvas (rolling pitch graph)
+ *   - Settings panel (gear button + all controls inside it)
+ *   - PracticeRecorder
  *   - Pitch readout (#pitch-readout)
  *
- * Reads:
- *   - Current session from score-session (model, engine for clock)
- *   - selectedPart changes via onScoreLoaded (which re-fires on updateSelectedPart)
- *   - frameXPosition from playback feature
+ * Reacts to score-session lifecycle and selectedPart changes via
+ * onScoreLoaded / onScoreCleared. Calls getFrameXPosition() from the
+ * playback feature to align pitch traces with the OSMD cursor.
  */
 import { onScoreLoaded, onScoreCleared, getSession } from '../../services/score-session';
 import { setStatus, showErrorBanner } from '../../services/backend';
@@ -27,9 +26,9 @@ import { type NoteModel } from '../../score/renderer';
 import { resolveSelectedDeviceId, type AudioInputDevice } from '../../audio/devices';
 import { PracticeRecorder } from '../../audio/recorder';
 import { getFrameXPosition } from '../playback/index';
-import { type Feature } from '../../registry';
+import { type Feature } from '../../feature-types';
 
-// ── Module-level singletons (one per app lifetime) ───────────────────────────
+// ── Module-level singletons (survive score reloads) ───────────────────────────
 
 const practiceRecorder = new PracticeRecorder();
 
@@ -58,13 +57,12 @@ const overlaySettings: OverlaySettings = {
 // ── Pitch readout ────────────────────────────────────────────────────────────
 
 function updatePitchReadout(): void {
-  const pitchReadoutEl = document.getElementById('pitch-readout') as HTMLSpanElement;
-  if (!lastPitchFrame) { pitchReadoutEl.textContent = 'Detected: —'; return; }
+  const el = document.getElementById('pitch-readout') as HTMLSpanElement;
+  if (!lastPitchFrame) { el.textContent = 'Detected: —'; return; }
   const hz = midiToFrequency(lastPitchFrame.midi);
   const freqLabel = `${hz.toFixed(2)} Hz`;
-  if (!showNoteNames) { pitchReadoutEl.textContent = `Detected: ${freqLabel}`; return; }
-  const noteName = midiToNoteName(lastPitchFrame.midi);
-  pitchReadoutEl.textContent = `Detected: ${freqLabel} → ${noteName}`;
+  if (!showNoteNames) { el.textContent = `Detected: ${freqLabel}`; return; }
+  el.textContent = `Detected: ${freqLabel} → ${midiToNoteName(lastPitchFrame.midi)}`;
 }
 
 // ── Pitch frame handling ───────────────────────────────────────────────────
@@ -79,15 +77,12 @@ function expectedMidiForFrame(frameTMs: number): number | null {
 function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number }): void {
   lastPitchFrame = { midi: frame.midi };
   updatePitchReadout();
-
   const frameSec = frame.t / 1000;
   if (Number.isFinite(frameSec) && frameSec >= 0) {
     pitchGraphNowSec = Math.max(pitchGraphNowSec, frameSec);
   }
-
-  const expectedMidi = expectedMidiForFrame(frame.t);
   pitchOverlay?.pushFrame(frame, getFrameXPosition(frame.t));
-  pitchGraph?.pushFrame(frame, expectedMidi);
+  pitchGraph?.pushFrame(frame, expectedMidiForFrame(frame.t));
 }
 
 // ── WebSocket ────────────────────────────────────────────────────────────────
@@ -104,12 +99,12 @@ function connectPitchSocket(): void {
   if (!pitchOverlay || syntheticModeEnabled) return;
   shouldReconnectPitchSocket = true;
   if (pitchReconnectTimer !== null) { window.clearTimeout(pitchReconnectTimer); pitchReconnectTimer = null; }
-  if (pitchWs && (pitchWs.readyState === WebSocket.OPEN || pitchWs.readyState === WebSocket.CONNECTING)) return;
+  if (pitchWs && (pitchWs.readyState === WebSocket.OPEN ||
+                  pitchWs.readyState === WebSocket.CONNECTING)) return;
 
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   pitchWs = new WebSocket(`${protocol}://${window.location.host}/ws/pitch`);
-
-  pitchWs.onopen = () => { pitchReconnectAttempts = 0; };
+  pitchWs.onopen  = () => { pitchReconnectAttempts = 0; };
   pitchWs.onerror = () => { pitchWs?.close(); };
   pitchWs.onclose = () => {
     pitchWs = null;
@@ -125,8 +120,7 @@ function connectPitchSocket(): void {
     let payload: unknown;
     try { payload = JSON.parse(event.data) as unknown; } catch { return; }
     const frame = parsePitchFrame(payload);
-    if (!frame) return;
-    handleIncomingPitchFrame(frame);
+    if (frame) handleIncomingPitchFrame(frame);
   };
 }
 
@@ -138,9 +132,7 @@ function startPitchGraphLoop(): void {
     const session = getSession();
     if (syntheticModeEnabled && session?.engine.playing) {
       const elapsedSec = Math.max(0, session.engine.ctx.currentTime - session.engine.startAudioTime);
-      const elapsedMs = elapsedSec * 1000;
-      const expectedMidi = expectedMidiForFrame(elapsedMs);
-      handleIncomingPitchFrame(syntheticPitchFrameAt(elapsedSec, expectedMidi));
+      handleIncomingPitchFrame(syntheticPitchFrameAt(elapsedSec, expectedMidiForFrame(elapsedSec * 1000)));
     }
     if (session?.engine.playing) {
       const playbackSec = Math.max(0, session.engine.ctx.currentTime - session.engine.startAudioTime);
@@ -158,30 +150,32 @@ function stopPitchGraphLoop(): void {
   pitchGraphRafId = null;
 }
 
-// ── Recording helpers ────────────────────────────────────────────────────────
+// ── Recording ───────────────────────────────────────────────────────────────
 
 function setRecordingStatus(msg: string): void {
   const el = document.getElementById('recording-status') as HTMLDivElement;
   el.textContent = msg;
 }
 
-function refreshRecordingControls(
-  recordingEnabledEl: HTMLInputElement,
-  btnRecordStart: HTMLButtonElement,
-  btnRecordStop: HTMLButtonElement,
-  btnRecordPlay: HTMLButtonElement,
-  btnRecordSave: HTMLButtonElement,
-  btnRecordDiscard: HTMLButtonElement,
-): void {
-  const enabled = recordingEnabledEl.checked;
+interface RecordingCtrl {
+  enabled: HTMLInputElement;
+  start: HTMLButtonElement;
+  stop: HTMLButtonElement;
+  play: HTMLButtonElement;
+  save: HTMLButtonElement;
+  discard: HTMLButtonElement;
+}
+
+function refreshRecordingControls(ctrl: RecordingCtrl): void {
+  const enabled = ctrl.enabled.checked;
   const isSupported = PracticeRecorder.isSupported();
   const state = practiceRecorder.state;
-  btnRecordStart.disabled = !enabled || !isSupported || state === 'recording';
-  btnRecordStop.disabled  = !enabled || !isSupported || state !== 'recording';
-  btnRecordPlay.disabled  = !enabled || !isSupported || state !== 'recorded';
-  btnRecordSave.disabled  = !enabled || !isSupported || state !== 'recorded';
-  btnRecordDiscard.disabled = !enabled || !isSupported || state === 'idle';
-  if (!enabled) { setRecordingStatus('Recording disabled.'); return; }
+  ctrl.start.disabled   = !enabled || !isSupported || state === 'recording';
+  ctrl.stop.disabled    = !enabled || !isSupported || state !== 'recording';
+  ctrl.play.disabled    = !enabled || !isSupported || state !== 'recorded';
+  ctrl.save.disabled    = !enabled || !isSupported || state !== 'recorded';
+  ctrl.discard.disabled = !enabled || !isSupported || state === 'idle';
+  if (!enabled)     { setRecordingStatus('Recording disabled.'); return; }
   if (!isSupported) { setRecordingStatus('Recording unsupported in this browser.'); return; }
   if (recordingError) { setRecordingStatus(recordingError); return; }
   if (state === 'idle')      setRecordingStatus('Ready to record.');
@@ -189,7 +183,7 @@ function refreshRecordingControls(
   if (state === 'recorded')  setRecordingStatus('Take captured.');
 }
 
-// ── Settings panel ──────────────────────────────────────────────────────────
+// ── Settings: audio devices ────────────────────────────────────────────────────
 
 async function refreshAudioSettings(
   settingsDeviceEl: HTMLSelectElement,
@@ -240,30 +234,29 @@ function mount(_slot: HTMLElement): void {
   const btnSettings            = document.getElementById('btn-settings')             as HTMLButtonElement;
   const settingsDeviceEl       = document.getElementById('settings-device')         as HTMLSelectElement;
   const settingsConfidenceEl   = document.getElementById('settings-confidence')     as HTMLInputElement;
-  const settingsConfidenceLabelEl = document.getElementById('settings-confidence-label') as HTMLSpanElement;
+  const settingsConfLabelEl    = document.getElementById('settings-confidence-label') as HTMLSpanElement;
   const settingsTrailEl        = document.getElementById('settings-trail')          as HTMLInputElement;
   const settingsTrailLabelEl   = document.getElementById('settings-trail-label')    as HTMLSpanElement;
   const settingsShowNoteNamesEl = document.getElementById('settings-show-note-names') as HTMLInputElement;
-  const settingsSyntheticModeEl = document.getElementById('settings-synthetic-mode') as HTMLInputElement;
+  const settingsSyntheticEl    = document.getElementById('settings-synthetic-mode') as HTMLInputElement;
   const settingsEngineEl       = document.getElementById('settings-engine')         as HTMLDivElement;
   const recordingEnabledEl     = document.getElementById('recording-enabled')       as HTMLInputElement;
-  const btnRecordStart         = document.getElementById('btn-record-start')        as HTMLButtonElement;
-  const btnRecordStop          = document.getElementById('btn-record-stop')         as HTMLButtonElement;
-  const btnRecordPlay          = document.getElementById('btn-record-play')         as HTMLButtonElement;
-  const btnRecordSave          = document.getElementById('btn-record-save')         as HTMLButtonElement;
-  const btnRecordDiscard       = document.getElementById('btn-record-discard')      as HTMLButtonElement;
+
+  const ctrl: RecordingCtrl = {
+    enabled: recordingEnabledEl,
+    start:   document.getElementById('btn-record-start')   as HTMLButtonElement,
+    stop:    document.getElementById('btn-record-stop')    as HTMLButtonElement,
+    play:    document.getElementById('btn-record-play')    as HTMLButtonElement,
+    save:    document.getElementById('btn-record-save')    as HTMLButtonElement,
+    discard: document.getElementById('btn-record-discard') as HTMLButtonElement,
+  };
 
   function updateSettingsLabels(): void {
-    settingsConfidenceLabelEl.textContent = overlaySettings.confidenceThreshold.toFixed(2);
+    settingsConfLabelEl.textContent = overlaySettings.confidenceThreshold.toFixed(2);
     settingsTrailLabelEl.textContent = `${(overlaySettings.trailMs / 1000).toFixed(1)}s`;
   }
 
-  function rc(): void {
-    refreshRecordingControls(recordingEnabledEl,
-      btnRecordStart, btnRecordStop, btnRecordPlay, btnRecordSave, btnRecordDiscard);
-  }
-
-  // ── Pitch graph ──────────────────────────────────────────────────────────
+  // ── Pitch graph init (survives score reloads) ──────────────────────────
   pitchGraph = new PitchGraphCanvas(pitchGraphCanvasEl);
   startPitchGraphLoop();
 
@@ -279,9 +272,10 @@ function mount(_slot: HTMLElement): void {
   });
 
   onScoreLoaded((session) => {
-    // Re-build overlay for new score / part selection
+    // Rebuild overlay whenever a new score or part is selected.
     pitchOverlay?.destroy();
-    pitchOverlay = new PitchOverlay(scoreContainerEl, session.model, session.selectedPart, overlaySettings);
+    pitchOverlay = new PitchOverlay(
+      scoreContainerEl, session.model, session.selectedPart, overlaySettings);
     activePartNotes = session.model.notes.filter((n) => n.part === session.selectedPart);
     pitchGraph?.clear();
     lastPitchFrame = null;
@@ -290,117 +284,101 @@ function mount(_slot: HTMLElement): void {
     connectPitchSocket();
   });
 
-  // ── Settings panel ─────────────────────────────────────────────────────
+  // ── Settings panel init ──────────────────────────────────────────────────
   settingsConfidenceEl.value = String(overlaySettings.confidenceThreshold);
   settingsTrailEl.value = String(overlaySettings.trailMs / 1000);
   settingsShowNoteNamesEl.checked = showNoteNames;
-  settingsSyntheticModeEl.checked = syntheticModeEnabled;
+  settingsSyntheticEl.checked = syntheticModeEnabled;
   updateSettingsLabels();
   updatePitchReadout();
-  rc();
+  refreshRecordingControls(ctrl);
 
   btnSettings.addEventListener('click', async (event) => {
     event.stopPropagation();
     const visible = settingsPanelEl.classList.toggle('visible');
-    if (!visible) return;
-    await refreshAudioSettings(settingsDeviceEl, settingsEngineEl);
+    if (visible) await refreshAudioSettings(settingsDeviceEl, settingsEngineEl);
   });
-
-  settingsPanelEl.addEventListener('click', (event) => { event.stopPropagation(); });
-
-  window.addEventListener('click', (event) => {
+  settingsPanelEl.addEventListener('click', (e) => { e.stopPropagation(); });
+  window.addEventListener('click', (e) => {
     if (!settingsPanelEl.classList.contains('visible')) return;
-    const target = event.target;
+    const target = e.target;
     if (!(target instanceof Node)) return;
     if (settingsPanelEl.contains(target) || btnSettings.contains(target)) return;
     settingsPanelEl.classList.remove('visible');
   });
-
-  window.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') settingsPanelEl.classList.remove('visible');
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') settingsPanelEl.classList.remove('visible');
   });
 
   settingsDeviceEl.addEventListener('change', () => {
-    const value = settingsDeviceEl.value;
-    if (value === '') { selectedDeviceId = null; return; }
-    const parsed = Number.parseInt(value, 10);
+    const v = settingsDeviceEl.value;
+    if (v === '') { selectedDeviceId = null; return; }
+    const parsed = Number.parseInt(v, 10);
     selectedDeviceId = Number.isNaN(parsed) ? null : parsed;
   });
-
   settingsConfidenceEl.addEventListener('input', () => {
     overlaySettings.confidenceThreshold = parseFloat(settingsConfidenceEl.value);
     pitchOverlay?.applySettings(overlaySettings);
     updateSettingsLabels();
   });
-
   settingsTrailEl.addEventListener('input', () => {
     overlaySettings.trailMs = parseFloat(settingsTrailEl.value) * 1000;
     pitchOverlay?.applySettings(overlaySettings);
     updateSettingsLabels();
   });
-
   settingsShowNoteNamesEl.addEventListener('change', () => {
     showNoteNames = settingsShowNoteNamesEl.checked;
     updatePitchReadout();
   });
-
-  settingsSyntheticModeEl.addEventListener('change', () => {
-    syntheticModeEnabled = settingsSyntheticModeEl.checked;
+  settingsSyntheticEl.addEventListener('change', () => {
+    syntheticModeEnabled = settingsSyntheticEl.checked;
     closePitchSocket();
     if (!syntheticModeEnabled) connectPitchSocket();
   });
 
-  // ── Recording ───────────────────────────────────────────────────────────
+  // ── Recording controls ──────────────────────────────────────────────────
   recordingEnabledEl.addEventListener('change', () => {
     if (!recordingEnabledEl.checked) practiceRecorder.discard();
     recordingError = null;
-    rc();
+    refreshRecordingControls(ctrl);
   });
-
-  btnRecordStart.addEventListener('click', async () => {
+  ctrl.start.addEventListener('click', async () => {
     try {
       await practiceRecorder.start();
       recordingError = null;
-      rc();
+      refreshRecordingControls(ctrl);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      recordingError = message.toLowerCase().includes('denied') || message.toLowerCase().includes('notallowed')
+      const msg = err instanceof Error ? err.message : String(err);
+      recordingError = msg.toLowerCase().includes('denied') || msg.toLowerCase().includes('notallowed')
         ? 'Microphone permission denied. Recording remains off until access is granted.'
-        : `Could not start recording: ${message}`;
-      rc();
+        : `Could not start recording: ${msg}`;
+      refreshRecordingControls(ctrl);
     }
   });
-
-  btnRecordStop.addEventListener('click', async () => {
+  ctrl.stop.addEventListener('click', async () => {
     await practiceRecorder.stop();
     recordingError = null;
-    rc();
+    refreshRecordingControls(ctrl);
   });
-
-  btnRecordPlay.addEventListener('click', () => {
-    const audio = practiceRecorder.playLastTake();
-    if (!audio) setRecordingStatus('No take to play yet.');
+  ctrl.play.addEventListener('click', () => {
+    if (!practiceRecorder.playLastTake()) setRecordingStatus('No take to play yet.');
   });
-
-  btnRecordSave.addEventListener('click', async () => {
+  ctrl.save.addEventListener('click', async () => {
     try {
       const saved = await practiceRecorder.saveLastTake();
-      if (!saved) setRecordingStatus('No take to save yet.');
-      else setRecordingStatus('Take saved.');
+      setRecordingStatus(saved ? 'Take saved.' : 'No take to save yet.');
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (message.toLowerCase().includes('abort')) { setRecordingStatus('Save cancelled.'); return; }
-      setRecordingStatus(`Could not save take: ${message}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      setRecordingStatus(msg.toLowerCase().includes('abort') ? 'Save cancelled.' : `Could not save take: ${msg}`);
     }
   });
-
-  btnRecordDiscard.addEventListener('click', () => {
+  ctrl.discard.addEventListener('click', () => {
     practiceRecorder.discard();
     recordingError = null;
-    rc();
+    refreshRecordingControls(ctrl);
   });
 
-  // ── Cleanup on page unload ─────────────────────────────────────────────────
+  // ── Page unload cleanup ───────────────────────────────────────────────────
   window.addEventListener('beforeunload', () => {
     closePitchSocket();
     stopPitchGraphLoop();

@@ -6,21 +6,21 @@
  *   - #transpose-select
  *   - #tempo-slider / #tempo-label
  *
- * Notifies the session store when the selected part changes so the
- * pitch-overlay and playback features can respond.
+ * Calls updateSelectedPart() on change so pitch-overlay can react without
+ * a direct coupling between the two features.
  */
 import { onScoreLoaded, onScoreCleared, getSession, updateSelectedPart } from '../../services/score-session';
 import { setStatus } from '../../services/backend';
 import { getVisiblePartOptions } from '../../part-options';
-import { beatToMs, setPlaybackTempo, setPlaybackTranspose } from '../../transport/controls';
-import { type Feature } from '../../registry';
+import { setPlaybackTempo, setPlaybackTranspose } from '../../transport/controls';
+import { type Feature } from '../../feature-types';
 
 function mount(_slot: HTMLElement): void {
-  const partSelectEl      = document.getElementById('part-select')       as HTMLSelectElement;
+  const partSelectEl      = document.getElementById('part-select')        as HTMLSelectElement;
   const showAccompEl      = document.getElementById('show-accompaniment') as HTMLInputElement;
-  const transposeSelectEl = document.getElementById('transpose-select')  as HTMLSelectElement;
-  const tempoSliderEl     = document.getElementById('tempo-slider')      as HTMLInputElement;
-  const tempoLabelEl      = document.getElementById('tempo-label')       as HTMLSpanElement;
+  const transposeSelectEl = document.getElementById('transpose-select')   as HTMLSelectElement;
+  const tempoSliderEl     = document.getElementById('tempo-slider')       as HTMLInputElement;
+  const tempoLabelEl      = document.getElementById('tempo-label')        as HTMLSpanElement;
 
   function getTransposeSemitones(): number {
     const parsed = parseInt(transposeSelectEl.value, 10);
@@ -31,17 +31,17 @@ function mount(_slot: HTMLElement): void {
     const session = getSession();
     if (!session || !selectedPart) return;
     const { engine, renderer, model } = session;
-    const partExistsInModel = model.parts.includes(selectedPart);
-    const partExistsInNotes = model.notes.some((n) => n.part === selectedPart);
-    if (!partExistsInModel || !partExistsInNotes) return;
+    if (!model.parts.includes(selectedPart)) return;
+    if (!model.notes.some((n) => n.part === selectedPart)) return;
 
     if (engine.state === 'playing') {
       engine.selectPart(selectedPart);
     } else {
-      const semitones = getTransposeSemitones();
-      engine.schedule(model.notes, model.tempo_marks, selectedPart,
-        parseFloat(tempoSliderEl.value) / 100);
-      engine.setTransposeSemitones(semitones);
+      engine.schedule(
+        model.notes, model.tempo_marks, selectedPart,
+        parseFloat(tempoSliderEl.value) / 100,
+      );
+      engine.setTransposeSemitones(getTransposeSemitones());
     }
     renderer.setHighlightedPart(selectedPart);
   }
@@ -58,36 +58,26 @@ function mount(_slot: HTMLElement): void {
     const stillVisible = visibleParts.some((opt) => opt.name === selectedBefore);
     const selectedPart = stillVisible ? selectedBefore : (visibleParts[0]?.name ?? allParts[0] ?? '');
     partSelectEl.value = selectedPart;
-    partSelectEl.disabled = !session.engine || visibleParts.length <= 1;
+    partSelectEl.disabled = visibleParts.length <= 1;
     scheduleSelectedPart(selectedPart);
     updateSelectedPart(selectedPart);
   }
 
-  onScoreCleared(() => {
-    partSelectEl.innerHTML = '';
-  });
+  onScoreCleared(() => { partSelectEl.innerHTML = ''; });
+  onScoreLoaded(() => { refreshPartSelector(); });
 
-  onScoreLoaded(() => {
-    refreshPartSelector();
-  });
-
-  // Part change
   partSelectEl.addEventListener('change', () => {
     scheduleSelectedPart(partSelectEl.value);
     updateSelectedPart(partSelectEl.value);
   });
 
-  showAccompEl.addEventListener('change', () => {
-    refreshPartSelector();
-  });
+  showAccompEl.addEventListener('change', () => { refreshPartSelector(); });
 
   // Tempo
   tempoLabelEl.textContent = `${tempoSliderEl.value}%`;
-
   tempoSliderEl.addEventListener('input', () => {
     tempoLabelEl.textContent = `${tempoSliderEl.value}%`;
   });
-
   tempoSliderEl.addEventListener('change', async () => {
     const session = getSession();
     if (!session) return;
@@ -122,7 +112,7 @@ function mount(_slot: HTMLElement): void {
   });
 }
 
-function unmount(): void { /* stateless — nothing to clean up */ }
+function unmount(): void { /* stateless */ }
 
 export const partSelectorFeature: Feature = {
   id: 'slot-part-selector',

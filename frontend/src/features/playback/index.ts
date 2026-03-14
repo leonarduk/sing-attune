@@ -8,9 +8,6 @@
  *   - Keyboard shortcuts: Space, R, ArrowLeft, ArrowRight
  *   - #headphone-warning banner
  *
- * Reads the current session from score-session; responds to onScoreLoaded /
- * onScoreCleared so it wires/unwires itself automatically.
- *
  * Clock hierarchy (must never be broken):
  *   AudioContext.currentTime → engine.currentBeat → cursor.seekToBeat()
  */
@@ -18,15 +15,14 @@ import { onScoreCleared, getSession } from '../../services/score-session';
 import { setStatus } from '../../services/backend';
 import { beatToMs, postPlayback, startPlayback, seekPlayback } from '../../transport/controls';
 import { elapsedToBeat } from '../../score/timing';
-import { type Feature } from '../../registry';
+import { type Feature } from '../../feature-types';
 
-// ── Cursor RAF state ──────────────────────────────────────────────────────────
+// ── Cursor RAF state ────────────────────────────────────────────────────────────
 
 let cursorRafId: number | null = null;
 let cursorBeatSample: { beat: number; x: number } | null = null;
 let pxPerBeatEstimate = 0;
 
-/** The x-position of the OSMD cursor element within #score-container. */
 function cursorXPosition(): number {
   const session = getSession();
   if (!session) return 0;
@@ -39,11 +35,11 @@ function cursorXPosition(): number {
 }
 
 /**
- * Project a pitch-frame's timestamp onto a screen x-coordinate.
- * Exported so the pitch-overlay feature can import it, keeping px-per-beat
- * estimation in one place.
+ * Project a pitch-frame timestamp onto a screen x-coordinate.
+ * Exported for the pitch-overlay feature so it can align pitch traces with
+ * the cursor without duplicating the px-per-beat estimation logic.
  */
-export function frameXPosition(frameTMs: number): number {
+export function getFrameXPosition(frameTMs: number): number {
   const session = getSession();
   if (!session) return cursorXPosition();
   const frameBeat = elapsedToBeat(frameTMs, 0, session.model.tempo_marks);
@@ -87,15 +83,15 @@ function stopCursorRaf(): void {
   pxPerBeatEstimate = 0;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 async function seekByBeats(delta: number): Promise<void> {
   const session = getSession();
   if (!session) return;
   const { engine, cursor, model } = session;
-  const totalBeats = model.total_beats;
   const stepBeats = model.time_signatures[0]?.numerator ?? 4;
-  const targetBeat = Math.max(0, Math.min(totalBeats, engine.currentBeat + delta * stepBeats));
+  const targetBeat = Math.max(0,
+    Math.min(model.total_beats, engine.currentBeat + delta * stepBeats));
   try {
     await seekPlayback(beatToMs(targetBeat, model, engine.tempoMultiplier));
   } catch (err) {
@@ -108,10 +104,7 @@ async function seekByBeats(delta: number): Promise<void> {
   if (engine.state !== 'playing') stopCursorRaf();
 }
 
-/**
- * Read the currently selected mic device id from the settings-device select.
- * Written by the pitch-overlay feature; read here to pass to startPlayback().
- */
+/** Read the mic device id from the settings-device select (owned by pitch-overlay). */
 function getSelectedDeviceId(): number | null {
   const el = document.getElementById('settings-device') as HTMLSelectElement | null;
   if (!el || el.value === '') return null;
@@ -119,7 +112,7 @@ function getSelectedDeviceId(): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-// ── mount ─────────────────────────────────────────────────────────────────────
+// ── mount ──────────────────────────────────────────────────────────────────
 
 function mount(_slot: HTMLElement): void {
   const btnPlay   = document.getElementById('btn-play')   as HTMLButtonElement;
@@ -131,7 +124,7 @@ function mount(_slot: HTMLElement): void {
 
   onScoreCleared(() => { stopCursorRaf(); });
 
-  // ── Play ──────────────────────────────────────────────────────────────────
+  // ── Play ───────────────────────────────────────────────────────────────
   btnPlay.addEventListener('click', async () => {
     const session = getSession();
     if (!session) return;
@@ -140,7 +133,6 @@ function mount(_slot: HTMLElement): void {
 
     headphoneWarning.classList.remove('hidden');
     const fromBeat = engine.state === 'paused' ? engine.startBeat : 0;
-
     try {
       if (fromBeat > 0) {
         await postPlayback('/playback/resume');
@@ -157,7 +149,7 @@ function mount(_slot: HTMLElement): void {
     }
   });
 
-  // ── Pause ─────────────────────────────────────────────────────────────────
+  // ── Pause ─────────────────────────────────────────────────────────────
   btnPause.addEventListener('click', async () => {
     const session = getSession();
     if (!session) return;
@@ -171,16 +163,15 @@ function mount(_slot: HTMLElement): void {
     }
   });
 
-  // ── Stop ──────────────────────────────────────────────────────────────────
+  // ── Stop ───────────────────────────────────────────────────────────────
   btnStop.addEventListener('click', async () => {
     const session = getSession();
     if (!session) return;
-    const { engine, cursor } = session;
     try {
       await postPlayback('/playback/stop');
-      engine.stop();
+      session.engine.stop();
       stopCursorRaf();
-      cursor.stop();
+      session.cursor.stop();
       headphoneWarning.classList.add('hidden');
     } catch (err) {
       setStatus(`stop failed: ${String(err)}`, 'error');
@@ -188,27 +179,24 @@ function mount(_slot: HTMLElement): void {
     }
   });
 
-  // ── Rewind ────────────────────────────────────────────────────────────────
+  // ── Rewind ─────────────────────────────────────────────────────────────
   btnRewind.addEventListener('click', async () => {
     const session = getSession();
     if (!session) return;
-    const { engine, cursor } = session;
-    try {
-      await postPlayback('/playback/stop');
-    } catch (err) {
+    try { await postPlayback('/playback/stop'); } catch (err) {
       setStatus(`rewind failed: ${String(err)}`, 'error');
       console.error('Rewind failed:', err);
     }
-    engine.stop();
+    session.engine.stop();
     stopCursorRaf();
-    cursor.stop();
-    cursor.osmd.cursor.show();
+    session.cursor.stop();
+    session.cursor.osmd.cursor.show();
     headphoneWarning.classList.add('hidden');
   });
 
   warningDismiss.addEventListener('click', () => { headphoneWarning.classList.add('hidden'); });
 
-  // ── Keyboard shortcuts ────────────────────────────────────────────────────
+  // ── Keyboard shortcuts ───────────────────────────────────────────────────
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
     const tag = (e.target as HTMLElement | null)?.tagName;
@@ -221,7 +209,11 @@ function mount(_slot: HTMLElement): void {
       if (session.engine.state === 'playing') { btnPause.click(); } else { btnPlay.click(); }
       return;
     }
-    if (e.key.toLowerCase() === 'r') { e.preventDefault(); if (!btnRewind.disabled) btnRewind.click(); return; }
+    if (e.key.toLowerCase() === 'r') {
+      e.preventDefault();
+      if (!btnRewind.disabled) btnRewind.click();
+      return;
+    }
     if (e.key === 'ArrowLeft')  { e.preventDefault(); void seekByBeats(-1); return; }
     if (e.key === 'ArrowRight') { e.preventDefault(); void seekByBeats(1); }
   });
@@ -236,6 +228,3 @@ export const playbackFeature: Feature = {
   mount,
   unmount,
 };
-
-/** Re-exported for pitch-overlay feature consumption. */
-export { frameXPosition as getFrameXPosition };
