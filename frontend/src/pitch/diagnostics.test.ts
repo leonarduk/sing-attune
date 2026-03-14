@@ -30,7 +30,13 @@ describe('StablePitchTracker', () => {
     expect(state.noteName).toBe('A4');
   });
 
-  it('resets stability when confidence drops', () => {
+  it('returns null activeMidi when confidence is below threshold', () => {
+    const tracker = new StablePitchTracker();
+    const state = tracker.push({ t: 0, midi: 69.0, conf: 0.3 }, 0.6);
+    expect(state.activeMidi).toBeNull();
+  });
+
+  it('resets stability when confidence drops and recovers after STABLE_FRAMES_REQUIRED frames', () => {
     const tracker = new StablePitchTracker();
     tracker.push({ t: 0, midi: 69.0, conf: 0.9 }, 0.6);
     tracker.push({ t: 50, midi: 69.1, conf: 0.9 }, 0.6);
@@ -41,8 +47,16 @@ describe('StablePitchTracker', () => {
     expect(dropped.stable).toBe(false);
     expect(dropped.heldMs).toBe(0);
 
-    const recovered = tracker.push({ t: 250, midi: 69.1, conf: 0.9 }, 0.6);
-    expect(recovered.stable).toBe(false);
-    expect(recovered.heldMs).toBe(0);
+    // One frame back — still not stable (run restarted at 1)
+    const recovered1 = tracker.push({ t: 250, midi: 69.1, conf: 0.9 }, 0.6);
+    expect(recovered1.stable).toBe(false);
+    expect(recovered1.heldMs).toBe(0);
+
+    // Fill remaining frames to reach STABLE_FRAMES_REQUIRED (= 4)
+    tracker.push({ t: 300, midi: 69.1, conf: 0.9 }, 0.6);
+    tracker.push({ t: 350, midi: 69.1, conf: 0.9 }, 0.6);
+    const fullyRecovered = tracker.push({ t: 400, midi: 69.1, conf: 0.9 }, 0.6);
+    expect(fullyRecovered.stable).toBe(true);
+    expect(fullyRecovered.activeMidi).toBe(69);
   });
 });

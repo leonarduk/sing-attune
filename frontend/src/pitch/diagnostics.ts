@@ -12,7 +12,7 @@ export interface DiagnosticState {
   confidence: number;
   stable: boolean;
   heldMs: number;
-  activeMidi: number;
+  activeMidi: number | null;
 }
 
 const STABLE_FRAMES_REQUIRED = 4;
@@ -35,13 +35,13 @@ export class StablePitchTracker {
   }
 
   push(frame: DiagnosticFrame, confidenceThreshold: number): DiagnosticState {
-    const rounded = Number.isFinite(frame.midi) ? Math.round(frame.midi) : 0;
+    const rounded = Number.isFinite(frame.midi) ? Math.round(frame.midi) : null;
     const cents = midiToCentsOffset(frame.midi);
-    const noteName = midiToNoteName(rounded);
+    const noteName = rounded !== null ? midiToNoteName(rounded) : '—';
     const confidenceOk = frame.conf >= confidenceThreshold;
     const centsOk = Math.abs(cents) <= STABLE_CENTS_LIMIT;
 
-    if (!confidenceOk || !centsOk) {
+    if (!confidenceOk || !centsOk || rounded === null) {
       this.lastRoundedMidi = null;
       this.runLength = 0;
       this.heldStartMs = null;
@@ -51,7 +51,7 @@ export class StablePitchTracker {
         confidence: frame.conf,
         stable: false,
         heldMs: 0,
-        activeMidi: rounded,
+        activeMidi: null,
       };
     }
 

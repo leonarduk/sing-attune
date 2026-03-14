@@ -397,7 +397,6 @@ function mount(_slot: HTMLElement): void {
   pitchGraph = new PitchGraphCanvas(pitchGraphCanvasEl);
   bindPlaybackSync();
   startPitchGraphLoop();
-  renderMiniKeyboard(null);
   clearDiagnostics();
   clearPhraseSummaryPanel();
 
