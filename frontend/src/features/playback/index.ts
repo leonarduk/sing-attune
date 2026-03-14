@@ -18,6 +18,7 @@
 import { onScoreCleared, onScoreLoaded, getSession } from '../../services/score-session';
 import { setStatus } from '../../services/backend';
 import { recordBeatSample, resetProjection, getCursorX } from '../../services/cursor-projection';
+import { emitPlaybackSyncEvent } from '../../services/playback-sync';
 import { beatToMs, postPlayback, startPlayback, seekPlayback } from '../../transport/controls';
 import { type Feature } from '../../feature-types';
 
@@ -57,7 +58,14 @@ async function seekByBeats(delta: number): Promise<void> {
   const targetBeat = Math.max(0,
     Math.min(model.total_beats, engine.currentBeat + delta * stepBeats));
   try {
-    await seekPlayback(beatToMs(targetBeat, model, engine.tempoMultiplier));
+    const audioTimeSec = engine.ctx.currentTime;
+    const response = await seekPlayback(beatToMs(targetBeat, model, engine.tempoMultiplier));
+    emitPlaybackSyncEvent({
+      type: 'seek',
+      tMs: response.t_ms,
+      audioTimeSec,
+      syncOffsetMs: null,
+    });
   } catch (err) {
     setStatus(`seek failed: ${String(err)}`, 'error');
     console.error('Seek failed:', err);
@@ -118,9 +126,23 @@ function mount(_slot: HTMLElement): void {
     const fromBeat = engine.state === 'paused' ? engine.startBeat : 0;
     try {
       if (fromBeat > 0) {
-        await postPlayback('/playback/resume');
+        const audioTimeSec = engine.ctx.currentTime;
+        const response = await postPlayback('/playback/resume');
+        emitPlaybackSyncEvent({
+          type: 'resume',
+          tMs: response.t_ms,
+          audioTimeSec,
+          syncOffsetMs: null,
+        });
       } else {
-        await startPlayback(getSelectedDeviceId());
+        const audioTimeSec = engine.ctx.currentTime;
+        const response = await startPlayback(getSelectedDeviceId());
+        emitPlaybackSyncEvent({
+          type: 'start',
+          tMs: response.t_ms,
+          audioTimeSec,
+          syncOffsetMs: null,
+        });
         cursor.stop();
         cursor.osmd.cursor.show();
       }
@@ -139,11 +161,25 @@ function mount(_slot: HTMLElement): void {
     const { engine } = session;
     try {
       if (engine.state === 'playing') {
-        await postPlayback('/playback/pause');
+        const audioTimeSec = engine.ctx.currentTime;
+        const response = await postPlayback('/playback/pause');
+        emitPlaybackSyncEvent({
+          type: 'pause',
+          tMs: response.t_ms,
+          audioTimeSec,
+          syncOffsetMs: null,
+        });
         engine.pause();
         stopCursorRaf();
       } else if (engine.state === 'paused') {
-        await postPlayback('/playback/resume');
+        const audioTimeSec = engine.ctx.currentTime;
+        const response = await postPlayback('/playback/resume');
+        emitPlaybackSyncEvent({
+          type: 'resume',
+          tMs: response.t_ms,
+          audioTimeSec,
+          syncOffsetMs: null,
+        });
         engine.play(engine.startBeat);
         startCursorRaf();
       }
@@ -158,8 +194,15 @@ function mount(_slot: HTMLElement): void {
     const session = getSession();
     if (!session) return;
     try {
-      await postPlayback('/playback/stop');
+      const audioTimeSec = session.engine.ctx.currentTime;
+      const response = await postPlayback('/playback/stop');
       session.engine.stop();
+      emitPlaybackSyncEvent({
+        type: 'stop',
+        tMs: response.t_ms,
+        audioTimeSec,
+        syncOffsetMs: null,
+      });
       stopCursorRaf();
       session.cursor.stop();
       headphoneWarning.classList.add('hidden');
@@ -173,7 +216,16 @@ function mount(_slot: HTMLElement): void {
   btnRewind.addEventListener('click', async () => {
     const session = getSession();
     if (!session) return;
-    try { await postPlayback('/playback/stop'); } catch (err) {
+    try {
+      const audioTimeSec = session.engine.ctx.currentTime;
+      const response = await postPlayback('/playback/stop');
+      emitPlaybackSyncEvent({
+        type: 'stop',
+        tMs: response.t_ms,
+        audioTimeSec,
+        syncOffsetMs: null,
+      });
+    } catch (err) {
       setStatus(`rewind failed: ${String(err)}`, 'error');
       console.error('Rewind failed:', err);
     }
