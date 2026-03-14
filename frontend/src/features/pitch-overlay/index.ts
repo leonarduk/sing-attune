@@ -21,7 +21,7 @@ import { showErrorBanner } from '../../services/backend';
 import { getFrameXPosition } from '../../services/cursor-projection';
 import { DEFAULT_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from '../../pitch/overlay';
 import { PitchGraphCanvas } from '../../pitch/graph';
-import { expectedNoteAtBeat } from '../../pitch/accuracy';
+import { expectedNoteAtBeat, GREEN_CENTS_THRESHOLD, AMBER_CENTS_THRESHOLD } from '../../pitch/accuracy';
 import { syntheticPitchFrameAt } from '../../pitch/synthetic';
 import { PitchTimelineSync } from '../../pitch/timeline-sync';
 import { parsePitchSocketMessage, reconnectDelayMs } from '../../pitch/socket';
@@ -193,7 +193,7 @@ function renderPhraseSummary(summary: PhraseSummary): void {
     <div class="phrase-summary-card">
       <div class="phrase-summary-title">Phrase ${summary.phraseId} · ${summary.withinTolerancePct.toFixed(0)}% in tolerance</div>
       <div class="phrase-summary-notes">${notesHtml}</div>
-      <div class="phrase-summary-legend">🟢 ≤50c · 🟡 51–100c · 🔴 &gt;100c</div>
+      <div class="phrase-summary-legend">🟢 ≤${GREEN_CENTS_THRESHOLD}c · 🟡 ${GREEN_CENTS_THRESHOLD + 1}–${AMBER_CENTS_THRESHOLD}c · 🔴 &gt;${AMBER_CENTS_THRESHOLD}c</div>
     </div>
   `;
 }
