@@ -18,6 +18,7 @@
 import { onScoreCleared, getSession } from '../../services/score-session';
 import { setStatus } from '../../services/backend';
 import { recordBeatSample, resetProjection, getCursorX } from '../../services/cursor-projection';
+import { finishPracticeSessionCapture, startPracticeSessionCapture } from '../../services/progress-history';
 import { beatToMs, postPlayback, startPlayback, seekPlayback } from '../../transport/controls';
 import { type Feature } from '../../feature-types';
 
@@ -86,6 +87,7 @@ function mount(_slot: HTMLElement): void {
   const warningDismiss   = document.getElementById('warning-dismiss')   as HTMLButtonElement;
 
   onScoreCleared(() => { stopCursorRaf(); });
+  onScoreCleared(() => { finishPracticeSessionCapture(); });
 
   btnPlay.addEventListener('click', async () => {
     const session = getSession();
@@ -98,6 +100,7 @@ function mount(_slot: HTMLElement): void {
       if (fromBeat > 0) {
         await postPlayback('/playback/resume');
       } else {
+        startPracticeSessionCapture(session.model.title, session.selectedPart);
         await startPlayback(getSelectedDeviceId());
         cursor.stop();
         cursor.osmd.cursor.show();
@@ -129,6 +132,7 @@ function mount(_slot: HTMLElement): void {
     try {
       await postPlayback('/playback/stop');
       session.engine.stop();
+      finishPracticeSessionCapture();
       stopCursorRaf();
       session.cursor.stop();
       headphoneWarning.classList.add('hidden');
@@ -146,6 +150,7 @@ function mount(_slot: HTMLElement): void {
       console.error('Rewind failed:', err);
     }
     session.engine.stop();
+    finishPracticeSessionCapture();
     stopCursorRaf();
     session.cursor.stop();
     session.cursor.osmd.cursor.show();
