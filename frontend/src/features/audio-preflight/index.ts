@@ -121,6 +121,7 @@ function startLevelMeter(): void {
 }
 
 async function ensureMonitorStream(): Promise<void> {
+  // Always clean up first; cleanupMonitor() closes and nulls monitorCtx.
   cleanupMonitor();
 
   const constraints: MediaStreamConstraints = {
@@ -137,7 +138,7 @@ async function ensureMonitorStream(): Promise<void> {
     persistPreflightDeviceId(selectedDeviceId);
   }
 
-  const ctx = (!monitorCtx || monitorCtx.state === 'closed') ? new AudioContext() : monitorCtx;
+  const ctx = new AudioContext();
   if (ctx.state === 'suspended') {
     await ctx.resume();
   }
@@ -346,8 +347,7 @@ function mount(_slot: HTMLElement): void {
 
 function unmount(): void {
   cleanupMonitor();
-  void monitorCtx?.close().catch(() => undefined);
-  monitorCtx = null;
+  // monitorCtx is already closed and nulled by cleanupMonitor()
   modalEl?.remove();
   modalEl = null;
 }
