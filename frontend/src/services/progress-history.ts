@@ -108,11 +108,12 @@ export function capturePitchFrame(frame: { t: number; midi: number; conf: number
   if (!activeCapture) return;
 
   // Always accumulate duration (regardless of voicing quality) so wall time is
-  // tracked even through quiet passages.
+  // tracked even through quiet passages. Use Math.abs so out-of-order frames
+  // (e.g. late UDP delivery) still contribute rather than being silently dropped.
   if (activeCapture.lastFrameTMs === null) {
     activeCapture.singingDurationMs += DEFAULT_FRAME_DURATION_MS;
-  } else if (frame.t >= activeCapture.lastFrameTMs) {
-    const delta = frame.t - activeCapture.lastFrameTMs;
+  } else {
+    const delta = Math.abs(frame.t - activeCapture.lastFrameTMs);
     if (delta <= MAX_FRAME_GAP_MS) activeCapture.singingDurationMs += delta;
   }
   activeCapture.lastFrameTMs = frame.t;
