@@ -32,6 +32,7 @@ import { type NoteModel } from '../../score/renderer';
 import { PhraseSummaryTracker, type PhraseSummary } from '../../pitch/phrase-summary';
 import { resolveSelectedDeviceId, type AudioInputDevice } from '../../audio/devices';
 import { PracticeRecorder } from '../../audio/recorder';
+import { capturePitchFrame } from '../../services/progress-history';
 import { type Feature } from '../../feature-types';
 
 // ── Module-level singletons (survive score reloads) ───────────────────────────
@@ -103,6 +104,7 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
   }
   pitchOverlay?.pushFrame(frame, getFrameXPosition(frame.t));
   pitchGraph?.pushFrame(frame, expectedMidiForFrame(frame.t));
+  capturePitchFrame(frame);
   const completedPhrases = phraseSummaryTracker?.pushFrame(frame) ?? [];
   for (const summary of completedPhrases) {
     renderPhraseSummary(summary);
