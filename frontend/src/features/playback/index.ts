@@ -58,11 +58,13 @@ async function seekByBeats(delta: number): Promise<void> {
   const targetBeat = Math.max(0,
     Math.min(model.total_beats, engine.currentBeat + delta * stepBeats));
   try {
+    const audioTimeSec = engine.ctx.currentTime;
     const response = await seekPlayback(beatToMs(targetBeat, model, engine.tempoMultiplier));
     emitPlaybackSyncEvent({
       type: 'seek',
       tMs: response.t_ms,
-      audioTimeSec: engine.ctx.currentTime,
+      audioTimeSec,
+      syncOffsetMs: null,
     });
   } catch (err) {
     setStatus(`seek failed: ${String(err)}`, 'error');
@@ -124,18 +126,22 @@ function mount(_slot: HTMLElement): void {
     const fromBeat = engine.state === 'paused' ? engine.startBeat : 0;
     try {
       if (fromBeat > 0) {
+        const audioTimeSec = engine.ctx.currentTime;
         const response = await postPlayback('/playback/resume');
         emitPlaybackSyncEvent({
           type: 'resume',
           tMs: response.t_ms,
-          audioTimeSec: engine.ctx.currentTime,
+          audioTimeSec,
+          syncOffsetMs: null,
         });
       } else {
+        const audioTimeSec = engine.ctx.currentTime;
         const response = await startPlayback(getSelectedDeviceId());
         emitPlaybackSyncEvent({
           type: 'start',
           tMs: response.t_ms,
-          audioTimeSec: engine.ctx.currentTime,
+          audioTimeSec,
+          syncOffsetMs: null,
         });
         cursor.stop();
         cursor.osmd.cursor.show();
@@ -155,11 +161,25 @@ function mount(_slot: HTMLElement): void {
     const { engine } = session;
     try {
       if (engine.state === 'playing') {
-        await postPlayback('/playback/pause');
+        const audioTimeSec = engine.ctx.currentTime;
+        const response = await postPlayback('/playback/pause');
+        emitPlaybackSyncEvent({
+          type: 'pause',
+          tMs: response.t_ms,
+          audioTimeSec,
+          syncOffsetMs: null,
+        });
         engine.pause();
         stopCursorRaf();
       } else if (engine.state === 'paused') {
-        await postPlayback('/playback/resume');
+        const audioTimeSec = engine.ctx.currentTime;
+        const response = await postPlayback('/playback/resume');
+        emitPlaybackSyncEvent({
+          type: 'resume',
+          tMs: response.t_ms,
+          audioTimeSec,
+          syncOffsetMs: null,
+        });
         engine.play(engine.startBeat);
         startCursorRaf();
       }
@@ -174,12 +194,14 @@ function mount(_slot: HTMLElement): void {
     const session = getSession();
     if (!session) return;
     try {
+      const audioTimeSec = session.engine.ctx.currentTime;
       const response = await postPlayback('/playback/stop');
       session.engine.stop();
       emitPlaybackSyncEvent({
         type: 'stop',
         tMs: response.t_ms,
-        audioTimeSec: session.engine.ctx.currentTime,
+        audioTimeSec,
+        syncOffsetMs: null,
       });
       stopCursorRaf();
       session.cursor.stop();
@@ -195,11 +217,13 @@ function mount(_slot: HTMLElement): void {
     const session = getSession();
     if (!session) return;
     try {
+      const audioTimeSec = session.engine.ctx.currentTime;
       const response = await postPlayback('/playback/stop');
       emitPlaybackSyncEvent({
         type: 'stop',
         tMs: response.t_ms,
-        audioTimeSec: session.engine.ctx.currentTime,
+        audioTimeSec,
+        syncOffsetMs: null,
       });
     } catch (err) {
       setStatus(`rewind failed: ${String(err)}`, 'error');

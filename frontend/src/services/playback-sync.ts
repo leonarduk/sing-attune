@@ -4,6 +4,7 @@ export interface PlaybackSyncEvent {
   type: PlaybackSyncEventType;
   tMs: number;
   audioTimeSec: number;
+  syncOffsetMs: number | null;
 }
 
 type PlaybackSyncListener = (event: PlaybackSyncEvent) => void;

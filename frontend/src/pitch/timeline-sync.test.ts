@@ -34,4 +34,18 @@ describe('PitchTimelineSync', () => {
     expect(sync.audioToFrameTime(1.2)).toBeNull();
     expect(sync.isFrameStale(100, 1.2, 500)).toBe(false);
   });
+
+
+  it('applies sync offset to conversions and re-anchoring', () => {
+    const sync = new PitchTimelineSync();
+    sync.setSyncOffsetMs(80);
+    sync.reanchor(1000, 10);
+
+    expect(sync.frameToAudioTime(1000)).toBeCloseTo(10, 6);
+    expect(sync.audioToFrameTime(10.3)).toBeCloseTo(1300, 6);
+
+    sync.setSyncOffsetMs(20);
+    expect(sync.frameToAudioTime(1300)).toBeCloseTo(10.3, 6);
+  });
+
 });

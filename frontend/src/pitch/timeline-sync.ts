@@ -9,14 +9,23 @@ interface TimelineAnchor {
  */
 export class PitchTimelineSync {
   private anchor: TimelineAnchor | null = null;
+  private syncOffsetMs = 0;
 
   reset(): void {
     this.anchor = null;
   }
 
+  setSyncOffsetMs(offsetMs: number): void {
+    if (!Number.isFinite(offsetMs)) return;
+    if (this.anchor) {
+      this.anchor.frameMs += (offsetMs - this.syncOffsetMs);
+    }
+    this.syncOffsetMs = offsetMs;
+  }
+
   reanchor(frameMs: number, audioTimeSec: number): void {
     this.anchor = {
-      frameMs,
+      frameMs: frameMs + this.syncOffsetMs,
       audioTimeSec,
     };
   }
@@ -27,12 +36,12 @@ export class PitchTimelineSync {
 
   frameToAudioTime(frameMs: number): number | null {
     if (!this.anchor) return null;
-    return this.anchor.audioTimeSec + ((frameMs - this.anchor.frameMs) / 1000);
+    return this.anchor.audioTimeSec + (((frameMs + this.syncOffsetMs) - this.anchor.frameMs) / 1000);
   }
 
   audioToFrameTime(audioTimeSec: number): number | null {
     if (!this.anchor) return null;
-    return this.anchor.frameMs + ((audioTimeSec - this.anchor.audioTimeSec) * 1000);
+    return (this.anchor.frameMs + ((audioTimeSec - this.anchor.audioTimeSec) * 1000)) - this.syncOffsetMs;
   }
 
   isFrameStale(frameMs: number, nowAudioTimeSec: number, visibleWindowMs: number): boolean {

@@ -54,6 +54,7 @@ let selectedDeviceId: number | null = null;
 let recordingError: string | null = null;
 const timelineSync = new PitchTimelineSync();
 let playbackSyncUnsubscribe: (() => void) | null = null;
+let syncOffsetWarningShown = false;
 
 const overlaySettings: OverlaySettings = {
   confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
@@ -121,10 +122,15 @@ function bindPlaybackSync(): void {
     if (event.type === 'pause') {
       return;
     }
+    if (event.syncOffsetMs === null && !syncOffsetWarningShown) {
+      console.info('Pitch sync offset unavailable; using default offset 0ms until protocol in issue #27 is implemented.');
+      syncOffsetWarningShown = true;
+    }
+    timelineSync.setSyncOffsetMs(event.syncOffsetMs ?? 0);
+    pitchGraphNowSec = event.tMs / 1000;
     timelineSync.reanchor(event.tMs, event.audioTimeSec);
     pitchOverlay?.clear();
     pitchGraph?.clear();
-    pitchGraphNowSec = event.tMs / 1000;
   });
 }
 
