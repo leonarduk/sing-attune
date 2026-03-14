@@ -16,7 +16,7 @@
  * playback feature) to preserve feature isolation.
  */
 import { onScoreLoaded, onScoreCleared, getSession } from '../../services/score-session';
-import { setStatus, showErrorBanner } from '../../services/backend';
+import { showErrorBanner } from '../../services/backend';
 import { getFrameXPosition } from '../../services/cursor-projection';
 import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from '../../pitch/overlay';
 import { PitchGraphCanvas } from '../../pitch/graph';
