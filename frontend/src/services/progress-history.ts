@@ -18,13 +18,18 @@ interface ActiveCapture {
   confidenceSum: number;
   confidenceCount: number;
   singingDurationMs: number;
-  lastFrameTMs: number | null;
+  /** Monotonic high-water mark: the largest frame.t seen so far.
+   *  Out-of-order frames (t < maxFrameTMs) are skipped for duration
+   *  to avoid double-counting retransmits or jitter. */
+  maxFrameTMs: number | null;
 }
 
 const STORAGE_KEY = 'sing-attune.progress-history.v1';
 const MAX_SAVED_SESSIONS = 250;
 const MAX_FRAME_GAP_MS = 2000;
 const DEFAULT_FRAME_DURATION_MS = 100;
+/** Sessions shorter than this are discarded as accidental button presses. */
+const MIN_SESSION_DURATION_MS = 500;
 /** Frames below this confidence are excluded from range and average stats. */
 const MIN_VOICED_CONFIDENCE = 0.5;
 
@@ -100,23 +105,28 @@ export function startPracticeSessionCapture(pieceName: string, part: string, tim
     confidenceSum: 0,
     confidenceCount: 0,
     singingDurationMs: 0,
-    lastFrameTMs: null,
+    maxFrameTMs: null,
   };
 }
 
 export function capturePitchFrame(frame: { t: number; midi: number; conf: number }): void {
   if (!activeCapture) return;
 
-  // Always accumulate duration (regardless of voicing quality) so wall time is
-  // tracked even through quiet passages. Use Math.abs so out-of-order frames
-  // (e.g. late UDP delivery) still contribute rather than being silently dropped.
-  if (activeCapture.lastFrameTMs === null) {
+  // Duration: advance only when frame.t moves the monotonic clock forward.
+  // Out-of-order frames (t < maxFrameTMs) are retransmits or jitter —
+  // skip them for duration to avoid double-counting elapsed time.
+  if (activeCapture.maxFrameTMs === null) {
+    // First frame: credit a nominal duration rather than zero.
     activeCapture.singingDurationMs += DEFAULT_FRAME_DURATION_MS;
-  } else {
-    const delta = Math.abs(frame.t - activeCapture.lastFrameTMs);
+  } else if (frame.t > activeCapture.maxFrameTMs) {
+    const delta = frame.t - activeCapture.maxFrameTMs;
     if (delta <= MAX_FRAME_GAP_MS) activeCapture.singingDurationMs += delta;
+    // delta > MAX_FRAME_GAP_MS: treat as a pause/resume gap — don't count it.
   }
-  activeCapture.lastFrameTMs = frame.t;
+  // Always advance the high-water mark forward; never move it back.
+  if (activeCapture.maxFrameTMs === null || frame.t > activeCapture.maxFrameTMs) {
+    activeCapture.maxFrameTMs = frame.t;
+  }
 
   // Only include sufficiently confident (voiced) frames in pitch range and
   // average confidence stats to avoid unvoiced noise corrupting the summary.
@@ -129,19 +139,25 @@ export function capturePitchFrame(frame: { t: number; midi: number; conf: number
 
 export function finishPracticeSessionCapture(): PracticeSessionSummary | null {
   if (!activeCapture) return null;
+  const capture = activeCapture;
+  activeCapture = null;
+
+  // Discard sessions that are too short to be meaningful (e.g. accidental
+  // play→stop with no real singing, or stop fired before any frames arrived).
+  if (capture.singingDurationMs < MIN_SESSION_DURATION_MS) return null;
+
   const complete: PracticeSessionSummary = {
     id: crypto.randomUUID(),
-    timestamp: activeCapture.timestamp,
-    pieceName: activeCapture.pieceName,
-    part: activeCapture.part,
-    minMidi: activeCapture.minMidi,
-    maxMidi: activeCapture.maxMidi,
-    averageConfidence: activeCapture.confidenceCount > 0
-      ? activeCapture.confidenceSum / activeCapture.confidenceCount
+    timestamp: capture.timestamp,
+    pieceName: capture.pieceName,
+    part: capture.part,
+    minMidi: capture.minMidi,
+    maxMidi: capture.maxMidi,
+    averageConfidence: capture.confidenceCount > 0
+      ? capture.confidenceSum / capture.confidenceCount
       : 0,
-    singingDurationMs: activeCapture.singingDurationMs,
+    singingDurationMs: capture.singingDurationMs,
   };
-  activeCapture = null;
 
   const existing = loadPracticeHistory();
   writeSessions([complete, ...existing].slice(0, MAX_SAVED_SESSIONS));
