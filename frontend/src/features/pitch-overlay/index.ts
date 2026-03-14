@@ -16,7 +16,7 @@
  * playback feature) to preserve feature isolation.
  */
 import { onScoreLoaded, onScoreCleared, getSession } from '../../services/score-session';
-import { setStatus, showErrorBanner } from '../../services/backend';
+import { showErrorBanner } from '../../services/backend';
 import { getFrameXPosition } from '../../services/cursor-projection';
 import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from '../../pitch/overlay';
 import { PitchGraphCanvas } from '../../pitch/graph';
@@ -26,6 +26,7 @@ import { parsePitchFrame, reconnectDelayMs } from '../../pitch/socket';
 import { midiToFrequency, midiToNoteName } from '../../pitch/note-name';
 import { elapsedToBeat } from '../../score/timing';
 import { type NoteModel } from '../../score/renderer';
+import { PhraseSummaryTracker, type PhraseSummary } from '../../pitch/phrase-summary';
 import { resolveSelectedDeviceId, type AudioInputDevice } from '../../audio/devices';
 import { PracticeRecorder } from '../../audio/recorder';
 import { type Feature } from '../../feature-types';
@@ -50,6 +51,7 @@ let showNoteNames = false;
 let syntheticModeEnabled = false;
 let selectedDeviceId: number | null = null;
 let recordingError: string | null = null;
+let phraseSummaryTracker: PhraseSummaryTracker | null = null;
 
 const overlaySettings: OverlaySettings = {
   confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
@@ -85,6 +87,41 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
   }
   pitchOverlay?.pushFrame(frame, getFrameXPosition(frame.t));
   pitchGraph?.pushFrame(frame, expectedMidiForFrame(frame.t));
+  const completedPhrases = phraseSummaryTracker?.pushFrame(frame) ?? [];
+  if (completedPhrases.length > 0) {
+    renderPhraseSummary(completedPhrases[completedPhrases.length - 1]);
+  }
+}
+
+function clearPhraseSummaryPanel(): void {
+  const panel = document.getElementById('phrase-summary-panel') as HTMLDivElement | null;
+  if (!panel) return;
+  panel.innerHTML = '<p class="phrase-summary-empty">Phrase summary will appear after a phrase completes.</p>';
+}
+
+function renderPhraseSummary(summary: PhraseSummary): void {
+  const panel = document.getElementById('phrase-summary-panel') as HTMLDivElement | null;
+  if (!panel) return;
+
+  const notesHtml = summary.noteSummaries.map((note) => {
+    const cents = note.meanCents > 0 ? `+${note.meanCents.toFixed(0)}c` : `${note.meanCents.toFixed(0)}c`;
+    const direction = note.direction === 'neutral' ? 'neutral' : `${note.direction} ${cents}`;
+    return `<span class="phrase-badge phrase-badge-${note.badge}">${note.label} ${badgeEmoji(note.badge)} · ${direction}</span>`;
+  }).join('');
+
+  panel.innerHTML = `
+    <div class="phrase-summary-card">
+      <div class="phrase-summary-title">Phrase ${summary.phraseId} · ${summary.withinTolerancePct.toFixed(0)}% in tolerance</div>
+      <div class="phrase-summary-notes">${notesHtml}</div>
+      <div class="phrase-summary-legend">🟢 ≤50c · 🟡 51–100c · 🔴 &gt;100c</div>
+    </div>
+  `;
+}
+
+function badgeEmoji(badge: 'green' | 'amber' | 'red'): string {
+  if (badge === 'green') return '🟢';
+  if (badge === 'amber') return '🟡';
+  return '🔴';
 }
 
 // ── WebSocket ────────────────────────────────────────────────────────────────
@@ -234,6 +271,8 @@ function mount(_slot: HTMLElement): void {
   const settingsSynthEl     = document.getElementById('settings-synthetic-mode')  as HTMLInputElement;
   const settingsEngineEl    = document.getElementById('settings-engine')           as HTMLDivElement;
   const recordingEnabledEl  = document.getElementById('recording-enabled')        as HTMLInputElement;
+  const btnStop             = document.getElementById('btn-stop')                 as HTMLButtonElement;
+  const btnRewind           = document.getElementById('btn-rewind')               as HTMLButtonElement;
 
   const ctrl: RecordingCtrl = {
     enabled: recordingEnabledEl,
@@ -251,6 +290,7 @@ function mount(_slot: HTMLElement): void {
 
   pitchGraph = new PitchGraphCanvas(pitchGraphCanvasEl);
   startPitchGraphLoop();
+  clearPhraseSummaryPanel();
 
   onScoreCleared(() => {
     closePitchSocket();
@@ -259,6 +299,8 @@ function mount(_slot: HTMLElement): void {
     pitchGraph?.clear();
     lastPitchFrame = null;
     pitchGraphNowSec = 0;
+    phraseSummaryTracker = null;
+    clearPhraseSummaryPanel();
     updatePitchReadout();
   });
 
@@ -267,11 +309,22 @@ function mount(_slot: HTMLElement): void {
     pitchOverlay = new PitchOverlay(
       scoreContainerEl, session.model, session.selectedPart, overlaySettings);
     activePartNotes = session.model.notes.filter((n) => n.part === session.selectedPart);
+    phraseSummaryTracker = new PhraseSummaryTracker(activePartNotes, session.model.tempo_marks);
     pitchGraph?.clear();
     lastPitchFrame = null;
     pitchGraphNowSec = 0;
+    clearPhraseSummaryPanel();
     updatePitchReadout();
     connectPitchSocket();
+  });
+
+  btnStop.addEventListener('click', () => {
+    phraseSummaryTracker?.reset();
+    clearPhraseSummaryPanel();
+  });
+  btnRewind.addEventListener('click', () => {
+    phraseSummaryTracker?.reset();
+    clearPhraseSummaryPanel();
   });
 
   // Settings panel init

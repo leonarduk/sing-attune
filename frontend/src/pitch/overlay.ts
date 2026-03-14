@@ -1,8 +1,8 @@
 import type { ScoreModel, NoteModel } from '../score/renderer';
 import { elapsedToBeat } from '../score/timing';
-import { classifyPitchColor, expectedNoteAtBeat, type DotColor } from './accuracy';
+import { classifyPitchColor, expectedNoteAtBeat, MIN_CONFIDENCE_FOR_DOT, type DotColor } from './accuracy';
 
-export const MIN_CONFIDENCE_THRESHOLD = 0.6;
+export const MIN_CONFIDENCE_THRESHOLD = MIN_CONFIDENCE_FOR_DOT;
 export const MAX_CONFIDENCE_THRESHOLD = 0.95;
 export const MIN_TRAIL_MS = 500;
 export const MAX_TRAIL_MS = 5000;
