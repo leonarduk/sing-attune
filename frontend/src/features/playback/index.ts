@@ -94,8 +94,10 @@ function mount(_slot: HTMLElement): void {
   const headphoneWarning = document.getElementById('headphone-warning') as HTMLDivElement;
   const warningDismiss   = document.getElementById('warning-dismiss')   as HTMLButtonElement;
 
-  onScoreCleared(() => { stopCursorRaf(); });
-  onScoreCleared(() => { finishPracticeSessionCapture(); });
+  // Merge into a single onScoreCleared callback so both always fire together,
+  // regardless of whether the implementation replaces or appends listeners.
+  onScoreCleared(() => { stopCursorRaf(); finishPracticeSessionCapture(); });
+
   function syncPauseButton(): void {
     const session = getSession();
     if (!session) {

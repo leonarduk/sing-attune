@@ -25,6 +25,8 @@ const STORAGE_KEY = 'sing-attune.progress-history.v1';
 const MAX_SAVED_SESSIONS = 250;
 const MAX_FRAME_GAP_MS = 2000;
 const DEFAULT_FRAME_DURATION_MS = 100;
+/** Frames below this confidence are excluded from range and average stats. */
+const MIN_VOICED_CONFIDENCE = 0.5;
 
 let activeCapture: ActiveCapture | null = null;
 const listeners = new Set<(sessions: PracticeSessionSummary[]) => void>();
@@ -42,7 +44,12 @@ function setStoredRaw(value: string): void {
     memoryStorage.set(STORAGE_KEY, value);
     return;
   }
-  window.localStorage.setItem(STORAGE_KEY, value);
+  try {
+    window.localStorage.setItem(STORAGE_KEY, value);
+  } catch {
+    // QuotaExceededError — fall back to in-memory so listeners still fire.
+    memoryStorage.set(STORAGE_KEY, value);
+  }
 }
 
 function parseStoredSessions(raw: string | null): PracticeSessionSummary[] {
@@ -99,11 +106,9 @@ export function startPracticeSessionCapture(pieceName: string, part: string, tim
 
 export function capturePitchFrame(frame: { t: number; midi: number; conf: number }): void {
   if (!activeCapture) return;
-  activeCapture.minMidi = activeCapture.minMidi === null ? frame.midi : Math.min(activeCapture.minMidi, frame.midi);
-  activeCapture.maxMidi = activeCapture.maxMidi === null ? frame.midi : Math.max(activeCapture.maxMidi, frame.midi);
-  activeCapture.confidenceSum += frame.conf;
-  activeCapture.confidenceCount += 1;
 
+  // Always accumulate duration (regardless of voicing quality) so wall time is
+  // tracked even through quiet passages.
   if (activeCapture.lastFrameTMs === null) {
     activeCapture.singingDurationMs += DEFAULT_FRAME_DURATION_MS;
   } else if (frame.t >= activeCapture.lastFrameTMs) {
@@ -111,12 +116,20 @@ export function capturePitchFrame(frame: { t: number; midi: number; conf: number
     if (delta <= MAX_FRAME_GAP_MS) activeCapture.singingDurationMs += delta;
   }
   activeCapture.lastFrameTMs = frame.t;
+
+  // Only include sufficiently confident (voiced) frames in pitch range and
+  // average confidence stats to avoid unvoiced noise corrupting the summary.
+  if (frame.conf < MIN_VOICED_CONFIDENCE) return;
+  activeCapture.minMidi = activeCapture.minMidi === null ? frame.midi : Math.min(activeCapture.minMidi, frame.midi);
+  activeCapture.maxMidi = activeCapture.maxMidi === null ? frame.midi : Math.max(activeCapture.maxMidi, frame.midi);
+  activeCapture.confidenceSum += frame.conf;
+  activeCapture.confidenceCount += 1;
 }
 
 export function finishPracticeSessionCapture(): PracticeSessionSummary | null {
   if (!activeCapture) return null;
   const complete: PracticeSessionSummary = {
-    id: `${activeCapture.timestamp}-${Math.random().toString(36).slice(2, 10)}`,
+    id: crypto.randomUUID(),
     timestamp: activeCapture.timestamp,
     pieceName: activeCapture.pieceName,
     part: activeCapture.part,
