@@ -14,12 +14,13 @@
  * Clock hierarchy (must never be broken):
  *   AudioContext.currentTime → engine.currentBeat → cursor.seekToBeat()
  */
-import { onScoreLoaded, onScoreCleared, getSession } from '../../services/score-session';
+import { onScoreCleared, getSession } from '../../services/score-session';
 import { setStatus } from '../../services/backend';
-import { beatToMs, postPlayback, startPlayback, seekPlayback, setPlaybackTempo, setPlaybackTranspose } from '../../transport/controls';
+import { beatToMs, postPlayback, startPlayback, seekPlayback } from '../../transport/controls';
+import { elapsedToBeat } from '../../score/timing';
 import { type Feature } from '../../registry';
 
-// ── Cursor RAF state ────────────────────────────────────────────────────────────
+// ── Cursor RAF state ──────────────────────────────────────────────────────────
 
 let cursorRafId: number | null = null;
 let cursorBeatSample: { beat: number; x: number } | null = null;
@@ -38,12 +39,11 @@ function cursorXPosition(): number {
 }
 
 /**
- * Project a pitch-frame's beat position onto a screen x-coordinate.
- * Used by pitch-overlay and pitch-graph so their traces align with the cursor.
- * Exported so the pitch-overlay feature can import it.
+ * Project a pitch-frame's timestamp onto a screen x-coordinate.
+ * Exported so the pitch-overlay feature can import it, keeping px-per-beat
+ * estimation in one place.
  */
 export function frameXPosition(frameTMs: number): number {
-  const { elapsedToBeat } = require('../../score/timing') as typeof import('../../score/timing');
   const session = getSession();
   if (!session) return cursorXPosition();
   const frameBeat = elapsedToBeat(frameTMs, 0, session.model.tempo_marks);
@@ -87,7 +87,7 @@ function stopCursorRaf(): void {
   pxPerBeatEstimate = 0;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function seekByBeats(delta: number): Promise<void> {
   const session = getSession();
@@ -108,16 +108,18 @@ async function seekByBeats(delta: number): Promise<void> {
   if (engine.state !== 'playing') stopCursorRaf();
 }
 
+/**
+ * Read the currently selected mic device id from the settings-device select.
+ * Written by the pitch-overlay feature; read here to pass to startPlayback().
+ */
 function getSelectedDeviceId(): number | null {
-  // Delegated to part-selector / settings feature via the DOM.
-  // We read it from a data attribute that settings-panel writes.
   const el = document.getElementById('settings-device') as HTMLSelectElement | null;
   if (!el || el.value === '') return null;
   const parsed = Number.parseInt(el.value, 10);
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-// ── mount ──────────────────────────────────────────────────────────────────
+// ── mount ─────────────────────────────────────────────────────────────────────
 
 function mount(_slot: HTMLElement): void {
   const btnPlay   = document.getElementById('btn-play')   as HTMLButtonElement;
@@ -127,12 +129,9 @@ function mount(_slot: HTMLElement): void {
   const headphoneWarning = document.getElementById('headphone-warning') as HTMLDivElement;
   const warningDismiss   = document.getElementById('warning-dismiss')   as HTMLButtonElement;
 
-  // Stop cursor RAF whenever a session is cleared.
-  onScoreCleared(() => {
-    stopCursorRaf();
-  });
+  onScoreCleared(() => { stopCursorRaf(); });
 
-  // ── Play ───────────────────────────────────────────────────────────────
+  // ── Play ──────────────────────────────────────────────────────────────────
   btnPlay.addEventListener('click', async () => {
     const session = getSession();
     if (!session) return;
@@ -158,7 +157,7 @@ function mount(_slot: HTMLElement): void {
     }
   });
 
-  // ── Pause ─────────────────────────────────────────────────────────────
+  // ── Pause ─────────────────────────────────────────────────────────────────
   btnPause.addEventListener('click', async () => {
     const session = getSession();
     if (!session) return;
@@ -172,7 +171,7 @@ function mount(_slot: HTMLElement): void {
     }
   });
 
-  // ── Stop ───────────────────────────────────────────────────────────────
+  // ── Stop ──────────────────────────────────────────────────────────────────
   btnStop.addEventListener('click', async () => {
     const session = getSession();
     if (!session) return;
@@ -189,7 +188,7 @@ function mount(_slot: HTMLElement): void {
     }
   });
 
-  // ── Rewind ─────────────────────────────────────────────────────────────
+  // ── Rewind ────────────────────────────────────────────────────────────────
   btnRewind.addEventListener('click', async () => {
     const session = getSession();
     if (!session) return;
@@ -207,9 +206,7 @@ function mount(_slot: HTMLElement): void {
     headphoneWarning.classList.add('hidden');
   });
 
-  warningDismiss.addEventListener('click', () => {
-    headphoneWarning.classList.add('hidden');
-  });
+  warningDismiss.addEventListener('click', () => { headphoneWarning.classList.add('hidden'); });
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
   window.addEventListener('keydown', (e) => {
@@ -221,21 +218,11 @@ function mount(_slot: HTMLElement): void {
       e.preventDefault();
       const session = getSession();
       if (!session) return;
-      if (session.engine.state === 'playing') {
-        btnPause.click();
-      } else {
-        btnPlay.click();
-      }
+      if (session.engine.state === 'playing') { btnPause.click(); } else { btnPlay.click(); }
       return;
     }
-
-    if (e.key.toLowerCase() === 'r') {
-      e.preventDefault();
-      if (!btnRewind.disabled) btnRewind.click();
-      return;
-    }
-
-    if (e.key === 'ArrowLeft') { e.preventDefault(); void seekByBeats(-1); return; }
+    if (e.key.toLowerCase() === 'r') { e.preventDefault(); if (!btnRewind.disabled) btnRewind.click(); return; }
+    if (e.key === 'ArrowLeft')  { e.preventDefault(); void seekByBeats(-1); return; }
     if (e.key === 'ArrowRight') { e.preventDefault(); void seekByBeats(1); }
   });
 }
@@ -250,5 +237,5 @@ export const playbackFeature: Feature = {
   unmount,
 };
 
-/** Re-export for pitch-overlay feature. */
-export { frameXPosition as getFrameXPosition, cursorXPosition as getCursorXPosition };
+/** Re-exported for pitch-overlay feature consumption. */
+export { frameXPosition as getFrameXPosition };
