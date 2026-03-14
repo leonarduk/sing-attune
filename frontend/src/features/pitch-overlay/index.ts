@@ -16,13 +16,15 @@
  * playback feature) to preserve feature isolation.
  */
 import { onScoreLoaded, onScoreCleared, getSession } from '../../services/score-session';
+import { onPlaybackSyncEvent } from '../../services/playback-sync';
 import { showErrorBanner } from '../../services/backend';
 import { getFrameXPosition } from '../../services/cursor-projection';
 import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from '../../pitch/overlay';
 import { PitchGraphCanvas } from '../../pitch/graph';
 import { expectedNoteAtBeat } from '../../pitch/accuracy';
 import { syntheticPitchFrameAt } from '../../pitch/synthetic';
-import { parsePitchFrame, reconnectDelayMs } from '../../pitch/socket';
+import { PitchTimelineSync } from '../../pitch/timeline-sync';
+import { parsePitchSocketMessage, reconnectDelayMs } from '../../pitch/socket';
 import { midiToFrequency, midiToNoteName } from '../../pitch/note-name';
 import { elapsedToBeat } from '../../score/timing';
 import { type NoteModel } from '../../score/renderer';
@@ -50,6 +52,9 @@ let showNoteNames = false;
 let syntheticModeEnabled = false;
 let selectedDeviceId: number | null = null;
 let recordingError: string | null = null;
+const timelineSync = new PitchTimelineSync();
+let playbackSyncUnsubscribe: (() => void) | null = null;
+let syncOffsetWarningShown = false;
 
 const overlaySettings: OverlaySettings = {
   confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
@@ -77,6 +82,14 @@ function expectedMidiForFrame(frameTMs: number): number | null {
 }
 
 function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number }): void {
+  const session = getSession();
+  if (session) {
+    const staleWindowMs = Math.max(2000, overlaySettings.trailMs * 1.5);
+    if (timelineSync.isFrameStale(frame.t, session.engine.ctx.currentTime, staleWindowMs)) {
+      return;
+    }
+  }
+
   lastPitchFrame = { midi: frame.midi };
   updatePitchReadout();
   const frameSec = frame.t / 1000;
@@ -95,6 +108,32 @@ function closePitchSocket(): void {
   if (pitchReconnectTimer !== null) { window.clearTimeout(pitchReconnectTimer); pitchReconnectTimer = null; }
   pitchWs?.close();
   pitchWs = null;
+}
+
+function bindPlaybackSync(): void {
+  playbackSyncUnsubscribe?.();
+  playbackSyncUnsubscribe = onPlaybackSyncEvent((event) => {
+    if (event.type === 'stop') {
+      timelineSync.reset();
+      pitchOverlay?.clear();
+      pitchGraph?.clear();
+      return;
+    }
+    if (event.type === 'pause') {
+      return;
+    }
+    if (event.syncOffsetMs === null && !syncOffsetWarningShown) {
+      console.warn('Pitch sync offset unavailable; using default offset 0ms until protocol in issue #27 is implemented.');
+      syncOffsetWarningShown = true;
+    }
+    timelineSync.setSyncOffsetMs(event.syncOffsetMs ?? 0);
+    // Use audioTimeSec (AudioContext seconds) as the graph scroll cursor —
+    // event.tMs is backend-relative milliseconds and must not be used here.
+    pitchGraphNowSec = event.audioTimeSec;
+    timelineSync.reanchor(event.tMs, event.audioTimeSec);
+    pitchOverlay?.clear();
+    pitchGraph?.clear();
+  });
 }
 
 function connectPitchSocket(): void {
@@ -120,8 +159,8 @@ function connectPitchSocket(): void {
     if (!pitchOverlay || syntheticModeEnabled) return;
     let payload: unknown;
     try { payload = JSON.parse(event.data) as unknown; } catch { return; }
-    const frame = parsePitchFrame(payload);
-    if (frame) handleIncomingPitchFrame(frame);
+    const message = parsePitchSocketMessage(payload);
+    if (message.kind === 'frame') handleIncomingPitchFrame(message.frame);
   };
 }
 
@@ -250,6 +289,7 @@ function mount(_slot: HTMLElement): void {
   }
 
   pitchGraph = new PitchGraphCanvas(pitchGraphCanvasEl);
+  bindPlaybackSync();
   startPitchGraphLoop();
 
   onScoreCleared(() => {
@@ -257,6 +297,7 @@ function mount(_slot: HTMLElement): void {
     pitchOverlay?.destroy();
     pitchOverlay = null;
     pitchGraph?.clear();
+    timelineSync.reset();
     lastPitchFrame = null;
     pitchGraphNowSec = 0;
     updatePitchReadout();
@@ -268,6 +309,7 @@ function mount(_slot: HTMLElement): void {
       scoreContainerEl, session.model, session.selectedPart, overlaySettings);
     activePartNotes = session.model.notes.filter((n) => n.part === session.selectedPart);
     pitchGraph?.clear();
+    timelineSync.reset();
     lastPitchFrame = null;
     pitchGraphNowSec = 0;
     updatePitchReadout();
@@ -368,6 +410,8 @@ function mount(_slot: HTMLElement): void {
 }
 
 function unmount(): void {
+  playbackSyncUnsubscribe?.();
+  playbackSyncUnsubscribe = null;
   closePitchSocket();
   stopPitchGraphLoop();
   pitchOverlay?.destroy(); pitchOverlay = null;
