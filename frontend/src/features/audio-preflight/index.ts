@@ -19,6 +19,7 @@ let monitorCtx: AudioContext | null = null;
 let monitorStream: MediaStream | null = null;
 let analyser: AnalyserNode | null = null;
 let meterRaf: number | null = null;
+let meterRunToken = 0;
 let monitorSource: MediaStreamAudioSourceNode | null = null;
 let monitorGain: GainNode | null = null;
 
@@ -29,6 +30,7 @@ let latencyValueEl: HTMLSpanElement | null = null;
 let errorEl: HTMLDivElement | null = null;
 let testButtonEl: HTMLButtonElement | null = null;
 let continueButtonEl: HTMLButtonElement | null = null;
+const METER_GAIN_SCALE = 140;
 
 let selectedDeviceId: string | null = loadPreflightDeviceId();
 let isMonitoring = false;
@@ -42,13 +44,22 @@ function setPermissionStatus(message: string): void {
 }
 
 function cleanupMonitor(): void {
+  meterRunToken += 1;
   if (meterRaf !== null) {
     cancelAnimationFrame(meterRaf);
     meterRaf = null;
   }
 
-  monitorGain?.disconnect();
-  monitorSource?.disconnect();
+  try {
+    monitorGain?.disconnect();
+  } catch {
+    // No-op: some Web Audio implementations throw if already disconnected.
+  }
+  try {
+    monitorSource?.disconnect();
+  } catch {
+    // No-op: some Web Audio implementations throw if already disconnected.
+  }
 
   monitorStream?.getTracks().forEach((track) => track.stop());
   monitorStream = null;
@@ -75,11 +86,25 @@ async function loadInputDevices(): Promise<BrowserAudioInputDevice[]> {
   }));
 }
 
+
+function resolveSelectedDeviceId(
+  devices: BrowserAudioInputDevice[],
+  currentSelectedDeviceId: string | null,
+): string | null {
+  if (devices.length === 0) return null;
+  const hasSelected = currentSelectedDeviceId
+    ? devices.some((d) => d.deviceId === currentSelectedDeviceId)
+    : false;
+  return hasSelected ? currentSelectedDeviceId : devices[0].deviceId;
+}
+
 function startLevelMeter(): void {
   if (!analyser || !meterFillEl) return;
   const data = new Uint8Array(analyser.fftSize);
+  const runToken = meterRunToken;
 
   const tick = (): void => {
+    if (runToken !== meterRunToken) return;
     if (!analyser || !meterFillEl) return;
     analyser.getByteTimeDomainData(data);
     let peak = 0;
@@ -88,7 +113,7 @@ function startLevelMeter(): void {
       const mag = Math.abs(centered);
       if (mag > peak) peak = mag;
     }
-    meterFillEl.style.width = `${Math.min(100, Math.round(peak * 140))}%`;
+    meterFillEl.style.width = `${Math.min(100, Math.round(peak * METER_GAIN_SCALE))}%`;
     meterRaf = requestAnimationFrame(tick);
   };
 
@@ -112,7 +137,10 @@ async function ensureMonitorStream(): Promise<void> {
     persistPreflightDeviceId(selectedDeviceId);
   }
 
-  const ctx = new AudioContext();
+  const ctx = (!monitorCtx || monitorCtx.state === 'closed') ? new AudioContext() : monitorCtx;
+  if (ctx.state === 'suspended') {
+    await ctx.resume();
+  }
   monitorCtx = ctx;
   monitorSource = ctx.createMediaStreamSource(stream);
   analyser = ctx.createAnalyser();
@@ -132,21 +160,13 @@ async function requestPermissionAndDevices(): Promise<void> {
       .map((d) => `<option value="${d.deviceId}">${d.label}</option>`)
       .join('');
 
-    if (selectedDeviceId) {
-      const hasSaved = devices.some((d) => d.deviceId === selectedDeviceId);
-      if (hasSaved) {
-        deviceSelectEl.value = selectedDeviceId;
-      } else if (devices.length > 0) {
-        selectedDeviceId = devices[0].deviceId;
-        deviceSelectEl.value = selectedDeviceId;
-        persistPreflightDeviceId(selectedDeviceId);
-      }
-    }
-
-    if (!selectedDeviceId && devices.length > 0) {
-      selectedDeviceId = devices[0].deviceId;
-      deviceSelectEl.value = selectedDeviceId;
+    const resolvedDeviceId = resolveSelectedDeviceId(devices, selectedDeviceId);
+    if (resolvedDeviceId !== selectedDeviceId) {
+      selectedDeviceId = resolvedDeviceId;
       persistPreflightDeviceId(selectedDeviceId);
+    }
+    if (selectedDeviceId) {
+      deviceSelectEl.value = selectedDeviceId;
     }
 
     setPermissionStatus('Microphone permission granted.');
@@ -162,8 +182,14 @@ async function requestPermissionAndDevices(): Promise<void> {
 
 async function toggleMicTest(): Promise<void> {
   if (!monitorCtx || !analyser || !monitorSource) {
-    await requestPermissionAndDevices();
-    return;
+    try {
+      await requestPermissionAndDevices();
+    } catch {
+      isMonitoring = false;
+      if (testButtonEl) testButtonEl.textContent = 'Test my mic';
+      return;
+    }
+    if (!monitorCtx || !analyser || !monitorSource) return;
   }
 
   if (!monitorGain) {
@@ -325,6 +351,10 @@ function unmount(): void {
   modalEl?.remove();
   modalEl = null;
 }
+
+export const __audioPreflightInternals = {
+  resolveSelectedDeviceId,
+};
 
 export const audioPreflightFeature: Feature = {
   id: 'slot-audio-preflight',
