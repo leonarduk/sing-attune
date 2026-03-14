@@ -39,6 +39,7 @@ function mount(slot: HTMLElement): void {
   const tempoSliderEl     = document.getElementById('tempo-slider')       as HTMLInputElement;
   const transposeSelectEl = document.getElementById('transpose-select')   as HTMLSelectElement;
   const headphoneWarning  = document.getElementById('headphone-warning')  as HTMLDivElement;
+  const btnLoadTestScore  = document.getElementById('btn-load-test-score') as HTMLButtonElement | null;
 
   // ── Loading overlay ─────────────────────────────────────────────────────────
   const dropZoneIdleMarkup = dropZoneEl.innerHTML;
@@ -80,6 +81,23 @@ function mount(slot: HTMLElement): void {
   }
 
   // ── Score loading ─────────────────────────────────────────────────────────
+
+  async function loadDevTestScore(filename: string): Promise<void> {
+    try {
+      setStatus(`Loading test score ${filename}…`, 'loading');
+      const response = await fetch(`/musescore/${filename}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const blob = await response.blob();
+      const file = new File([blob], filename, { type: blob.type || 'application/vnd.recordare.musicxml+xml' });
+      await loadScore(file);
+    } catch (err) {
+      showErrorBanner(`Could not load test score ${filename}.`);
+      setStatus(`test score load failed: ${String(err)}`, 'error');
+      console.error('Dev test score load failed:', err);
+    }
+  }
+
   async function loadScore(file: File): Promise<void> {
     clearErrorBanner();
     showLoading(`Loading ${file.name}…`);
@@ -214,6 +232,21 @@ function mount(slot: HTMLElement): void {
 
   const btnBrowse = document.getElementById('btn-browse') as HTMLButtonElement;
   btnBrowse.addEventListener('click', () => fileInputEl.click());
+
+  if (btnLoadTestScore) {
+    const devScoreFilename = 'homeward_bound.mxl';
+    void fetch(`/musescore/${devScoreFilename}`, { method: 'HEAD' })
+      .then((response) => {
+        if (!response.ok) return;
+        btnLoadTestScore.style.display = '';
+        btnLoadTestScore.addEventListener('click', () => {
+          void loadDevTestScore(devScoreFilename);
+        });
+      })
+      .catch(() => {
+        // Test score endpoint unavailable (e.g. production build).
+      });
+  }
 
   fileInputEl.addEventListener('change', () => {
     const file = fileInputEl.files?.[0];
