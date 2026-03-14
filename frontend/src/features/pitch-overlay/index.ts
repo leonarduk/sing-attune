@@ -15,11 +15,11 @@
  * Imports getFrameXPosition from services/cursor-projection (not from the
  * playback feature) to preserve feature isolation.
  */
-import { onScoreLoaded, onScoreCleared, getSession } from '../../services/score-session';
+import { onScoreLoaded, onScoreCleared, onPartChanged, getSession } from '../../services/score-session';
 import { onPlaybackSyncEvent } from '../../services/playback-sync';
 import { showErrorBanner } from '../../services/backend';
 import { getFrameXPosition } from '../../services/cursor-projection';
-import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from '../../pitch/overlay';
+import { DEFAULT_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from '../../pitch/overlay';
 import { PitchGraphCanvas } from '../../pitch/graph';
 import { expectedNoteAtBeat } from '../../pitch/accuracy';
 import { syntheticPitchFrameAt } from '../../pitch/synthetic';
@@ -59,7 +59,7 @@ let playbackSyncUnsubscribe: (() => void) | null = null;
 let syncOffsetWarningShown = false;
 
 const overlaySettings: OverlaySettings = {
-  confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
+  confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
   trailMs: 2000,
 };
 
@@ -361,6 +361,21 @@ function mount(_slot: HTMLElement): void {
     clearPhraseSummaryPanel();
     updatePitchReadout();
     connectPitchSocket();
+  });
+
+  onPartChanged((session) => {
+    if (!pitchOverlay) return;
+    pitchOverlay.destroy();
+    pitchOverlay = new PitchOverlay(
+      scoreContainerEl, session.model, session.selectedPart, overlaySettings);
+    activePartNotes = session.model.notes.filter((n) => n.part === session.selectedPart);
+    phraseSummaryTracker = new PhraseSummaryTracker(activePartNotes, session.model.tempo_marks);
+    pitchGraph?.clear();
+    timelineSync.reset();
+    lastPitchFrame = null;
+    pitchGraphNowSec = 0;
+    clearPhraseSummaryPanel();
+    updatePitchReadout();
   });
 
   btnStop.addEventListener('click', () => {

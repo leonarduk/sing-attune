@@ -60,7 +60,7 @@ function mount(_slot: HTMLElement): void {
     partSelectEl.value = selectedPart;
     partSelectEl.disabled = visibleParts.length <= 1;
     scheduleSelectedPart(selectedPart);
-    updateSelectedPart(selectedPart);
+    if (session.selectedPart !== selectedPart) updateSelectedPart(selectedPart);
   }
 
   onScoreCleared(() => { partSelectEl.innerHTML = ''; });
