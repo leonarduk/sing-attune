@@ -10,43 +10,20 @@
  *
  * Clock hierarchy (must never be broken):
  *   AudioContext.currentTime → engine.currentBeat → cursor.seekToBeat()
+ *
+ * The cursor x-projection logic (beat → screen x) is kept in
+ * services/cursor-projection.ts so pitch-overlay can read it without
+ * importing from this feature.
  */
 import { onScoreCleared, getSession } from '../../services/score-session';
 import { setStatus } from '../../services/backend';
+import { recordBeatSample, resetProjection, getCursorX } from '../../services/cursor-projection';
 import { beatToMs, postPlayback, startPlayback, seekPlayback } from '../../transport/controls';
-import { elapsedToBeat } from '../../score/timing';
 import { type Feature } from '../../feature-types';
 
-// ── Cursor RAF state ────────────────────────────────────────────────────────────
+// ── Cursor RAF ──────────────────────────────────────────────────────────────────
 
 let cursorRafId: number | null = null;
-let cursorBeatSample: { beat: number; x: number } | null = null;
-let pxPerBeatEstimate = 0;
-
-function cursorXPosition(): number {
-  const session = getSession();
-  if (!session) return 0;
-  const scoreContainerEl = document.getElementById('score-container') as HTMLDivElement;
-  const cursorEl = session.cursor.osmd.cursor.cursorElement;
-  if (!cursorEl) return 0;
-  const scoreRect = scoreContainerEl.getBoundingClientRect();
-  const cursorRect = cursorEl.getBoundingClientRect();
-  return cursorRect.left - scoreRect.left + scoreContainerEl.scrollLeft;
-}
-
-/**
- * Project a pitch-frame timestamp onto a screen x-coordinate.
- * Exported for the pitch-overlay feature so it can align pitch traces with
- * the cursor without duplicating the px-per-beat estimation logic.
- */
-export function getFrameXPosition(frameTMs: number): number {
-  const session = getSession();
-  if (!session) return cursorXPosition();
-  const frameBeat = elapsedToBeat(frameTMs, 0, session.model.tempo_marks);
-  if (!cursorBeatSample || pxPerBeatEstimate === 0) return cursorXPosition();
-  const projected = cursorBeatSample.x + ((frameBeat - cursorBeatSample.beat) * pxPerBeatEstimate);
-  return Number.isFinite(projected) ? projected : cursorXPosition();
-}
 
 function startCursorRaf(): void {
   stopCursorRaf();
@@ -55,19 +32,7 @@ function startCursorRaf(): void {
     if (session?.engine.playing && session.cursor) {
       const beat = session.engine.currentBeat;
       session.cursor.seekToBeat(beat);
-      const x = cursorXPosition();
-      if (cursorBeatSample !== null) {
-        const beatDelta = beat - cursorBeatSample.beat;
-        if (Math.abs(beatDelta) > 0.001) {
-          const next = (x - cursorBeatSample.x) / beatDelta;
-          if (Number.isFinite(next)) {
-            pxPerBeatEstimate = pxPerBeatEstimate === 0
-              ? next
-              : (pxPerBeatEstimate * 0.7) + (next * 0.3);
-          }
-        }
-      }
-      cursorBeatSample = { beat, x };
+      recordBeatSample(beat, getCursorX());
       cursorRafId = requestAnimationFrame(tick);
     }
   }
@@ -79,8 +44,7 @@ function stopCursorRaf(): void {
     cancelAnimationFrame(cursorRafId);
     cursorRafId = null;
   }
-  cursorBeatSample = null;
-  pxPerBeatEstimate = 0;
+  resetProjection();
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -104,7 +68,6 @@ async function seekByBeats(delta: number): Promise<void> {
   if (engine.state !== 'playing') stopCursorRaf();
 }
 
-/** Read the mic device id from the settings-device select (owned by pitch-overlay). */
 function getSelectedDeviceId(): number | null {
   const el = document.getElementById('settings-device') as HTMLSelectElement | null;
   if (!el || el.value === '') return null;
@@ -112,7 +75,7 @@ function getSelectedDeviceId(): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-// ── mount ──────────────────────────────────────────────────────────────────
+// ── mount ─────────────────────────────────────────────────────────────────
 
 function mount(_slot: HTMLElement): void {
   const btnPlay   = document.getElementById('btn-play')   as HTMLButtonElement;
@@ -124,13 +87,11 @@ function mount(_slot: HTMLElement): void {
 
   onScoreCleared(() => { stopCursorRaf(); });
 
-  // ── Play ───────────────────────────────────────────────────────────────
   btnPlay.addEventListener('click', async () => {
     const session = getSession();
     if (!session) return;
     const { engine, cursor } = session;
     if (engine.state === 'playing') return;
-
     headphoneWarning.classList.remove('hidden');
     const fromBeat = engine.state === 'paused' ? engine.startBeat : 0;
     try {
@@ -149,7 +110,6 @@ function mount(_slot: HTMLElement): void {
     }
   });
 
-  // ── Pause ─────────────────────────────────────────────────────────────
   btnPause.addEventListener('click', async () => {
     const session = getSession();
     if (!session) return;
@@ -163,7 +123,6 @@ function mount(_slot: HTMLElement): void {
     }
   });
 
-  // ── Stop ───────────────────────────────────────────────────────────────
   btnStop.addEventListener('click', async () => {
     const session = getSession();
     if (!session) return;
@@ -179,7 +138,6 @@ function mount(_slot: HTMLElement): void {
     }
   });
 
-  // ── Rewind ─────────────────────────────────────────────────────────────
   btnRewind.addEventListener('click', async () => {
     const session = getSession();
     if (!session) return;
@@ -196,12 +154,10 @@ function mount(_slot: HTMLElement): void {
 
   warningDismiss.addEventListener('click', () => { headphoneWarning.classList.add('hidden'); });
 
-  // ── Keyboard shortcuts ───────────────────────────────────────────────────
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
     const tag = (e.target as HTMLElement | null)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-
     if (e.code === 'Space') {
       e.preventDefault();
       const session = getSession();
@@ -209,11 +165,7 @@ function mount(_slot: HTMLElement): void {
       if (session.engine.state === 'playing') { btnPause.click(); } else { btnPlay.click(); }
       return;
     }
-    if (e.key.toLowerCase() === 'r') {
-      e.preventDefault();
-      if (!btnRewind.disabled) btnRewind.click();
-      return;
-    }
+    if (e.key.toLowerCase() === 'r') { e.preventDefault(); if (!btnRewind.disabled) btnRewind.click(); return; }
     if (e.key === 'ArrowLeft')  { e.preventDefault(); void seekByBeats(-1); return; }
     if (e.key === 'ArrowRight') { e.preventDefault(); void seekByBeats(1); }
   });
