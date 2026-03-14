@@ -49,4 +49,45 @@ describe('StableNoteDetector', () => {
     const switched = detector.pushFrame({ t: 420, midi: 62.01, conf: 0.9 });
     expect(switched.stableMidi).toBeCloseTo(62.0, 1);
   });
+
+  it('applySettings mid-stream prunes window and preserves stable state', () => {
+    // Build up a stable note with a 500ms window.
+    const detector = new StableNoteDetector({
+      minConfidence: 0.5,
+      clusteringToleranceCents: 40,
+      holdDurationMs: 80,
+      smoothingWindowMs: 500,
+    });
+
+    // Populate window at t=0..200; hold satisfied → stable = 60
+    detector.pushFrame({ t: 0,   midi: 60, conf: 0.9 });
+    detector.pushFrame({ t: 100, midi: 60, conf: 0.9 });
+    const stableState = detector.pushFrame({ t: 200, midi: 60, conf: 0.9 });
+    expect(stableState.stableMidi).not.toBeNull();
+
+    // Shrink window to 100ms — frames at t=0 and t=100 fall outside cutoff
+    // (cutoff = 200 - 100 = 100, so t=0 and t=100 are pruned, only t=200 remains).
+    // Stable value should survive because candidateStartMs is not reset by applySettings.
+    detector.applySettings({
+      minConfidence: 0.5,
+      clusteringToleranceCents: 40,
+      holdDurationMs: 80,
+      smoothingWindowMs: 100,
+    });
+
+    // Next frame is still within-tolerance; stable state should persist.
+    const after = detector.pushFrame({ t: 250, midi: 60.02, conf: 0.9 });
+    expect(after.stableMidi).not.toBeNull();
+
+    // Frames from an entirely different pitch cluster now arrive; stable should
+    // eventually flip once hold is satisfied for the new candidate.
+    detector.pushFrame({ t: 300, midi: 64, conf: 0.9 });
+    const beforeSwitch = detector.pushFrame({ t: 370, midi: 64, conf: 0.9 });
+    // Hold not yet met from first 64-cluster frame (370-300=70ms < 80ms holdDurationMs).
+    expect(beforeSwitch.stableMidi).toBeCloseTo(60, 1);
+
+    const afterSwitch = detector.pushFrame({ t: 410, midi: 64, conf: 0.9 });
+    // 410-300=110ms > 80ms hold → should have switched
+    expect(afterSwitch.stableMidi).toBeCloseTo(64, 1);
+  });
 });

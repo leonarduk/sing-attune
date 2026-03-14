@@ -101,9 +101,6 @@ function expectedMidiForFrame(frameTMs: number): number | null {
 }
 
 function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number }): void {
-  const stableState = stableNoteDetector.pushFrame(frame);
-  lastPitchFrame = frame;
-  lastStableMidi = stableState.stableMidi;
   const session = getSession();
   if (session) {
     const staleWindowMs = Math.max(2000, overlaySettings.trailMs * 1.5);
@@ -111,15 +108,25 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
       return;
     }
   }
+
+  // Update state only after the stale-frame guard: late/post-seek frames must
+  // not corrupt the stability window or the readout.
+  const stableState = stableNoteDetector.pushFrame(frame);
+  lastPitchFrame = frame;
+  lastStableMidi = stableState.stableMidi;
+
   updatePitchReadout();
   const frameSec = frame.t / 1000;
   if (Number.isFinite(frameSec) && frameSec >= 0) {
     pitchGraphNowSec = Math.max(pitchGraphNowSec, frameSec);
   }
+  // Overlay dots use the stabilised midi for visual smoothness; the accuracy
+  // graph always receives the raw frame so it reflects what the singer actually
+  // sang rather than the smoothed estimate.
   const overlayMidi = stableState.stableMidi ?? frame.midi;
   const displayFrame = { ...frame, midi: overlayMidi };
   pitchOverlay?.pushFrame(displayFrame, getFrameXPosition(frame.t));
-  pitchGraph?.pushFrame(displayFrame, expectedMidiForFrame(frame.t));
+  pitchGraph?.pushFrame(frame, expectedMidiForFrame(frame.t));
   window.dispatchEvent(new CustomEvent('stable-pitch-frame', {
     detail: {
       t: frame.t,
