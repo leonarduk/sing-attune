@@ -203,4 +203,4 @@ Full build plan: [IMPLEMENTATION.md](IMPLEMENTATION.md)
 
 ## Licence
 
-MIT — do what you want with it.
+Apache-2.0 — permissive open-source licensing with an explicit patent grant.
