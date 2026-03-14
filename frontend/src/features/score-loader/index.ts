@@ -108,7 +108,7 @@ function mount(slot: HTMLElement): void {
       showErrorBanner('Could not load this MusicXML file. Try exporting again from notation software.');
       setStatus(String(err), 'error');
       console.error('Score parse/render failed:', err);
-      dropZoneEl.classList.remove('hidden');
+      resetDropZoneToIdle();
       hideLoading();
       return;
     }
