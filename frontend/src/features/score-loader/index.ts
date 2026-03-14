@@ -41,12 +41,20 @@ function mount(slot: HTMLElement): void {
   const headphoneWarning  = document.getElementById('headphone-warning')  as HTMLDivElement;
 
   // ── Loading overlay ─────────────────────────────────────────────────────────
+  const dropZoneIdleMarkup = dropZoneEl.innerHTML;
+
   function showLoading(message: string): void {
     scoreLoadingEl.textContent = message;
     scoreLoadingEl.classList.add('visible');
   }
   function hideLoading(): void {
     scoreLoadingEl.classList.remove('visible');
+  }
+
+  function resetDropZoneToIdle(): void {
+    dropZoneEl.innerHTML = dropZoneIdleMarkup;
+    dropZoneEl.classList.remove('hidden', 'drag-over');
+    scoreLoadingEl.textContent = 'Loading score…';
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -145,6 +153,8 @@ function mount(slot: HTMLElement): void {
     } catch (err) {
       showErrorBanner('Score loaded, but playback setup failed. Check audio/soundfont settings and try again.');
       setStatus(String(err), 'error');
+      console.error('Score load failed:', err);
+      resetDropZoneToIdle();
       console.error('Post-parse score setup failed:', err);
       dropZoneEl.classList.remove('hidden');
     } finally {
