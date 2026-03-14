@@ -30,6 +30,7 @@ type SessionCallback = (session: ScoreSession) => void;
 type ClearCallback = () => void;
 
 const loadedCallbacks: SessionCallback[] = [];
+const partChangedCallbacks: SessionCallback[] = [];
 const clearCallbacks: ClearCallback[] = [];
 
 let current: ScoreSession | null = null;
@@ -67,18 +68,28 @@ export function onScoreLoaded(cb: SessionCallback): void {
   if (current) cb(current);
 }
 
+/**
+ * Register a callback fired whenever selectedPart changes on the current
+ * session. If a session already exists at registration time the callback
+ * fires immediately with the current selectedPart.
+ */
+export function onPartChanged(cb: SessionCallback): void {
+  partChangedCallbacks.push(cb);
+  if (current) cb(current);
+}
+
 /** Register a callback fired just before each session tear-down. */
 export function onScoreCleared(cb: ClearCallback): void {
   clearCallbacks.push(cb);
 }
 
 /**
- * Update selectedPart on the current session snapshot and re-notify all
- * onScoreLoaded subscribers. Called by the part-selector feature so
- * pitch-overlay can react without a direct feature-to-feature coupling.
+ * Update selectedPart on the current session snapshot and notify only
+ * onPartChanged subscribers.
  */
 export function updateSelectedPart(part: string): void {
   if (!current) return;
+  if (current.selectedPart === part) return;
   current = { ...current, selectedPart: part };
-  for (const cb of loadedCallbacks) cb(current);
+  for (const cb of partChangedCallbacks) cb(current);
 }
