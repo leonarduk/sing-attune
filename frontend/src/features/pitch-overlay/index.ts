@@ -24,7 +24,7 @@ import { PitchGraphCanvas } from '../../pitch/graph';
 import { expectedNoteAtBeat } from '../../pitch/accuracy';
 import { syntheticPitchFrameAt } from '../../pitch/synthetic';
 import { PitchTimelineSync } from '../../pitch/timeline-sync';
-import { parsePitchSocketMessage, reconnectDelayMs } from '../../pitch/socket';
+import { parsePitchSocketMessage, reconnectDelayMs, type PitchFrame } from '../../pitch/socket';
 import { midiToFrequency, midiToNoteName } from '../../pitch/note-name';
 import {
   DEFAULT_STABLE_NOTE_SETTINGS,
@@ -52,7 +52,7 @@ let shouldReconnectPitchSocket = false;
 let pitchReconnectAttempts = 0;
 
 let pitchOverlay: PitchOverlay | null = null;
-let lastPitchFrame: { midi: number } | null = null;
+let lastPitchFrame: PitchFrame | null = null;
 let activePartNotes: NoteModel[] = [];
 let showNoteNames = false;
 let syntheticModeEnabled = false;
@@ -102,7 +102,7 @@ function expectedMidiForFrame(frameTMs: number): number | null {
 
 function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number }): void {
   const stableState = stableNoteDetector.pushFrame(frame);
-  lastPitchFrame = { midi: stableState.rawMidi };
+  lastPitchFrame = frame;
   lastStableMidi = stableState.stableMidi;
   const session = getSession();
   if (session) {
@@ -111,16 +111,15 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
       return;
     }
   }
-
-  lastPitchFrame = { midi: frame.midi };
   updatePitchReadout();
   const frameSec = frame.t / 1000;
   if (Number.isFinite(frameSec) && frameSec >= 0) {
     pitchGraphNowSec = Math.max(pitchGraphNowSec, frameSec);
   }
   const overlayMidi = stableState.stableMidi ?? frame.midi;
-  pitchOverlay?.pushFrame({ ...frame, midi: overlayMidi }, getFrameXPosition(frame.t));
-  pitchGraph?.pushFrame(frame, expectedMidiForFrame(frame.t));
+  const displayFrame = { ...frame, midi: overlayMidi };
+  pitchOverlay?.pushFrame(displayFrame, getFrameXPosition(frame.t));
+  pitchGraph?.pushFrame(displayFrame, expectedMidiForFrame(frame.t));
   window.dispatchEvent(new CustomEvent('stable-pitch-frame', {
     detail: {
       t: frame.t,
