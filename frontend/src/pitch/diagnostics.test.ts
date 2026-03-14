@@ -7,6 +7,12 @@ describe('midiToCentsOffset', () => {
     expect(midiToCentsOffset(69.25)).toBeCloseTo(25, 6);
     expect(midiToCentsOffset(68.8)).toBeCloseTo(-20, 6);
   });
+
+  it('returns zero for non-finite MIDI values', () => {
+    expect(midiToCentsOffset(Number.NaN)).toBe(0);
+    expect(midiToCentsOffset(Number.POSITIVE_INFINITY)).toBe(0);
+  });
+
 });
 
 describe('StablePitchTracker', () => {
@@ -16,6 +22,12 @@ describe('StablePitchTracker', () => {
     expect(frames[2]?.stable).toBe(false);
     expect(frames[3]?.stable).toBe(true);
     expect(frames[3]?.heldMs).toBe(150);
+  });
+
+  it('includes note name in diagnostic state', () => {
+    const tracker = new StablePitchTracker();
+    const state = tracker.push({ t: 0, midi: 69.0, conf: 0.9 }, 0.6);
+    expect(state.noteName).toBe('A4');
   });
 
   it('resets stability when confidence drops', () => {

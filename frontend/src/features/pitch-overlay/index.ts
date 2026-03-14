@@ -26,7 +26,7 @@ import { syntheticPitchFrameAt } from '../../pitch/synthetic';
 import { PitchTimelineSync } from '../../pitch/timeline-sync';
 import { parsePitchSocketMessage, reconnectDelayMs } from '../../pitch/socket';
 import { midiToFrequency, midiToNoteName } from '../../pitch/note-name';
-import { StablePitchTracker, midiToCentsOffset } from '../../pitch/diagnostics';
+import { StablePitchTracker } from '../../pitch/diagnostics';
 import { elapsedToBeat } from '../../score/timing';
 import { type NoteModel } from '../../score/renderer';
 import { PhraseSummaryTracker, type PhraseSummary } from '../../pitch/phrase-summary';
@@ -158,10 +158,8 @@ function updateDiagnostics(frame: { t: number; midi: number; conf: number }): vo
   const confFillEl = document.getElementById('diag-confidence-fill') as HTMLDivElement;
 
   const state = stablePitchTracker.push(frame, overlaySettings.confidenceThreshold);
-  const noteName = midiToNoteName(frame.midi);
-  const cents = midiToCentsOffset(frame.midi);
-  noteEl.textContent = noteName;
-  centsEl.textContent = `${cents >= 0 ? '+' : ''}${cents.toFixed(1)} cents`;
+  noteEl.textContent = state.noteName;
+  centsEl.textContent = `${state.cents >= 0 ? '+' : ''}${state.cents.toFixed(1)} cents`;
   stabilityEl.textContent = state.stable ? 'Stable' : 'Unstable';
   stabilityEl.classList.toggle('unstable', !state.stable);
   heldEl.textContent = `${(state.heldMs / 1000).toFixed(1)}s`;
@@ -172,13 +170,6 @@ function updateDiagnostics(frame: { t: number; midi: number; conf: number }): vo
 
 // ── Phrase summary ───────────────────────────────────────────────────────────
 
-  // Render all completed summaries — multiple can flush in a single frame after
-  // a seek or discontinuity. Only the last one will remain visible, but each
-  // call updates the panel so the most-recently-completed phrase is shown.
-  for (const summary of completedPhrases) {
-    renderPhraseSummary(summary);
-  }
-}
 
 function clearPhraseSummaryPanel(): void {
   const panel = document.getElementById('phrase-summary-panel') as HTMLDivElement | null;

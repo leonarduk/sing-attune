@@ -1,3 +1,5 @@
+import { midiToNoteName } from './note-name';
+
 export interface DiagnosticFrame {
   t: number;
   midi: number;
@@ -17,6 +19,7 @@ const STABLE_FRAMES_REQUIRED = 4;
 const STABLE_CENTS_LIMIT = 40;
 
 export function midiToCentsOffset(midi: number): number {
+  if (!Number.isFinite(midi)) return 0;
   return (midi - Math.round(midi)) * 100;
 }
 
@@ -32,8 +35,9 @@ export class StablePitchTracker {
   }
 
   push(frame: DiagnosticFrame, confidenceThreshold: number): DiagnosticState {
-    const rounded = Math.round(frame.midi);
+    const rounded = Number.isFinite(frame.midi) ? Math.round(frame.midi) : 0;
     const cents = midiToCentsOffset(frame.midi);
+    const noteName = midiToNoteName(rounded);
     const confidenceOk = frame.conf >= confidenceThreshold;
     const centsOk = Math.abs(cents) <= STABLE_CENTS_LIMIT;
 
@@ -42,7 +46,7 @@ export class StablePitchTracker {
       this.runLength = 0;
       this.heldStartMs = null;
       return {
-        noteName: '',
+        noteName,
         cents,
         confidence: frame.conf,
         stable: false,
@@ -63,7 +67,7 @@ export class StablePitchTracker {
     const heldMs = this.heldStartMs === null ? 0 : Math.max(0, frame.t - this.heldStartMs);
 
     return {
-      noteName: '',
+      noteName,
       cents,
       confidence: frame.conf,
       stable,
