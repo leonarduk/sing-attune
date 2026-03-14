@@ -11,8 +11,8 @@ import { playbackFeature     } from './features/playback/index';
 import { partSelectorFeature } from './features/part-selector/index';
 import { pitchOverlayFeature } from './features/pitch-overlay/index';
 
+// Re-export so external consumers can import Feature from registry if they want.
 export type { Feature } from './feature-types';
-export type { Feature as FeatureType } from './feature-types'; // backwards-compat alias
 
 import { type Feature } from './feature-types';
 
