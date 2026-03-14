@@ -1,6 +1,12 @@
 import type { NoteModel } from '../score/renderer';
 
 export type DotColor = 'green' | 'amber' | 'red' | 'grey';
+export type CentsBand = 'green' | 'amber' | 'red';
+
+export const GREEN_CENTS_THRESHOLD = 50;
+export const AMBER_CENTS_THRESHOLD = 100;
+export const MIN_CONFIDENCE_FOR_DOT = 0.6;
+export const MIN_CONFIDENCE_FOR_SUMMARY = 0.55;
 
 export function expectedNoteAtBeat(beat: number, notes: NoteModel[]): NoteModel | null {
   if (notes.length === 0) return null;
@@ -22,29 +28,29 @@ export function expectedNoteAtBeat(beat: number, notes: NoteModel[]): NoteModel 
   if (idx < 0) return null;
   const candidate = notes[idx];
   const end = candidate.beat_start + candidate.duration;
-  // Notes use half-open beat ranges [start, end), matching how scheduling
-  // and measure boundaries are represented in the score model.
   return beat >= candidate.beat_start && beat < end ? candidate : null;
 }
 
-/**
- * Classify the dot colour for a voiced pitch frame.
- *
- * Precondition: expectedMidi is the MIDI value of the currently active note
- * (i.e. expectedNoteAtBeat() returned non-null). Callers must not invoke this
- * function during rests — use the null return from expectedNoteAtBeat() to
- * suppress the dot entirely before reaching this function.
- */
+export function centsOffPitch(sungMidi: number, expectedMidi: number): number {
+  return (sungMidi - expectedMidi) * 100;
+}
+
+export function classifyByCents(absCents: number): CentsBand {
+  if (absCents <= GREEN_CENTS_THRESHOLD) return 'green';
+  if (absCents <= AMBER_CENTS_THRESHOLD) return 'amber';
+  return 'red';
+}
+
+export function isWithinTolerance(absCents: number): boolean {
+  return absCents <= GREEN_CENTS_THRESHOLD;
+}
+
 export function classifyPitchColor(
   sungMidi: number,
   expectedMidi: number,
   conf: number,
-  confidenceThreshold = 0.6,
+  confidenceThreshold = MIN_CONFIDENCE_FOR_DOT,
 ): DotColor {
   if (conf < confidenceThreshold) return 'grey';
-
-  const cents = Math.abs((sungMidi - expectedMidi) * 100);
-  if (cents <= 50) return 'green';
-  if (cents <= 100) return 'amber';
-  return 'red';
+  return classifyByCents(Math.abs(centsOffPitch(sungMidi, expectedMidi)));
 }

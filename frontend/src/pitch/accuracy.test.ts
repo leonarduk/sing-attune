@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { classifyPitchColor, expectedNoteAtBeat } from './accuracy';
+import {
+  AMBER_CENTS_THRESHOLD,
+  GREEN_CENTS_THRESHOLD,
+  centsOffPitch,
+  classifyByCents,
+  classifyPitchColor,
+  expectedNoteAtBeat,
+  isWithinTolerance,
+} from './accuracy';
 import type { NoteModel } from '../score/renderer';
 
 const notes: NoteModel[] = [
@@ -53,5 +61,24 @@ describe('classifyPitchColor', () => {
   it('classifies a note just inside amber (51 cents)', () => {
     // 0.51 semitones = 51 cents — just above green threshold
     expect(classifyPitchColor(60.51, 60, 0.8)).toBe('amber');
+  });
+});
+
+describe('shared cents helpers', () => {
+  it('computes signed cents from midi deltas', () => {
+    expect(centsOffPitch(60.2, 60)).toBeCloseTo(20, 5);
+    expect(centsOffPitch(59.8, 60)).toBeCloseTo(-20, 5);
+  });
+
+  it('classifies tolerance bands using shared constants', () => {
+    expect(classifyByCents(GREEN_CENTS_THRESHOLD)).toBe('green');
+    expect(classifyByCents(GREEN_CENTS_THRESHOLD + 1)).toBe('amber');
+    expect(classifyByCents(AMBER_CENTS_THRESHOLD + 1)).toBe('red');
+  });
+
+  it('reports in-tolerance based on green threshold only', () => {
+    expect(isWithinTolerance(49)).toBe(true);
+    expect(isWithinTolerance(50)).toBe(true);
+    expect(isWithinTolerance(51)).toBe(false);
   });
 });

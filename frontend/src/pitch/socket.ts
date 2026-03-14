@@ -4,6 +4,12 @@ export interface PitchFrame {
   conf: number;
 }
 
+export type PitchSocketMessage =
+  | { kind: 'frame'; frame: PitchFrame }
+  | { kind: 'status' }
+  | { kind: 'ping' }
+  | { kind: 'unknown' };
+
 export const PITCH_RECONNECT_BASE_MS = 500;
 export const PITCH_RECONNECT_MAX_MS = 5000;
 
@@ -19,4 +25,23 @@ export function parsePitchFrame(payload: unknown): PitchFrame | null {
     return null;
   }
   return { t: frame.t, midi: frame.midi, conf: frame.conf };
+}
+
+export function parsePitchSocketMessage(payload: unknown): PitchSocketMessage {
+  if (typeof payload !== 'object' || payload === null) return { kind: 'unknown' };
+  const message = payload as { status?: unknown; ping?: unknown };
+
+  if (message.status === 'connected') {
+    return { kind: 'status' };
+  }
+  if (message.ping === true) {
+    return { kind: 'ping' };
+  }
+
+  const frame = parsePitchFrame(payload);
+  if (frame) {
+    return { kind: 'frame', frame };
+  }
+
+  return { kind: 'unknown' };
 }
