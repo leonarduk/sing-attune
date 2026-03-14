@@ -23,6 +23,7 @@ import { emitPlaybackSyncEvent } from '../../services/playback-sync';
 import { beatToMs, postPlayback, startPlayback, seekPlayback } from '../../transport/controls';
 import { sessionSummaryTracker, type SessionSummary } from '../../practice/session-summary';
 import { type Feature } from '../../feature-types';
+import { ensureAudioPreflightReady } from '../../services/audio-preflight';
 
 // ── Cursor RAF ──────────────────────────────────────────────────────────────────
 
@@ -193,6 +194,11 @@ function mount(_slot: HTMLElement): void {
     if (!session) return;
     const { engine, cursor } = session;
     if (engine.state === 'playing') return;
+    const preflightReady = await ensureAudioPreflightReady();
+    if (!preflightReady) {
+      setStatus('Audio setup is required before starting playback.', 'error');
+      return;
+    }
     headphoneWarning.classList.remove('hidden');
     const fromBeat = engine.state === 'paused' ? engine.startBeat : 0;
     try {
