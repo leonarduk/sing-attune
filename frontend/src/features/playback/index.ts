@@ -18,8 +18,10 @@
 import { onScoreCleared, onScoreLoaded, getSession } from '../../services/score-session';
 import { setStatus } from '../../services/backend';
 import { recordBeatSample, resetProjection, getCursorX } from '../../services/cursor-projection';
+import { finishPracticeSessionCapture, startPracticeSessionCapture } from '../../services/progress-history';
 import { emitPlaybackSyncEvent } from '../../services/playback-sync';
 import { beatToMs, postPlayback, startPlayback, seekPlayback } from '../../transport/controls';
+import { sessionSummaryTracker, type SessionSummary } from '../../practice/session-summary';
 import { type Feature } from '../../feature-types';
 import { ensureAudioPreflightReady } from '../../services/audio-preflight';
 
@@ -84,6 +86,41 @@ function getSelectedDeviceId(): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+function formatSummary(summary: SessionSummary): string {
+  const avgDeviation = summary.averagePitchDeviationCents === null
+    ? '—'
+    : `${summary.averagePitchDeviationCents.toFixed(1)} cents`;
+  const difficultBars = summary.mostDifficultBars.length === 0
+    ? 'No aligned bars yet.'
+    : summary.mostDifficultBars
+      .map((bar) => `Bar ${bar.measure}: ${bar.avgDeviationCents.toFixed(1)} cents`)
+      .join(' · ');
+  const sustained = summary.longestSustainedNote
+    ? `${summary.longestSustainedNote.noteName} (${(summary.longestSustainedNote.durationMs / 1000).toFixed(2)}s)`
+    : '—';
+
+  return [
+    `Lowest note: ${summary.lowestNote ?? '—'}`,
+    `Highest note: ${summary.highestNote ?? '—'}`,
+    `Average pitch deviation: ${avgDeviation}`,
+    `Most difficult bars: ${difficultBars}`,
+    `Longest sustained note: ${sustained}`,
+  ].join('\n');
+}
+
+function showSessionSummary(summary: SessionSummary): void {
+  const modal = document.getElementById('session-summary-modal') as HTMLDivElement;
+  const content = document.getElementById('session-summary-content') as HTMLPreElement;
+  if (!modal || !content) return;
+  content.textContent = formatSummary(summary);
+  modal.classList.remove('hidden');
+}
+
+function hideSessionSummary(): void {
+  const modal = document.getElementById('session-summary-modal') as HTMLDivElement;
+  modal?.classList.add('hidden');
+}
+
 // ── mount ─────────────────────────────────────────────────────────────────
 
 function mount(_slot: HTMLElement): void {
@@ -93,9 +130,25 @@ function mount(_slot: HTMLElement): void {
   const btnRewind = document.getElementById('btn-rewind') as HTMLButtonElement;
   const headphoneWarning = document.getElementById('headphone-warning') as HTMLDivElement;
   const warningDismiss   = document.getElementById('warning-dismiss')   as HTMLButtonElement;
+  const summaryClose     = document.getElementById('btn-summary-close')  as HTMLButtonElement;
+  const summaryRetry     = document.getElementById('btn-summary-retry')  as HTMLButtonElement;
+  const summaryReplay    = document.getElementById('btn-summary-replay') as HTMLButtonElement;
 
-  function syncPauseButton(): void {
+  // Merge into a single onScoreCleared callback so both always fire together,
+  // regardless of whether the implementation replaces or appends listeners.
+  onScoreCleared(() => { stopCursorRaf(); finishPracticeSessionCapture(); });
+
+  function syncTransportButtons(): void {
     const session = getSession();
+
+    // Play: enabled only when a score is loaded and not already playing.
+    if (!session || session.engine.state === 'playing') {
+      btnPlay.disabled = true;
+    } else {
+      btnPlay.disabled = false;
+    }
+
+    // Pause/Resume: enabled when playing or paused.
     if (!session) {
       btnPause.disabled = true;
       btnPause.innerHTML = '&#9646;&#9646; Pause';
@@ -115,8 +168,26 @@ function mount(_slot: HTMLElement): void {
     btnPause.innerHTML = '&#9646;&#9646; Pause';
   }
 
-  onScoreLoaded(() => { syncPauseButton(); });
-  onScoreCleared(() => { stopCursorRaf(); syncPauseButton(); });
+  function syncPauseButton(): void {
+    const session = getSession();
+    if (!session || session.engine.state === 'stopped') {
+      btnPause.disabled = true;
+      btnPause.innerHTML = '&#9646;&#9646; Pause';
+      return;
+    }
+    if (session.engine.state === 'playing') {
+      btnPause.disabled = false;
+      btnPause.innerHTML = '&#9646;&#9646; Pause';
+      return;
+    }
+    if (session.engine.state === 'paused') {
+      btnPause.disabled = false;
+      btnPause.innerHTML = '&#9654; Resume';
+    }
+  }
+
+  onScoreLoaded(() => { syncTransportButtons(); });
+  onScoreCleared(() => { stopCursorRaf(); syncTransportButtons(); });
 
   btnPlay.addEventListener('click', async () => {
     const session = getSession();
@@ -131,6 +202,7 @@ function mount(_slot: HTMLElement): void {
     headphoneWarning.classList.remove('hidden');
     const fromBeat = engine.state === 'paused' ? engine.startBeat : 0;
     try {
+      hideSessionSummary();
       if (fromBeat > 0) {
         const audioTimeSec = engine.ctx.currentTime;
         const response = await postPlayback('/playback/resume');
@@ -141,6 +213,8 @@ function mount(_slot: HTMLElement): void {
           syncOffsetMs: null,
         });
       } else {
+        sessionSummaryTracker.startSession();
+        startPracticeSessionCapture(session.model.title, session.selectedPart);
         const audioTimeSec = engine.ctx.currentTime;
         const response = await startPlayback(getSelectedDeviceId());
         emitPlaybackSyncEvent({
@@ -154,7 +228,7 @@ function mount(_slot: HTMLElement): void {
       }
       engine.play(fromBeat);
       startCursorRaf();
-      syncPauseButton();
+      syncTransportButtons();
     } catch (err) {
       setStatus(`playback start failed: ${String(err)}`, 'error');
       console.error('Play failed:', err);
@@ -189,7 +263,7 @@ function mount(_slot: HTMLElement): void {
         engine.play(engine.startBeat);
         startCursorRaf();
       }
-      syncPauseButton();
+      syncTransportButtons();
     } catch (err) {
       setStatus(`pause failed: ${String(err)}`, 'error');
       console.error('Pause failed:', err);
@@ -203,6 +277,7 @@ function mount(_slot: HTMLElement): void {
       const audioTimeSec = session.engine.ctx.currentTime;
       const response = await postPlayback('/playback/stop');
       session.engine.stop();
+      finishPracticeSessionCapture();
       emitPlaybackSyncEvent({
         type: 'stop',
         tMs: response.t_ms,
@@ -212,7 +287,10 @@ function mount(_slot: HTMLElement): void {
       stopCursorRaf();
       session.cursor.stop();
       headphoneWarning.classList.add('hidden');
+      const summary = sessionSummaryTracker.finishSession();
+      if (summary) showSessionSummary(summary);
       syncPauseButton();
+      syncTransportButtons();
     } catch (err) {
       setStatus(`stop failed: ${String(err)}`, 'error');
       console.error('Stop failed:', err);
@@ -236,15 +314,37 @@ function mount(_slot: HTMLElement): void {
       console.error('Rewind failed:', err);
     }
     session.engine.stop();
+    finishPracticeSessionCapture();
     stopCursorRaf();
     session.cursor.stop();
     session.cursor.osmd.cursor.show();
     headphoneWarning.classList.add('hidden');
+    sessionSummaryTracker.reset();
+    hideSessionSummary();
     syncPauseButton();
+    syncTransportButtons();
   });
 
   warningDismiss.addEventListener('click', () => { headphoneWarning.classList.add('hidden'); });
+  summaryClose.addEventListener('click', () => { hideSessionSummary(); });
+
+  // Replay: rewind and play again, preserving session stats for review.
+  summaryReplay.addEventListener('click', () => {
+    hideSessionSummary();
+    btnRewind.click();
+    btnPlay.click();
+  });
+
+  // Retry: reset session stats for a clean attempt, then rewind and play.
+  summaryRetry.addEventListener('click', () => {
+    hideSessionSummary();
+    sessionSummaryTracker.reset();
+    btnRewind.click();
+    btnPlay.click();
+  });
+
   syncPauseButton();
+  syncTransportButtons();
 
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
