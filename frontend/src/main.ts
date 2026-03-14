@@ -438,18 +438,20 @@ function startPitchGraphLoop(): void {
   if (pitchGraphRafId !== null) return;
 
   const tick = (): void => {
-    const playbackSec = playbackElapsedSec();
-    if (playbackSec !== null) {
-      pitchGraphNowSec = playbackSec;
-    }
-    pitchGraph?.tick(pitchGraphNowSec);
-
     if (syntheticModeEnabled && engine?.playing) {
       const elapsedSec = Math.max(0, engine.ctx.currentTime - engine.startAudioTime);
       const elapsedMs = elapsedSec * 1000;
       const expectedMidi = expectedMidiForFrame(elapsedMs);
       handleIncomingPitchFrame(syntheticPitchFrameAt(elapsedSec, expectedMidi));
     }
+
+    const playbackSec = playbackElapsedSec();
+    if (playbackSec !== null) {
+      // Keep graph time monotonic so frame-timestamp updates never get pulled
+      // backwards by slightly lagging playback clock updates.
+      pitchGraphNowSec = Math.max(pitchGraphNowSec, playbackSec);
+    }
+    pitchGraph?.tick(pitchGraphNowSec);
 
     pitchGraphRafId = requestAnimationFrame(tick);
   };
