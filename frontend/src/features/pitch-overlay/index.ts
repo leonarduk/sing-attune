@@ -172,6 +172,14 @@ function updateDiagnostics(frame: { t: number; midi: number; conf: number }): vo
 
 // ── Phrase summary ───────────────────────────────────────────────────────────
 
+  // Render all completed summaries — multiple can flush in a single frame after
+  // a seek or discontinuity. Only the last one will remain visible, but each
+  // call updates the panel so the most-recently-completed phrase is shown.
+  for (const summary of completedPhrases) {
+    renderPhraseSummary(summary);
+  }
+}
+
 function clearPhraseSummaryPanel(): void {
   const panel = document.getElementById('phrase-summary-panel') as HTMLDivElement | null;
   if (!panel) return;
@@ -230,6 +238,8 @@ function bindPlaybackSync(): void {
       syncOffsetWarningShown = true;
     }
     timelineSync.setSyncOffsetMs(event.syncOffsetMs ?? 0);
+    // Use audioTimeSec (AudioContext seconds) as the graph scroll cursor —
+    // event.tMs is backend-relative milliseconds and must not be used here.
     pitchGraphNowSec = event.audioTimeSec;
     timelineSync.reanchor(event.tMs, event.audioTimeSec);
     pitchOverlay?.clear();
