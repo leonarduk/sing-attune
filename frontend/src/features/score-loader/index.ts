@@ -10,7 +10,7 @@
  * After a score loads it publishes a ScoreSession via setSession().
  * Before loading it calls clearSession() so other features can tear down.
  */
-import { ScoreRenderer } from '../../score/renderer';
+import { ScoreRenderer, type ScoreModel } from '../../score/renderer';
 import { ScoreCursor } from '../../score/cursor';
 import { PlaybackEngine } from '../../playback/engine';
 import {
@@ -92,9 +92,20 @@ function mount(slot: HTMLElement): void {
     });
 
     const renderer = new ScoreRenderer(scoreContainerEl);
-    try {
-      const model = await renderer.load(file);
+    let model: ScoreModel;
 
+    try {
+      model = await renderer.load(file);
+    } catch (err) {
+      showErrorBanner('Could not load this MusicXML file. Try exporting again from notation software.');
+      setStatus(String(err), 'error');
+      console.error('Score parse/render failed:', err);
+      dropZoneEl.classList.remove('hidden');
+      hideLoading();
+      return;
+    }
+
+    try {
       // Populate part selector
       const visibleParts = getVisiblePartOptions(model.parts, showAccompEl.checked);
       partSelectEl.innerHTML = visibleParts
@@ -132,9 +143,9 @@ function mount(slot: HTMLElement): void {
       setTransportEnabled(true);
       setStatus('score loaded', 'ok');
     } catch (err) {
-      showErrorBanner('Could not load this MusicXML file. Try exporting again from notation software.');
+      showErrorBanner('Score loaded, but playback setup failed. Check audio/soundfont settings and try again.');
       setStatus(String(err), 'error');
-      console.error('Score load failed:', err);
+      console.error('Post-parse score setup failed:', err);
       dropZoneEl.classList.remove('hidden');
     } finally {
       hideLoading();
