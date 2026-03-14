@@ -62,7 +62,12 @@ function mount(slot: HTMLElement): void {
     for (const id of ids) {
       const el = document.getElementById(id) as
         HTMLButtonElement | HTMLInputElement | HTMLSelectElement | null;
-      if (el) el.disabled = !enabled;
+      if (!el) continue;
+      if (id === 'btn-pause') {
+        el.disabled = true;
+        continue;
+      }
+      el.disabled = !enabled;
     }
   }
 
