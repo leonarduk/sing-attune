@@ -99,6 +99,48 @@
     }
     #warning-dismiss:hover { background: rgba(230,81,0,0.3); }
 
+    /* ── Session summary modal ── */
+    #session-summary-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(7, 10, 22, 0.75);
+      z-index: 60;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    #session-summary-modal.hidden { display: none; }
+    #session-summary-card {
+      width: min(560px, 100%);
+      background: var(--color-surface);
+      border: 1px solid #1a5276;
+      border-radius: 10px;
+      padding: 16px;
+      box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4);
+    }
+    #session-summary-card h2 {
+      color: var(--color-accent);
+      font-size: 1rem;
+      margin-bottom: 10px;
+    }
+    #session-summary-content {
+      white-space: pre-wrap;
+      color: #d6dff7;
+      font-size: 0.86rem;
+      line-height: 1.4;
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      background: #0d162a;
+      padding: 10px;
+      margin-bottom: 12px;
+    }
+    #session-summary-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
     /* ── Toolbar (left sidebar) ── */
     #toolbar {
       width: 250px;
@@ -271,6 +313,18 @@
   <div id="headphone-warning" class="hidden">
     <span>🎧 Use headphones — speakers cause mic bleed and will break pitch detection.</span>
     <button id="warning-dismiss">Dismiss</button>
+  </div>
+
+  <div id="session-summary-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="session-summary-title">
+    <div id="session-summary-card">
+      <h2 id="session-summary-title">Practice summary</h2>
+      <pre id="session-summary-content">No summary available.</pre>
+      <div id="session-summary-actions">
+        <button id="btn-summary-close" class="transport-btn">Close</button>
+        <button id="btn-summary-replay" class="transport-btn">Replay</button>
+        <button id="btn-summary-retry" class="transport-btn">Retry</button>
+      </div>
+    </div>
   </div>
 
   <div id="app-layout">

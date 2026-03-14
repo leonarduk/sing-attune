@@ -19,6 +19,7 @@ import { onScoreCleared, getSession } from '../../services/score-session';
 import { setStatus } from '../../services/backend';
 import { recordBeatSample, resetProjection, getCursorX } from '../../services/cursor-projection';
 import { beatToMs, postPlayback, startPlayback, seekPlayback } from '../../transport/controls';
+import { sessionSummaryTracker, type SessionSummary } from '../../practice/session-summary';
 import { type Feature } from '../../feature-types';
 
 // ── Cursor RAF ──────────────────────────────────────────────────────────────────
@@ -75,6 +76,41 @@ function getSelectedDeviceId(): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+function formatSummary(summary: SessionSummary): string {
+  const avgDeviation = summary.averagePitchDeviationCents === null
+    ? '—'
+    : `${summary.averagePitchDeviationCents.toFixed(1)} cents`;
+  const difficultBars = summary.mostDifficultBars.length === 0
+    ? 'No aligned bars yet.'
+    : summary.mostDifficultBars
+      .map((bar) => `Bar ${bar.measure}: ${bar.avgDeviationCents.toFixed(1)} cents`)
+      .join(' · ');
+  const sustained = summary.longestSustainedNote
+    ? `${summary.longestSustainedNote.noteName} (${(summary.longestSustainedNote.durationMs / 1000).toFixed(2)}s)`
+    : '—';
+
+  return [
+    `Lowest note: ${summary.lowestNote ?? '—'}`,
+    `Highest note: ${summary.highestNote ?? '—'}`,
+    `Average pitch deviation: ${avgDeviation}`,
+    `Most difficult bars: ${difficultBars}`,
+    `Longest sustained note: ${sustained}`,
+  ].join('\n');
+}
+
+function showSessionSummary(summary: SessionSummary): void {
+  const modal = document.getElementById('session-summary-modal') as HTMLDivElement;
+  const content = document.getElementById('session-summary-content') as HTMLPreElement;
+  if (!modal || !content) return;
+  content.textContent = formatSummary(summary);
+  modal.classList.remove('hidden');
+}
+
+function hideSessionSummary(): void {
+  const modal = document.getElementById('session-summary-modal') as HTMLDivElement;
+  modal?.classList.add('hidden');
+}
+
 // ── mount ─────────────────────────────────────────────────────────────────
 
 function mount(_slot: HTMLElement): void {
@@ -84,6 +120,9 @@ function mount(_slot: HTMLElement): void {
   const btnRewind = document.getElementById('btn-rewind') as HTMLButtonElement;
   const headphoneWarning = document.getElementById('headphone-warning') as HTMLDivElement;
   const warningDismiss   = document.getElementById('warning-dismiss')   as HTMLButtonElement;
+  const summaryClose     = document.getElementById('btn-summary-close')  as HTMLButtonElement;
+  const summaryRetry     = document.getElementById('btn-summary-retry')  as HTMLButtonElement;
+  const summaryReplay    = document.getElementById('btn-summary-replay') as HTMLButtonElement;
 
   onScoreCleared(() => { stopCursorRaf(); });
 
@@ -95,9 +134,11 @@ function mount(_slot: HTMLElement): void {
     headphoneWarning.classList.remove('hidden');
     const fromBeat = engine.state === 'paused' ? engine.startBeat : 0;
     try {
+      hideSessionSummary();
       if (fromBeat > 0) {
         await postPlayback('/playback/resume');
       } else {
+        sessionSummaryTracker.startSession();
         await startPlayback(getSelectedDeviceId());
         cursor.stop();
         cursor.osmd.cursor.show();
@@ -132,6 +173,8 @@ function mount(_slot: HTMLElement): void {
       stopCursorRaf();
       session.cursor.stop();
       headphoneWarning.classList.add('hidden');
+      const summary = sessionSummaryTracker.finishSession();
+      if (summary) showSessionSummary(summary);
     } catch (err) {
       setStatus(`stop failed: ${String(err)}`, 'error');
       console.error('Stop failed:', err);
@@ -150,9 +193,22 @@ function mount(_slot: HTMLElement): void {
     session.cursor.stop();
     session.cursor.osmd.cursor.show();
     headphoneWarning.classList.add('hidden');
+    sessionSummaryTracker.reset();
+    hideSessionSummary();
   });
 
   warningDismiss.addEventListener('click', () => { headphoneWarning.classList.add('hidden'); });
+  summaryClose.addEventListener('click', () => { hideSessionSummary(); });
+  summaryRetry.addEventListener('click', () => {
+    hideSessionSummary();
+    btnRewind.click();
+    btnPlay.click();
+  });
+  summaryReplay.addEventListener('click', () => {
+    hideSessionSummary();
+    btnRewind.click();
+    btnPlay.click();
+  });
 
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;

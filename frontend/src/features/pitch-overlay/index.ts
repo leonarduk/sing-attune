@@ -16,7 +16,7 @@
  * playback feature) to preserve feature isolation.
  */
 import { onScoreLoaded, onScoreCleared, getSession } from '../../services/score-session';
-import { setStatus, showErrorBanner } from '../../services/backend';
+import { showErrorBanner } from '../../services/backend';
 import { getFrameXPosition } from '../../services/cursor-projection';
 import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from '../../pitch/overlay';
 import { PitchGraphCanvas } from '../../pitch/graph';
@@ -28,6 +28,7 @@ import { elapsedToBeat } from '../../score/timing';
 import { type NoteModel } from '../../score/renderer';
 import { resolveSelectedDeviceId, type AudioInputDevice } from '../../audio/devices';
 import { PracticeRecorder } from '../../audio/recorder';
+import { sessionSummaryTracker } from '../../practice/session-summary';
 import { type Feature } from '../../feature-types';
 
 // ── Module-level singletons (survive score reloads) ───────────────────────────
@@ -85,6 +86,7 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
   }
   pitchOverlay?.pushFrame(frame, getFrameXPosition(frame.t));
   pitchGraph?.pushFrame(frame, expectedMidiForFrame(frame.t));
+  sessionSummaryTracker.recordFrame(frame);
 }
 
 // ── WebSocket ────────────────────────────────────────────────────────────────
@@ -259,6 +261,7 @@ function mount(_slot: HTMLElement): void {
     pitchGraph?.clear();
     lastPitchFrame = null;
     pitchGraphNowSec = 0;
+    sessionSummaryTracker.reset();
     updatePitchReadout();
   });
 
@@ -267,6 +270,7 @@ function mount(_slot: HTMLElement): void {
     pitchOverlay = new PitchOverlay(
       scoreContainerEl, session.model, session.selectedPart, overlaySettings);
     activePartNotes = session.model.notes.filter((n) => n.part === session.selectedPart);
+    sessionSummaryTracker.setContext(session.model.tempo_marks, activePartNotes);
     pitchGraph?.clear();
     lastPitchFrame = null;
     pitchGraphNowSec = 0;
