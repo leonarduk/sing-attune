@@ -20,6 +20,21 @@ That's it.
 
 ---
 
+## Pitch graph panel
+
+The UI now includes a dedicated pitch graph canvas under the toolbar:
+
+- Semitone grid from **C2 to C6** with octave labels
+- Rolling **10-second** time window with 1-second vertical grid lines
+- Continuous f0 trace colour-coded against the active target note:
+  - **Green**: within ±25 cents
+  - **Red**: outside ±25 cents
+  - **Grey**: no active target note
+
+For backend-free testing, enable **Synthetic pitch input (no WebSocket)** in Settings. This feeds deterministic test frames so you can validate rendering and scrolling even when the backend pitch stream is unavailable.
+
+---
+
 ## Why it exists
 
 [SingScope](http://www.singscope.com/en/) does this brilliantly — but only on iOS. If you're a choir singer who practices on a Windows PC, or wants a bigger screen than an iPad, there's nothing that combines score display, part playback, and real-time pitch tracking in one tool. sing-attune fills that gap.

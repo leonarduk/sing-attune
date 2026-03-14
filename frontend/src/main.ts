@@ -12,11 +12,14 @@
  *   pitch overlay reads engine.ctx.currentTime − engine.startAudioTime to
  *   compute elapsed seconds → beat → cursor position. No engine changes needed.
  */
-import { ScoreRenderer } from './score/renderer';
+import { ScoreRenderer, type NoteModel } from './score/renderer';
 import { ScoreCursor } from './score/cursor';
 import { SoundfontLoader } from './playback/soundfont';
 import { PlaybackEngine } from './playback/engine';
 import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from './pitch/overlay';
+import { PitchGraphCanvas } from './pitch/graph';
+import { expectedNoteAtBeat } from './pitch/accuracy';
+import { syntheticPitchFrameAt } from './pitch/synthetic';
 import { parsePitchFrame, reconnectDelayMs } from './pitch/socket';
 import { midiToFrequency, midiToNoteName } from './pitch/note-name';
 import { getVisiblePartOptions } from './part-options';
@@ -49,6 +52,7 @@ const showAccompanimentEl = document.getElementById('show-accompaniment') as HTM
 const transposeSelectEl = document.getElementById('transpose-select') as HTMLSelectElement;
 const btnSettings = document.getElementById('btn-settings') as HTMLButtonElement;
 const pitchReadoutEl = document.getElementById('pitch-readout') as HTMLSpanElement;
+const pitchGraphCanvasEl = document.getElementById('pitch-graph-canvas') as HTMLDivElement;
 const settingsPanelEl = document.getElementById('settings-panel') as HTMLDivElement;
 const settingsDeviceEl = document.getElementById('settings-device') as HTMLSelectElement;
 const settingsConfidenceEl = document.getElementById('settings-confidence') as HTMLInputElement;
@@ -56,6 +60,7 @@ const settingsConfidenceLabelEl = document.getElementById('settings-confidence-l
 const settingsTrailEl = document.getElementById('settings-trail') as HTMLInputElement;
 const settingsTrailLabelEl = document.getElementById('settings-trail-label') as HTMLSpanElement;
 const settingsShowNoteNamesEl = document.getElementById('settings-show-note-names') as HTMLInputElement;
+const settingsSyntheticModeEl = document.getElementById('settings-synthetic-mode') as HTMLInputElement;
 const settingsEngineEl = document.getElementById('settings-engine') as HTMLDivElement;
 const recordingEnabledEl = document.getElementById('recording-enabled') as HTMLInputElement;
 const btnRecordStart = document.getElementById('btn-record-start') as HTMLButtonElement;
@@ -80,6 +85,7 @@ let soundfontLoadPromise: Promise<void> | null = null;
 let cursorRafId: number | null = null;
 let pitchOverlay: PitchOverlay | null = null;
 let pitchWs: WebSocket | null = null;
+let pitchGraph: PitchGraphCanvas | null = null;
 let pitchReconnectTimer: number | null = null;
 let shouldReconnectPitchSocket = false;
 let pitchReconnectAttempts = 0;
@@ -87,6 +93,10 @@ let cursorBeatSample: { beat: number; x: number } | null = null;
 let pxPerBeatEstimate = 0;
 let showNoteNames = false;
 let lastPitchFrame: { midi: number } | null = null;
+let pitchGraphRafId: number | null = null;
+let syntheticModeEnabled = false;
+let activePartNotes: NoteModel[] = [];
+let pitchGraphNowSec = 0;
 
 const overlaySettings: OverlaySettings = {
   confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
@@ -176,6 +186,7 @@ async function loadScore(file: File): Promise<void> {
   closePitchSocket();
   pitchOverlay?.destroy();
   pitchOverlay = null;
+  pitchGraph?.clear();
   lastPitchFrame = null;
   updatePitchReadout();
   scoreContainerEl.innerHTML = '';
@@ -217,6 +228,7 @@ async function loadScore(file: File): Promise<void> {
     cursor = new ScoreCursor(renderer.osmd, model);
     renderer.setHighlightedPart(selectedPart);
     pitchOverlay = new PitchOverlay(scoreContainerEl, model, selectedPart, overlaySettings);
+    activePartNotes = model.notes.filter((note) => note.part === selectedPart);
     connectPitchSocket();
     setTransportEnabled(true);
     setStatus('score loaded', 'ok');
@@ -391,8 +403,70 @@ function updatePitchReadout(): void {
   pitchReadoutEl.textContent = `Detected: ${frequencyLabel} → ${noteName}`;
 }
 
+
+function expectedMidiForFrame(frameTMs: number): number | null {
+  if (!renderer?.scoreModel || activePartNotes.length === 0) return null;
+  const beat = elapsedToBeat(frameTMs, 0, renderer.scoreModel.tempo_marks);
+  return expectedNoteAtBeat(beat, activePartNotes)?.midi ?? null;
+}
+
+function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number }): void {
+  lastPitchFrame = { midi: frame.midi };
+  updatePitchReadout();
+
+  const frameSec = frame.t / 1000;
+  if (Number.isFinite(frameSec) && frameSec >= 0) {
+    // Keep graph time anchored to the same timeline as incoming pitch frames
+    // so traces can span the full rolling window even if playback state lags.
+    pitchGraphNowSec = Math.max(pitchGraphNowSec, frameSec);
+  }
+
+  const expectedMidi = expectedMidiForFrame(frame.t);
+  pitchOverlay?.pushFrame(
+    frame,
+    frameXPosition(frame.t),
+  );
+  pitchGraph?.pushFrame(frame, expectedMidi);
+}
+
+function playbackElapsedSec(): number | null {
+  if (!engine?.playing) return null;
+  return Math.max(0, engine.ctx.currentTime - engine.startAudioTime);
+}
+
+function startPitchGraphLoop(): void {
+  if (pitchGraphRafId !== null) return;
+
+  const tick = (): void => {
+    if (syntheticModeEnabled && engine?.playing) {
+      const elapsedSec = Math.max(0, engine.ctx.currentTime - engine.startAudioTime);
+      const elapsedMs = elapsedSec * 1000;
+      const expectedMidi = expectedMidiForFrame(elapsedMs);
+      handleIncomingPitchFrame(syntheticPitchFrameAt(elapsedSec, expectedMidi));
+    }
+
+    const playbackSec = playbackElapsedSec();
+    if (playbackSec !== null) {
+      // Keep graph time monotonic so frame-timestamp updates never get pulled
+      // backwards by slightly lagging playback clock updates.
+      pitchGraphNowSec = Math.max(pitchGraphNowSec, playbackSec);
+    }
+    pitchGraph?.tick(pitchGraphNowSec);
+
+    pitchGraphRafId = requestAnimationFrame(tick);
+  };
+
+  pitchGraphRafId = requestAnimationFrame(tick);
+}
+
+function stopPitchGraphLoop(): void {
+  if (pitchGraphRafId === null) return;
+  cancelAnimationFrame(pitchGraphRafId);
+  pitchGraphRafId = null;
+}
+
 function connectPitchSocket(): void {
-  if (!pitchOverlay) return;
+  if (!pitchOverlay || syntheticModeEnabled) return;
   shouldReconnectPitchSocket = true;
 
   if (pitchReconnectTimer !== null) {
@@ -429,7 +503,7 @@ function connectPitchSocket(): void {
   };
 
   pitchWs.onmessage = (event) => {
-    if (!pitchOverlay) return;
+    if (!pitchOverlay || syntheticModeEnabled) return;
     let payload: unknown;
     try {
       payload = JSON.parse(event.data) as unknown;
@@ -440,13 +514,7 @@ function connectPitchSocket(): void {
     const frame = parsePitchFrame(payload);
     if (!frame) return;
 
-    lastPitchFrame = { midi: frame.midi };
-    updatePitchReadout();
-
-    pitchOverlay.pushFrame(
-      frame,
-      frameXPosition(frame.t),
-    );
+    handleIncomingPitchFrame(frame);
   };
 }
 
@@ -592,6 +660,8 @@ btnPlay.addEventListener('click', async () => {
       cursor.stop();
       cursor.osmd.cursor.show();
       pitchOverlay?.clear();
+      pitchGraph?.clear();
+      pitchGraphNowSec = 0;
       lastPitchFrame = null;
       updatePitchReadout();
     }
@@ -624,6 +694,8 @@ btnStop.addEventListener('click', async () => {
     stopCursorRaf();
     cursor.stop();
     pitchOverlay?.clear();
+    pitchGraph?.clear();
+    pitchGraphNowSec = 0;
     lastPitchFrame = null;
     updatePitchReadout();
     headphoneWarning.classList.add('hidden');
@@ -645,6 +717,9 @@ btnRewind.addEventListener('click', async () => {
   stopCursorRaf();
   cursor.stop();
   cursor.osmd.cursor.show();
+  pitchOverlay?.clear();
+  pitchGraph?.clear();
+  pitchGraphNowSec = 0;
   lastPitchFrame = null;
   updatePitchReadout();
   headphoneWarning.classList.add('hidden');
@@ -655,6 +730,7 @@ btnRewind.addEventListener('click', async () => {
 partSelectEl.addEventListener('change', () => {
   if (!engine || !renderer?.scoreModel) return;
   pitchOverlay?.updatePart(partSelectEl.value);
+  activePartNotes = renderer.scoreModel.notes.filter((note) => note.part === partSelectEl.value);
   scheduleSelectedPart(partSelectEl.value);
 });
 
@@ -762,6 +838,14 @@ settingsTrailEl.addEventListener('input', () => {
 settingsShowNoteNamesEl.addEventListener('change', () => {
   showNoteNames = settingsShowNoteNamesEl.checked;
   updatePitchReadout();
+});
+
+settingsSyntheticModeEl.addEventListener('change', () => {
+  syntheticModeEnabled = settingsSyntheticModeEl.checked;
+  closePitchSocket();
+  if (!syntheticModeEnabled) {
+    connectPitchSocket();
+  }
 });
 
 recordingEnabledEl.addEventListener('change', () => {
@@ -903,7 +987,9 @@ function setTransportEnabled(enabled: boolean): void {
 
 window.addEventListener('beforeunload', () => {
   closePitchSocket();
+  stopPitchGraphLoop();
   pitchOverlay?.destroy();
+  pitchGraph?.destroy();
   practiceRecorder.destroy();
 });
 
@@ -913,11 +999,14 @@ function initializeSettingsPanel(): void {
   settingsConfidenceEl.value = String(overlaySettings.confidenceThreshold);
   settingsTrailEl.value = String(overlaySettings.trailMs / 1000);
   settingsShowNoteNamesEl.checked = showNoteNames;
+  settingsSyntheticModeEl.checked = syntheticModeEnabled;
   updateSettingsLabels();
   updatePitchReadout();
 }
 
 setTransportEnabled(false);
+pitchGraph = new PitchGraphCanvas(pitchGraphCanvasEl);
+startPitchGraphLoop();
 tempoLabelEl.textContent = `${tempoSliderEl.value}%`;
 initializeSettingsPanel();
 refreshRecordingControls();
