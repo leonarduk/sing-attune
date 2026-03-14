@@ -16,7 +16,7 @@
  * playback feature) to preserve feature isolation.
  */
 import { onScoreLoaded, onScoreCleared, getSession } from '../../services/score-session';
-import { setStatus, showErrorBanner } from '../../services/backend';
+import { showErrorBanner } from '../../services/backend';
 import { getFrameXPosition } from '../../services/cursor-projection';
 import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from '../../pitch/overlay';
 import { PitchGraphCanvas } from '../../pitch/graph';
@@ -24,6 +24,11 @@ import { expectedNoteAtBeat } from '../../pitch/accuracy';
 import { syntheticPitchFrameAt } from '../../pitch/synthetic';
 import { parsePitchFrame, reconnectDelayMs } from '../../pitch/socket';
 import { midiToFrequency, midiToNoteName } from '../../pitch/note-name';
+import {
+  DEFAULT_STABLE_NOTE_SETTINGS,
+  StableNoteDetector,
+  type StableNoteSettings,
+} from '../../pitch/stable-note';
 import { elapsedToBeat } from '../../score/timing';
 import { type NoteModel } from '../../score/renderer';
 import { resolveSelectedDeviceId, type AudioInputDevice } from '../../audio/devices';
@@ -50,21 +55,33 @@ let showNoteNames = false;
 let syntheticModeEnabled = false;
 let selectedDeviceId: number | null = null;
 let recordingError: string | null = null;
+let lastStableMidi: number | null = null;
 
 const overlaySettings: OverlaySettings = {
   confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
   trailMs: 2000,
 };
 
+const stableNoteSettings: StableNoteSettings = { ...DEFAULT_STABLE_NOTE_SETTINGS };
+const stableNoteDetector = new StableNoteDetector(stableNoteSettings);
+
 // ── Pitch readout ────────────────────────────────────────────────────────────
 
 function updatePitchReadout(): void {
   const el = document.getElementById('pitch-readout') as HTMLSpanElement;
   if (!lastPitchFrame) { el.textContent = 'Detected: —'; return; }
-  const hz = midiToFrequency(lastPitchFrame.midi);
-  const freqLabel = `${hz.toFixed(2)} Hz`;
-  if (!showNoteNames) { el.textContent = `Detected: ${freqLabel}`; return; }
-  el.textContent = `Detected: ${freqLabel} → ${midiToNoteName(lastPitchFrame.midi)}`;
+  const rawHz = midiToFrequency(lastPitchFrame.midi);
+  const rawLabel = `${rawHz.toFixed(2)} Hz`;
+  const stableLabel = lastStableMidi === null
+    ? '—'
+    : `${midiToFrequency(lastStableMidi).toFixed(2)} Hz`;
+  if (!showNoteNames) {
+    el.textContent = `Raw: ${rawLabel} · Stable: ${stableLabel}`;
+    return;
+  }
+  const rawNoteLabel = midiToNoteName(lastPitchFrame.midi);
+  const stableNoteLabel = lastStableMidi === null ? '—' : midiToNoteName(lastStableMidi);
+  el.textContent = `Raw: ${rawLabel} (${rawNoteLabel}) · Stable: ${stableLabel} (${stableNoteLabel})`;
 }
 
 // ── Pitch frame handling ───────────────────────────────────────────────────
@@ -77,14 +94,25 @@ function expectedMidiForFrame(frameTMs: number): number | null {
 }
 
 function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number }): void {
-  lastPitchFrame = { midi: frame.midi };
+  const stableState = stableNoteDetector.pushFrame(frame);
+  lastPitchFrame = { midi: stableState.rawMidi };
+  lastStableMidi = stableState.stableMidi;
   updatePitchReadout();
   const frameSec = frame.t / 1000;
   if (Number.isFinite(frameSec) && frameSec >= 0) {
     pitchGraphNowSec = Math.max(pitchGraphNowSec, frameSec);
   }
-  pitchOverlay?.pushFrame(frame, getFrameXPosition(frame.t));
+  const overlayMidi = stableState.stableMidi ?? frame.midi;
+  pitchOverlay?.pushFrame({ ...frame, midi: overlayMidi }, getFrameXPosition(frame.t));
   pitchGraph?.pushFrame(frame, expectedMidiForFrame(frame.t));
+  window.dispatchEvent(new CustomEvent('stable-pitch-frame', {
+    detail: {
+      t: frame.t,
+      rawMidi: stableState.rawMidi,
+      stableMidi: stableState.stableMidi,
+      conf: frame.conf,
+    },
+  }));
 }
 
 // ── WebSocket ────────────────────────────────────────────────────────────────
@@ -233,6 +261,14 @@ function mount(_slot: HTMLElement): void {
   const settingsNoteNamesEl = document.getElementById('settings-show-note-names') as HTMLInputElement;
   const settingsSynthEl     = document.getElementById('settings-synthetic-mode')  as HTMLInputElement;
   const settingsEngineEl    = document.getElementById('settings-engine')           as HTMLDivElement;
+  const stableConfEl        = document.getElementById('settings-stable-confidence') as HTMLInputElement;
+  const stableConfLabelEl   = document.getElementById('settings-stable-confidence-label') as HTMLSpanElement;
+  const stableClusterEl     = document.getElementById('settings-stable-cluster') as HTMLInputElement;
+  const stableClusterLabelEl = document.getElementById('settings-stable-cluster-label') as HTMLSpanElement;
+  const stableHoldEl        = document.getElementById('settings-stable-hold') as HTMLInputElement;
+  const stableHoldLabelEl   = document.getElementById('settings-stable-hold-label') as HTMLSpanElement;
+  const stableWindowEl      = document.getElementById('settings-stable-window') as HTMLInputElement;
+  const stableWindowLabelEl = document.getElementById('settings-stable-window-label') as HTMLSpanElement;
   const recordingEnabledEl  = document.getElementById('recording-enabled')        as HTMLInputElement;
 
   const ctrl: RecordingCtrl = {
@@ -247,6 +283,14 @@ function mount(_slot: HTMLElement): void {
   function updateSettingsLabels(): void {
     settingsConfLabelEl.textContent = overlaySettings.confidenceThreshold.toFixed(2);
     settingsTrailLabelEl.textContent = `${(overlaySettings.trailMs / 1000).toFixed(1)}s`;
+    stableConfLabelEl.textContent = stableNoteSettings.minConfidence.toFixed(2);
+    stableClusterLabelEl.textContent = `${Math.round(stableNoteSettings.clusteringToleranceCents)} cents`;
+    stableHoldLabelEl.textContent = `${Math.round(stableNoteSettings.holdDurationMs)} ms`;
+    stableWindowLabelEl.textContent = `${Math.round(stableNoteSettings.smoothingWindowMs)} ms`;
+  }
+
+  function applyStableSettings(): void {
+    stableNoteDetector.applySettings(stableNoteSettings);
   }
 
   pitchGraph = new PitchGraphCanvas(pitchGraphCanvasEl);
@@ -258,6 +302,8 @@ function mount(_slot: HTMLElement): void {
     pitchOverlay = null;
     pitchGraph?.clear();
     lastPitchFrame = null;
+    lastStableMidi = null;
+    stableNoteDetector.reset();
     pitchGraphNowSec = 0;
     updatePitchReadout();
   });
@@ -269,6 +315,8 @@ function mount(_slot: HTMLElement): void {
     activePartNotes = session.model.notes.filter((n) => n.part === session.selectedPart);
     pitchGraph?.clear();
     lastPitchFrame = null;
+    lastStableMidi = null;
+    stableNoteDetector.reset();
     pitchGraphNowSec = 0;
     updatePitchReadout();
     connectPitchSocket();
@@ -277,6 +325,10 @@ function mount(_slot: HTMLElement): void {
   // Settings panel init
   settingsConfEl.value = String(overlaySettings.confidenceThreshold);
   settingsTrailEl.value = String(overlaySettings.trailMs / 1000);
+  stableConfEl.value = String(stableNoteSettings.minConfidence);
+  stableClusterEl.value = String(stableNoteSettings.clusteringToleranceCents);
+  stableHoldEl.value = String(stableNoteSettings.holdDurationMs);
+  stableWindowEl.value = String(stableNoteSettings.smoothingWindowMs);
   settingsNoteNamesEl.checked = showNoteNames;
   settingsSynthEl.checked = syntheticModeEnabled;
   updateSettingsLabels();
@@ -313,6 +365,26 @@ function mount(_slot: HTMLElement): void {
   settingsTrailEl.addEventListener('input', () => {
     overlaySettings.trailMs = parseFloat(settingsTrailEl.value) * 1000;
     pitchOverlay?.applySettings(overlaySettings);
+    updateSettingsLabels();
+  });
+  stableConfEl.addEventListener('input', () => {
+    stableNoteSettings.minConfidence = parseFloat(stableConfEl.value);
+    applyStableSettings();
+    updateSettingsLabels();
+  });
+  stableClusterEl.addEventListener('input', () => {
+    stableNoteSettings.clusteringToleranceCents = parseFloat(stableClusterEl.value);
+    applyStableSettings();
+    updateSettingsLabels();
+  });
+  stableHoldEl.addEventListener('input', () => {
+    stableNoteSettings.holdDurationMs = parseFloat(stableHoldEl.value);
+    applyStableSettings();
+    updateSettingsLabels();
+  });
+  stableWindowEl.addEventListener('input', () => {
+    stableNoteSettings.smoothingWindowMs = parseFloat(stableWindowEl.value);
+    applyStableSettings();
     updateSettingsLabels();
   });
   settingsNoteNamesEl.addEventListener('change', () => {
