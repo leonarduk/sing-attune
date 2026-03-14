@@ -11,12 +11,10 @@ import { playbackFeature     } from './features/playback/index';
 import { partSelectorFeature } from './features/part-selector/index';
 import { pitchOverlayFeature } from './features/pitch-overlay/index';
 
-export interface Feature {
-  /** Must match the id of the corresponding DOM slot in index.html. */
-  id: string;
-  mount(slot: HTMLElement): void;
-  unmount?(): void;
-}
+export type { Feature } from './feature-types';
+export type { Feature as FeatureType } from './feature-types'; // backwards-compat alias
+
+import { type Feature } from './feature-types';
 
 export const features: Feature[] = [
   scoreLoaderFeature,
