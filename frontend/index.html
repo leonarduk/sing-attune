@@ -157,7 +157,12 @@
     #tempo-label { min-width: 36px; color: var(--color-text); font-size: 0.8rem; }
 
     #score-info   { font-size: 0.8rem; color: var(--color-text-muted); }
-    #pitch-readout { font-size: 0.8rem; color: #c5d9ff; min-width: 120px; }
+    #pitch-readout, #session-range-readout, #session-range-summary {
+      font-size: 0.8rem;
+      color: #c5d9ff;
+      min-width: 120px;
+    }
+    #session-range-summary { color: #a8b7cf; font-size: 0.75rem; }
 
     #btn-settings { margin-top: auto; }
 
@@ -332,6 +337,8 @@
       <button id="btn-settings" class="transport-btn">⚙ Settings</button>
 
       <span id="pitch-readout" aria-live="polite">Detected: —</span>
+      <span id="session-range-readout" aria-live="polite">Session range: —</span>
+      <span id="session-range-summary" aria-live="polite">Last session range: —</span>
       <span id="score-info"></span>
     </div>
 
