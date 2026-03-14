@@ -257,7 +257,7 @@ function startPitchGraphLoop(): void {
       pitchGraphNowSec = Math.max(pitchGraphNowSec, playbackSec);
     }
     const isPlaying = !!session?.engine.playing;
-    if (wasPlayingLastTick && !isPlaying && sessionRangeTracker.hasRange()) {
+    if (wasPlayingLastTick && !isPlaying) {
       finalizeSessionRangeSummary();
     }
     wasPlayingLastTick = isPlaying;

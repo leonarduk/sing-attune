@@ -44,4 +44,34 @@ describe('SessionRangeTracker', () => {
     expect(tracker.hasRange()).toBe(false);
     expect(tracker.summary()).toBeNull();
   });
+
+  it('accepts frames at exact cents-deviation boundary', () => {
+    const tracker = new SessionRangeTracker({ stabilityMs: 100, maxCentsDeviation: 40 });
+
+    expect(tracker.ingest({ t: 0, midi: 60.4, conf: 0.9 }, 0.75)).toBe(false);
+    expect(tracker.ingest({ t: 110, midi: 60.4, conf: 0.9 }, 0.75)).toBe(true);
+    expect(tracker.summary()).toMatchObject({ lowMidi: 60, highMidi: 60 });
+  });
+
+  it('rejects frames with invalid timestamp or midi bounds', () => {
+    const tracker = new SessionRangeTracker({ stabilityMs: 100 });
+
+    expect(tracker.ingest({ t: -1, midi: 60, conf: 0.9 }, 0.75)).toBe(false);
+    expect(tracker.ingest({ t: 0, midi: -0.1, conf: 0.9 }, 0.75)).toBe(false);
+    expect(tracker.ingest({ t: 0, midi: 127.1, conf: 0.9 }, 0.75)).toBe(false);
+    expect(tracker.summary()).toBeNull();
+  });
+
+  it('requires continuous stability for rapid note changes', () => {
+    const tracker = new SessionRangeTracker({ stabilityMs: 200 });
+
+    tracker.ingest({ t: 0, midi: 60.02, conf: 0.9 }, 0.75);
+    tracker.ingest({ t: 80, midi: 62.01, conf: 0.9 }, 0.75);
+    tracker.ingest({ t: 160, midi: 60.01, conf: 0.9 }, 0.75);
+    expect(tracker.summary()).toBeNull();
+
+    expect(tracker.ingest({ t: 380, midi: 60.00, conf: 0.9 }, 0.75)).toBe(true);
+    expect(tracker.summary()).toMatchObject({ lowMidi: 60, highMidi: 60 });
+  });
+
 });

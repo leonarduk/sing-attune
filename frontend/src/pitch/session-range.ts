@@ -15,6 +15,8 @@ export interface SessionRangeTrackerOptions {
 
 const DEFAULT_STABILITY_MS = 250;
 const DEFAULT_MAX_CENTS_DEVIATION = 40;
+const MIN_MIDI = 0;
+const MAX_MIDI = 127;
 
 /**
  * Tracks lowest/highest stable notes detected within a practice session.
@@ -36,6 +38,10 @@ export class SessionRangeTracker {
 
   ingest(frame: { t: number; midi: number; conf: number }, minConfidence: number): boolean {
     if (!Number.isFinite(frame.t) || !Number.isFinite(frame.midi) || !Number.isFinite(frame.conf)) return false;
+    if (frame.t < 0 || frame.midi < MIN_MIDI || frame.midi > MAX_MIDI) {
+      this.resetCandidate();
+      return false;
+    }
     if (frame.conf < minConfidence) {
       this.resetCandidate();
       return false;
@@ -71,7 +77,9 @@ export class SessionRangeTracker {
 
   summary(): SessionRangeSummary | null {
     if (this.lowMidi === null || this.highMidi === null) return null;
+    if (!Number.isFinite(this.lowMidi) || !Number.isFinite(this.highMidi)) return null;
     const semitoneSpan = this.highMidi - this.lowMidi;
+    if (!Number.isFinite(semitoneSpan)) return null;
     return {
       lowMidi: this.lowMidi,
       highMidi: this.highMidi,
