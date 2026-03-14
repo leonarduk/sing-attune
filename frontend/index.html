@@ -17,6 +17,21 @@
       overflow: hidden;
     }
 
+    #app-layout {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      overflow: hidden;
+    }
+
+    #content-area {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
     /* ── Header ── */
     header {
       padding: 10px 20px;
@@ -78,14 +93,16 @@
 
     /* ── Toolbar ── */
     #toolbar {
-      padding: 8px 20px;
+      width: 250px;
+      padding: 12px;
       background: #16213e;
-      border-bottom: 1px solid #0f3460;
+      border-right: 1px solid #0f3460;
       display: flex;
-      align-items: center;
+      flex-direction: column;
+      align-items: stretch;
       gap: 10px;
       flex-shrink: 0;
-      flex-wrap: wrap;
+      overflow-y: auto;
     }
     .transport-btn {
       padding: 5px 18px;
@@ -95,15 +112,16 @@
       color: #eee;
       cursor: pointer;
       font-size: 0.85rem;
+      width: 100%;
     }
     .transport-btn:hover:not(:disabled) { background: #1a5276; }
     .transport-btn:disabled { opacity: 0.4; cursor: default; }
 
     .toolbar-divider {
-      width: 1px;
-      height: 24px;
+      width: 100%;
+      height: 1px;
       background: #0f3460;
-      margin: 0 4px;
+      margin: 2px 0;
     }
 
     /* Part selector */
@@ -116,6 +134,7 @@
       padding: 4px 8px;
       font-size: 0.85rem;
       cursor: pointer;
+      width: 100%;
     }
     #part-select:disabled,
     #transpose-select:disabled { opacity: 0.4; cursor: default; }
@@ -127,9 +146,10 @@
       gap: 6px;
       font-size: 0.8rem;
       color: #aaa;
+      width: 100%;
     }
     #tempo-slider {
-      width: 80px;
+      flex: 1;
       accent-color: #e94560;
     }
     #tempo-label { min-width: 36px; color: #eee; font-size: 0.8rem; }
@@ -138,13 +158,11 @@
     #score-info {
       font-size: 0.8rem;
       color: #aaa;
-      margin-left: 4px;
     }
 
     #pitch-readout {
       font-size: 0.8rem;
       color: #c5d9ff;
-      margin-left: 8px;
       min-width: 120px;
     }
 
@@ -227,7 +245,18 @@
 
 
     #btn-settings {
-      margin-left: auto;
+      margin-top: auto;
+    }
+
+    #toolbar label {
+      font-size: 0.8rem;
+      color: #aaa;
+    }
+
+    #toolbar .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
     #settings-panel {
@@ -309,8 +338,33 @@
     }
 
     @media (max-width: 900px) {
+      #app-layout {
+        flex-direction: column;
+      }
+
       #toolbar {
+        width: 100%;
+        border-right: 0;
+        border-bottom: 1px solid #0f3460;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
         gap: 8px;
+        padding: 8px 20px;
+      }
+
+      .transport-btn {
+        width: auto;
+      }
+
+      #btn-settings {
+        margin-top: 0;
+        margin-left: auto;
+      }
+
+      #part-select,
+      #transpose-select {
+        width: auto;
       }
 
       #score-info {
@@ -341,17 +395,18 @@
     <button id="warning-dismiss">Dismiss</button>
   </div>
 
-  <div id="toolbar">
-    <button id="btn-play"  class="transport-btn">▶ Play</button>
-    <button id="btn-pause" class="transport-btn">⏸ Pause</button>
-    <button id="btn-stop"  class="transport-btn">⏹ Stop</button>
-    <button id="btn-rewind" class="transport-btn">⏮ Rewind</button>
+  <div id="app-layout">
+    <div id="toolbar">
+      <button id="btn-play"  class="transport-btn">▶ Play</button>
+      <button id="btn-pause" class="transport-btn">⏸ Pause</button>
+      <button id="btn-stop"  class="transport-btn">⏹ Stop</button>
+      <button id="btn-rewind" class="transport-btn">⏮ Rewind</button>
 
     <div class="toolbar-divider"></div>
 
-    <label for="part-select" style="font-size:0.8rem;color:#aaa;">Part:</label>
+    <label for="part-select">Part:</label>
     <select id="part-select"></select>
-    <label for="show-accompaniment" style="font-size:0.8rem;color:#aaa;">
+    <label class="checkbox-label" for="show-accompaniment">
       <input id="show-accompaniment" type="checkbox" />
       Show all parts
     </label>
@@ -361,7 +416,7 @@
 
     <div class="toolbar-divider"></div>
 
-    <label for="transpose-select" style="font-size:0.8rem;color:#aaa;">Transpose:</label>
+    <label for="transpose-select">Transpose:</label>
     <select id="transpose-select">
       <option value="-12">-12</option>
       <option value="-11">-11</option>
@@ -396,12 +451,12 @@
       <span id="tempo-label">100%</span>
     </div>
 
-    <button id="btn-browse" class="transport-btn">Browse…</button>
-    <button id="btn-settings" class="transport-btn">⚙ Settings</button>
+      <button id="btn-browse" class="transport-btn">Browse…</button>
+      <button id="btn-settings" class="transport-btn">⚙ Settings</button>
 
-    <span id="pitch-readout" aria-live="polite">Detected: —</span>
-    <span id="score-info"></span>
-  </div>
+      <span id="pitch-readout" aria-live="polite">Detected: —</span>
+      <span id="score-info"></span>
+    </div>
 
   <aside id="settings-panel" aria-label="Settings panel">
     <div class="settings-row">
@@ -448,22 +503,25 @@
     <div id="settings-engine">Pitch engine: loading…</div>
   </aside>
 
-    <section id="pitch-graph-panel" aria-label="Pitch graph panel">
-    <div id="pitch-graph-header">
-      <span>Pitch graph (C2–C6, 10s window)</span>
-      <span>Blue: expected pitch · Green: ±25 cents · Red: out of tune · Grey: no target</span>
-    </div>
-    <div id="pitch-graph-canvas"></div>
-  </section>
+    <div id="content-area">
+      <section id="pitch-graph-panel" aria-label="Pitch graph panel">
+      <div id="pitch-graph-header">
+        <span>Pitch graph (C2–C6, 10s window)</span>
+        <span>Blue: expected pitch · Green: ±25 cents · Red: out of tune · Grey: no target</span>
+      </div>
+      <div id="pitch-graph-canvas"></div>
+    </section>
 
-  <main>
-    <div id="score-loading" aria-live="polite">Loading score…</div>
-    <div id="drop-zone">
-      <p>Drop a MusicXML file here</p>
-      <span>.xml or .mxl — or click to browse</span>
+    <main>
+      <div id="score-loading" aria-live="polite">Loading score…</div>
+      <div id="drop-zone">
+        <p>Drop a MusicXML file here</p>
+        <span>.xml or .mxl — or click to browse</span>
+      </div>
+      <div id="score-container"></div>
+    </main>
     </div>
-    <div id="score-container"></div>
-  </main>
+  </div>
 
   <input type="file" id="file-input" accept=".mxl,.xml" />
   <script type="module" src="/src/main.ts"></script>
