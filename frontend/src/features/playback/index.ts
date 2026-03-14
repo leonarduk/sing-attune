@@ -98,8 +98,17 @@ function mount(_slot: HTMLElement): void {
   // regardless of whether the implementation replaces or appends listeners.
   onScoreCleared(() => { stopCursorRaf(); finishPracticeSessionCapture(); });
 
-  function syncPauseButton(): void {
+  function syncTransportButtons(): void {
     const session = getSession();
+
+    // Play: enabled only when a score is loaded and not already playing.
+    if (!session || session.engine.state === 'playing') {
+      btnPlay.disabled = true;
+    } else {
+      btnPlay.disabled = false;
+    }
+
+    // Pause/Resume: enabled when playing or paused.
     if (!session) {
       btnPause.disabled = true;
       btnPause.innerHTML = '&#9646;&#9646; Pause';
@@ -119,8 +128,8 @@ function mount(_slot: HTMLElement): void {
     btnPause.innerHTML = '&#9646;&#9646; Pause';
   }
 
-  onScoreLoaded(() => { syncPauseButton(); });
-  onScoreCleared(() => { stopCursorRaf(); syncPauseButton(); });
+  onScoreLoaded(() => { syncTransportButtons(); });
+  onScoreCleared(() => { stopCursorRaf(); syncTransportButtons(); });
 
   btnPlay.addEventListener('click', async () => {
     const session = getSession();
@@ -154,7 +163,7 @@ function mount(_slot: HTMLElement): void {
       }
       engine.play(fromBeat);
       startCursorRaf();
-      syncPauseButton();
+      syncTransportButtons();
     } catch (err) {
       setStatus(`playback start failed: ${String(err)}`, 'error');
       console.error('Play failed:', err);
@@ -189,7 +198,7 @@ function mount(_slot: HTMLElement): void {
         engine.play(engine.startBeat);
         startCursorRaf();
       }
-      syncPauseButton();
+      syncTransportButtons();
     } catch (err) {
       setStatus(`pause failed: ${String(err)}`, 'error');
       console.error('Pause failed:', err);
@@ -213,7 +222,7 @@ function mount(_slot: HTMLElement): void {
       stopCursorRaf();
       session.cursor.stop();
       headphoneWarning.classList.add('hidden');
-      syncPauseButton();
+      syncTransportButtons();
     } catch (err) {
       setStatus(`stop failed: ${String(err)}`, 'error');
       console.error('Stop failed:', err);
@@ -242,11 +251,11 @@ function mount(_slot: HTMLElement): void {
     session.cursor.stop();
     session.cursor.osmd.cursor.show();
     headphoneWarning.classList.add('hidden');
-    syncPauseButton();
+    syncTransportButtons();
   });
 
   warningDismiss.addEventListener('click', () => { headphoneWarning.classList.add('hidden'); });
-  syncPauseButton();
+  syncTransportButtons();
 
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
