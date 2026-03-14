@@ -16,17 +16,20 @@
  * playback feature) to preserve feature isolation.
  */
 import { onScoreLoaded, onScoreCleared, getSession } from '../../services/score-session';
+import { onPlaybackSyncEvent } from '../../services/playback-sync';
 import { showErrorBanner } from '../../services/backend';
 import { getFrameXPosition } from '../../services/cursor-projection';
 import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from '../../pitch/overlay';
 import { PitchGraphCanvas } from '../../pitch/graph';
 import { expectedNoteAtBeat } from '../../pitch/accuracy';
 import { syntheticPitchFrameAt } from '../../pitch/synthetic';
-import { parsePitchFrame, reconnectDelayMs } from '../../pitch/socket';
+import { PitchTimelineSync } from '../../pitch/timeline-sync';
+import { parsePitchSocketMessage, reconnectDelayMs } from '../../pitch/socket';
 import { midiToFrequency, midiToNoteName } from '../../pitch/note-name';
 import { StablePitchTracker, midiToCentsOffset } from '../../pitch/diagnostics';
 import { elapsedToBeat } from '../../score/timing';
 import { type NoteModel } from '../../score/renderer';
+import { PhraseSummaryTracker, type PhraseSummary } from '../../pitch/phrase-summary';
 import { resolveSelectedDeviceId, type AudioInputDevice } from '../../audio/devices';
 import { PracticeRecorder } from '../../audio/recorder';
 import { type Feature } from '../../feature-types';
@@ -51,9 +54,12 @@ let showNoteNames = false;
 let syntheticModeEnabled = false;
 let selectedDeviceId: number | null = null;
 let recordingError: string | null = null;
+let phraseSummaryTracker: PhraseSummaryTracker | null = null;
 let diagnosticsModeEnabled = false;
-
 const stablePitchTracker = new StablePitchTracker();
+const timelineSync = new PitchTimelineSync();
+let playbackSyncUnsubscribe: (() => void) | null = null;
+let syncOffsetWarningShown = false;
 
 const overlaySettings: OverlaySettings = {
   confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
@@ -81,6 +87,14 @@ function expectedMidiForFrame(frameTMs: number): number | null {
 }
 
 function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number }): void {
+  const session = getSession();
+  if (session) {
+    const staleWindowMs = Math.max(2000, overlaySettings.trailMs * 1.5);
+    if (timelineSync.isFrameStale(frame.t, session.engine.ctx.currentTime, staleWindowMs)) {
+      return;
+    }
+  }
+
   lastPitchFrame = { midi: frame.midi };
   updatePitchReadout();
   const frameSec = frame.t / 1000;
@@ -89,12 +103,18 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
   }
   pitchOverlay?.pushFrame(frame, getFrameXPosition(frame.t));
   pitchGraph?.pushFrame(frame, expectedMidiForFrame(frame.t));
+  const completedPhrases = phraseSummaryTracker?.pushFrame(frame) ?? [];
+  for (const summary of completedPhrases) {
+    renderPhraseSummary(summary);
+  }
   updateDiagnostics(frame);
 }
 
 function shouldStreamPitch(): boolean {
   return syntheticModeEnabled || diagnosticsModeEnabled || pitchOverlay !== null;
 }
+
+// ── Diagnostics ──────────────────────────────────────────────────────────────
 
 function renderMiniKeyboard(activeMidi: number | null): void {
   const keyboardEl = document.getElementById('diag-keyboard') as HTMLDivElement;
@@ -129,6 +149,7 @@ function clearDiagnostics(): void {
 }
 
 function updateDiagnostics(frame: { t: number; midi: number; conf: number }): void {
+  if (!diagnosticsModeEnabled) return;
   const noteEl = document.getElementById('diag-note') as HTMLDivElement;
   const centsEl = document.getElementById('diag-cents') as HTMLDivElement;
   const stabilityEl = document.getElementById('diag-stability') as HTMLDivElement;
@@ -149,6 +170,39 @@ function updateDiagnostics(frame: { t: number; midi: number; conf: number }): vo
   renderMiniKeyboard(state.activeMidi);
 }
 
+// ── Phrase summary ───────────────────────────────────────────────────────────
+
+function clearPhraseSummaryPanel(): void {
+  const panel = document.getElementById('phrase-summary-panel') as HTMLDivElement | null;
+  if (!panel) return;
+  panel.innerHTML = '<p class="phrase-summary-empty">Phrase summary will appear after a phrase completes.</p>';
+}
+
+function renderPhraseSummary(summary: PhraseSummary): void {
+  const panel = document.getElementById('phrase-summary-panel') as HTMLDivElement | null;
+  if (!panel) return;
+
+  const notesHtml = summary.noteSummaries.map((note) => {
+    const cents = note.meanCents > 0 ? `+${note.meanCents.toFixed(0)}c` : `${note.meanCents.toFixed(0)}c`;
+    const direction = note.direction === 'neutral' ? 'neutral' : `${note.direction} ${cents}`;
+    return `<span class="phrase-badge phrase-badge-${note.badge}">${note.label} ${badgeEmoji(note.badge)} · ${direction}</span>`;
+  }).join('');
+
+  panel.innerHTML = `
+    <div class="phrase-summary-card">
+      <div class="phrase-summary-title">Phrase ${summary.phraseId} · ${summary.withinTolerancePct.toFixed(0)}% in tolerance</div>
+      <div class="phrase-summary-notes">${notesHtml}</div>
+      <div class="phrase-summary-legend">🟢 ≤50c · 🟡 51–100c · 🔴 &gt;100c</div>
+    </div>
+  `;
+}
+
+function badgeEmoji(badge: 'green' | 'amber' | 'red'): string {
+  if (badge === 'green') return '🟢';
+  if (badge === 'amber') return '🟡';
+  return '🔴';
+}
+
 // ── WebSocket ────────────────────────────────────────────────────────────────
 
 function closePitchSocket(): void {
@@ -157,6 +211,30 @@ function closePitchSocket(): void {
   if (pitchReconnectTimer !== null) { window.clearTimeout(pitchReconnectTimer); pitchReconnectTimer = null; }
   pitchWs?.close();
   pitchWs = null;
+}
+
+function bindPlaybackSync(): void {
+  playbackSyncUnsubscribe?.();
+  playbackSyncUnsubscribe = onPlaybackSyncEvent((event) => {
+    if (event.type === 'stop') {
+      timelineSync.reset();
+      pitchOverlay?.clear();
+      pitchGraph?.clear();
+      return;
+    }
+    if (event.type === 'pause') {
+      return;
+    }
+    if (event.syncOffsetMs === null && !syncOffsetWarningShown) {
+      console.warn('Pitch sync offset unavailable; using default offset 0ms until protocol in issue #27 is implemented.');
+      syncOffsetWarningShown = true;
+    }
+    timelineSync.setSyncOffsetMs(event.syncOffsetMs ?? 0);
+    pitchGraphNowSec = event.audioTimeSec;
+    timelineSync.reanchor(event.tMs, event.audioTimeSec);
+    pitchOverlay?.clear();
+    pitchGraph?.clear();
+  });
 }
 
 function connectPitchSocket(): void {
@@ -179,11 +257,11 @@ function connectPitchSocket(): void {
     }, reconnectDelayMs(pitchReconnectAttempts));
   };
   pitchWs.onmessage = (event) => {
-    if (!pitchOverlay || syntheticModeEnabled) return;
+    if (syntheticModeEnabled) return;
     let payload: unknown;
     try { payload = JSON.parse(event.data) as unknown; } catch { return; }
-    const frame = parsePitchFrame(payload);
-    if (frame) handleIncomingPitchFrame(frame);
+    const message = parsePitchSocketMessage(payload);
+    if (message.kind === 'frame') handleIncomingPitchFrame(message.frame);
   };
 }
 
@@ -298,6 +376,8 @@ function mount(_slot: HTMLElement): void {
   const settingsSynthEl     = document.getElementById('settings-synthetic-mode')  as HTMLInputElement;
   const settingsEngineEl    = document.getElementById('settings-engine')           as HTMLDivElement;
   const recordingEnabledEl  = document.getElementById('recording-enabled')        as HTMLInputElement;
+  const btnStop             = document.getElementById('btn-stop')                 as HTMLButtonElement;
+  const btnRewind           = document.getElementById('btn-rewind')               as HTMLButtonElement;
 
   const ctrl: RecordingCtrl = {
     enabled: recordingEnabledEl,
@@ -314,17 +394,22 @@ function mount(_slot: HTMLElement): void {
   }
 
   pitchGraph = new PitchGraphCanvas(pitchGraphCanvasEl);
+  bindPlaybackSync();
   startPitchGraphLoop();
   renderMiniKeyboard(null);
   clearDiagnostics();
+  clearPhraseSummaryPanel();
 
   onScoreCleared(() => {
     if (!diagnosticsModeEnabled) closePitchSocket();
     pitchOverlay?.destroy();
     pitchOverlay = null;
     pitchGraph?.clear();
+    timelineSync.reset();
     lastPitchFrame = null;
     pitchGraphNowSec = 0;
+    phraseSummaryTracker = null;
+    clearPhraseSummaryPanel();
     updatePitchReadout();
     clearDiagnostics();
     if (diagnosticsModeEnabled) connectPitchSocket();
@@ -335,12 +420,24 @@ function mount(_slot: HTMLElement): void {
     pitchOverlay = new PitchOverlay(
       scoreContainerEl, session.model, session.selectedPart, overlaySettings);
     activePartNotes = session.model.notes.filter((n) => n.part === session.selectedPart);
+    phraseSummaryTracker = new PhraseSummaryTracker(activePartNotes, session.model.tempo_marks);
     pitchGraph?.clear();
+    timelineSync.reset();
     lastPitchFrame = null;
     pitchGraphNowSec = 0;
+    clearPhraseSummaryPanel();
     updatePitchReadout();
     clearDiagnostics();
     connectPitchSocket();
+  });
+
+  btnStop.addEventListener('click', () => {
+    phraseSummaryTracker?.reset();
+    clearPhraseSummaryPanel();
+  });
+  btnRewind.addEventListener('click', () => {
+    phraseSummaryTracker?.reset();
+    clearPhraseSummaryPanel();
   });
 
   diagnosticsToggleEl.addEventListener('click', () => {
@@ -449,6 +546,8 @@ function mount(_slot: HTMLElement): void {
 }
 
 function unmount(): void {
+  playbackSyncUnsubscribe?.();
+  playbackSyncUnsubscribe = null;
   closePitchSocket();
   stopPitchGraphLoop();
   pitchOverlay?.destroy(); pitchOverlay = null;
