@@ -22,6 +22,7 @@ import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from '..
 import { PitchGraphCanvas } from '../../pitch/graph';
 import { expectedNoteAtBeat } from '../../pitch/accuracy';
 import { syntheticPitchFrameAt } from '../../pitch/synthetic';
+import { buildWarmupSequence, warmupMidiAt, WarmupTonePlayer, type WarmupSegment } from '../../warmup/session';
 import { parsePitchFrame, reconnectDelayMs } from '../../pitch/socket';
 import { midiToFrequency, midiToNoteName } from '../../pitch/note-name';
 import { elapsedToBeat } from '../../score/timing';
@@ -51,6 +52,13 @@ let syntheticModeEnabled = false;
 let selectedDeviceId: number | null = null;
 let recordingError: string | null = null;
 
+let warmupActive = false;
+let warmupStartPerfMs = 0;
+let warmupDurationSec = 120;
+let warmupSequence: WarmupSegment[] = [];
+let warmupTargetMidi: number | null = null;
+const warmupTonePlayer = new WarmupTonePlayer();
+
 const overlaySettings: OverlaySettings = {
   confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
   trailMs: 2000,
@@ -67,9 +75,20 @@ function updatePitchReadout(): void {
   el.textContent = `Detected: ${freqLabel} → ${midiToNoteName(lastPitchFrame.midi)}`;
 }
 
+
+function syncWarmupUi(message?: string): void {
+  const warmupStatusEl = document.getElementById('warmup-status') as HTMLSpanElement | null;
+  const btnStartWarmup = document.getElementById('btn-start-warmup') as HTMLButtonElement | null;
+  const btnStartRehearsal = document.getElementById('btn-start-rehearsal') as HTMLButtonElement | null;
+  if (warmupStatusEl && message !== undefined) warmupStatusEl.textContent = message;
+  if (btnStartWarmup) btnStartWarmup.disabled = warmupActive;
+  if (btnStartRehearsal) btnStartRehearsal.classList.toggle('hidden', warmupActive || warmupSequence.length === 0);
+}
+
 // ── Pitch frame handling ───────────────────────────────────────────────────
 
 function expectedMidiForFrame(frameTMs: number): number | null {
+  if (warmupActive) return warmupTargetMidi;
   const session = getSession();
   if (!session || activePartNotes.length === 0) return null;
   const beat = elapsedToBeat(frameTMs, 0, session.model.tempo_marks);
@@ -98,7 +117,7 @@ function closePitchSocket(): void {
 }
 
 function connectPitchSocket(): void {
-  if (!pitchOverlay || syntheticModeEnabled) return;
+  if (syntheticModeEnabled) return;
   shouldReconnectPitchSocket = true;
   if (pitchReconnectTimer !== null) { window.clearTimeout(pitchReconnectTimer); pitchReconnectTimer = null; }
   if (pitchWs && (pitchWs.readyState === WebSocket.OPEN ||
@@ -109,7 +128,7 @@ function connectPitchSocket(): void {
   pitchWs.onerror = () => { pitchWs?.close(); };
   pitchWs.onclose = () => {
     pitchWs = null;
-    if (!shouldReconnectPitchSocket || !pitchOverlay) return;
+    if (!shouldReconnectPitchSocket) return;
     pitchReconnectAttempts += 1;
     pitchReconnectTimer = window.setTimeout(() => {
       pitchReconnectTimer = null;
@@ -117,7 +136,7 @@ function connectPitchSocket(): void {
     }, reconnectDelayMs(pitchReconnectAttempts));
   };
   pitchWs.onmessage = (event) => {
-    if (!pitchOverlay || syntheticModeEnabled) return;
+    if (syntheticModeEnabled) return;
     let payload: unknown;
     try { payload = JSON.parse(event.data) as unknown; } catch { return; }
     const frame = parsePitchFrame(payload);
@@ -131,8 +150,24 @@ function startPitchGraphLoop(): void {
   if (pitchGraphRafId !== null) return;
   const tick = (): void => {
     const session = getSession();
-    if (syntheticModeEnabled && session?.engine.playing) {
-      const elapsedSec = Math.max(0, session.engine.ctx.currentTime - session.engine.startAudioTime);
+    const warmupElapsedMs = performance.now() - warmupStartPerfMs;
+    if (warmupActive) {
+      warmupTargetMidi = warmupMidiAt(warmupElapsedMs, warmupSequence);
+      if (warmupTargetMidi !== null) {
+        const seg = warmupSequence.find((item) => warmupElapsedMs >= item.startMs && warmupElapsedMs < item.endMs);
+        if (seg) syncWarmupUi(`Warm-up in progress: ${seg.exercise}`);
+        warmupTonePlayer.playExpectedMidi(warmupTargetMidi);
+      } else {
+        warmupActive = false;
+        warmupTargetMidi = null;
+        syncWarmupUi('Warm-up complete. You can start rehearsal.');
+        setStatus('warm-up complete', 'ok');
+      }
+    }
+    if (syntheticModeEnabled && (session?.engine.playing || warmupActive)) {
+      const elapsedSec = session?.engine.playing
+        ? Math.max(0, session.engine.ctx.currentTime - session.engine.startAudioTime)
+        : warmupElapsedMs / 1000;
       handleIncomingPitchFrame(syntheticPitchFrameAt(elapsedSec, expectedMidiForFrame(elapsedSec * 1000)));
     }
     if (session?.engine.playing) {
@@ -222,6 +257,9 @@ async function refreshAudioSettings(
 
 function mount(_slot: HTMLElement): void {
   const scoreContainerEl    = document.getElementById('score-container')           as HTMLDivElement;
+  const warmupDurationEl    = document.getElementById('warmup-duration')           as HTMLSelectElement;
+  const btnStartWarmup      = document.getElementById('btn-start-warmup')          as HTMLButtonElement;
+  const btnStartRehearsal   = document.getElementById('btn-start-rehearsal')       as HTMLButtonElement;
   const pitchGraphCanvasEl  = document.getElementById('pitch-graph-canvas')        as HTMLDivElement;
   const settingsPanelEl     = document.getElementById('settings-panel')            as HTMLDivElement;
   const btnSettings         = document.getElementById('btn-settings')              as HTMLButtonElement;
@@ -247,6 +285,21 @@ function mount(_slot: HTMLElement): void {
   function updateSettingsLabels(): void {
     settingsConfLabelEl.textContent = overlaySettings.confidenceThreshold.toFixed(2);
     settingsTrailLabelEl.textContent = `${(overlaySettings.trailMs / 1000).toFixed(1)}s`;
+  }
+
+  function updateWarmupUi(message: string): void {
+    syncWarmupUi(message);
+  }
+
+  function startWarmup(): void {
+    warmupDurationSec = Number.parseInt(warmupDurationEl.value, 10) || 120;
+    warmupSequence = buildWarmupSequence(warmupDurationSec, 60);
+    warmupStartPerfMs = performance.now();
+    warmupTargetMidi = warmupSequence[0]?.midi ?? null;
+    warmupActive = true;
+    setStatus('warm-up running', 'ok');
+    updateWarmupUi('Warm-up in progress: sirens');
+    connectPitchSocket();
   }
 
   pitchGraph = new PitchGraphCanvas(pitchGraphCanvasEl);
@@ -282,6 +335,7 @@ function mount(_slot: HTMLElement): void {
   updateSettingsLabels();
   updatePitchReadout();
   refreshRecordingControls(ctrl);
+  updateWarmupUi('Warm-up idle.');
 
   btnSettings.addEventListener('click', async (event) => {
     event.stopPropagation();
@@ -319,6 +373,18 @@ function mount(_slot: HTMLElement): void {
     showNoteNames = settingsNoteNamesEl.checked;
     updatePitchReadout();
   });
+  warmupDurationEl.addEventListener('change', () => {
+    warmupDurationSec = Number.parseInt(warmupDurationEl.value, 10) || 120;
+    if (!warmupActive) updateWarmupUi(`Warm-up idle (${warmupDurationSec}s configured).`);
+  });
+  btnStartWarmup.addEventListener('click', () => {
+    startWarmup();
+  });
+  btnStartRehearsal.addEventListener('click', () => {
+    const playBtn = document.getElementById('btn-play') as HTMLButtonElement | null;
+    playBtn?.click();
+  });
+
   settingsSynthEl.addEventListener('change', () => {
     syntheticModeEnabled = settingsSynthEl.checked;
     closePitchSocket();
