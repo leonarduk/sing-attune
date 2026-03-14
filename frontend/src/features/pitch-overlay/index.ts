@@ -370,6 +370,7 @@ function mount(_slot: HTMLElement): void {
   const diagnosticsPanelEl  = document.getElementById('pitch-diagnostics-panel')    as HTMLElement;
   const diagnosticsToggleEl = document.getElementById('btn-diagnostics')            as HTMLButtonElement;
   const btnSettings         = document.getElementById('btn-settings')              as HTMLButtonElement;
+  const btnSettingsClose    = document.getElementById('btn-settings-close')        as HTMLButtonElement;
   const settingsDeviceEl    = document.getElementById('settings-device')          as HTMLSelectElement;
   const settingsConfEl      = document.getElementById('settings-confidence')      as HTMLInputElement;
   const settingsConfLabelEl = document.getElementById('settings-confidence-label') as HTMLSpanElement;
@@ -483,6 +484,7 @@ function mount(_slot: HTMLElement): void {
     const visible = settingsPanelEl.classList.toggle('visible');
     if (visible) await refreshAudioSettings(settingsDeviceEl, settingsEngineEl);
   });
+  btnSettingsClose.addEventListener('click', () => { settingsPanelEl.classList.remove('visible'); });
   settingsPanelEl.addEventListener('click', (e) => { e.stopPropagation(); });
   window.addEventListener('click', (e) => {
     if (!settingsPanelEl.classList.contains('visible')) return;
