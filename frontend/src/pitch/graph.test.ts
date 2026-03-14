@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { buildSemitoneGrid, GRAPH_MIDI_MAX, GRAPH_MIDI_MIN, midiToGraphY, pruneSamples, timeToGraphX } from './graph';
+import {
+  buildSemitoneGrid,
+  DEFAULT_BAND_CENTS_TOLERANCE,
+  GRAPH_MIDI_MAX,
+  GRAPH_MIDI_MIN,
+  midiToGraphY,
+  pruneSamples,
+  targetBandY,
+  timeToGraphX,
+} from './graph';
 import { classifyGraphTraceColor, centsError, GRAPH_IN_TUNE_CENTS } from './graph-colors';
 
 describe('graph coordinate helpers', () => {
@@ -53,5 +62,41 @@ describe('semitone grid derivation', () => {
 
     const firstSharp = lines.find((line) => line.midi === 37);
     expect(firstSharp?.isBlackKey).toBe(true);
+  });
+});
+
+describe('targetBandY', () => {
+  it('has a default tolerance of 50 cents', () => {
+    expect(DEFAULT_BAND_CENTS_TOLERANCE).toBe(50);
+  });
+
+  it('returns topY < bottomY (canvas Y increases downward)', () => {
+    const { topY, bottomY } = targetBandY(60, 50, 1000);
+    expect(topY).toBeLessThan(bottomY);
+  });
+
+  it('band is symmetric around the expected note centre line', () => {
+    const height = 1000;
+    const midi = 60;
+    const centreY = midiToGraphY(midi, height);
+    const { topY, bottomY } = targetBandY(midi, 50, height);
+    expect(centreY - topY).toBeCloseTo(bottomY - centreY, 0);
+  });
+
+  it('wider tolerance produces a taller band', () => {
+    const narrow = targetBandY(60, 25, 1000);
+    const wide = targetBandY(60, 100, 1000);
+    expect(wide.bottomY - wide.topY).toBeGreaterThan(narrow.bottomY - narrow.topY);
+  });
+
+  it('band height corresponds to 2 × tolerance cents in MIDI space', () => {
+    const height = 10000; // large canvas for precision
+    const cents = 50;
+    const { topY, bottomY } = targetBandY(60, cents, height);
+    const bandHeightPx = bottomY - topY;
+    // 1 semitone = 100 cents; range is GRAPH_MIDI_MAX - GRAPH_MIDI_MIN semitones
+    const pixelsPerSemitone = height / (GRAPH_MIDI_MAX - GRAPH_MIDI_MIN);
+    const expectedHeightPx = (2 * cents / 100) * pixelsPerSemitone;
+    expect(bandHeightPx).toBeCloseTo(expectedHeightPx, 1);
   });
 });

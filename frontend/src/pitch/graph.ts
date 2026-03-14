@@ -4,6 +4,9 @@ import { classifyGraphTraceColor, type GraphTraceColor } from './graph-colors';
 export const GRAPH_MIDI_MIN = 36; // C2
 export const GRAPH_MIDI_MAX = 84; // C6
 
+/** Default tolerance for the target-note band (±50 cents = ±0.5 semitone). */
+export const DEFAULT_BAND_CENTS_TOLERANCE = 50;
+
 interface GraphSample {
   tSec: number;
   midi: number;
@@ -14,6 +17,12 @@ interface GraphSample {
 export interface PitchGraphOptions {
   windowSeconds?: number;
   backgroundColor?: string;
+  /**
+   * Half-width of the target-note band in cents (default 50).
+   * The band spans [expectedMidi - tolerance/100, expectedMidi + tolerance/100]
+   * in MIDI units, rendered as a filled semi-transparent rectangle.
+   */
+  bandCentsTolerance?: number;
 }
 
 interface GridLine {
@@ -59,6 +68,28 @@ export function buildSemitoneGrid(minMidi = GRAPH_MIDI_MIN, maxMidi = GRAPH_MIDI
   return lines;
 }
 
+/**
+ * Returns the canvas Y coordinates for the top and bottom edges of the
+ * target-note band centred on `expectedMidi`.
+ *
+ * @param expectedMidi  MIDI note number for the expected pitch
+ * @param centsTolerance  Half-width of the band in cents (e.g. 50)
+ * @param height  Canvas height in pixels
+ * @returns { topY, bottomY } — topY < bottomY (canvas Y increases downward)
+ */
+export function targetBandY(
+  expectedMidi: number,
+  centsTolerance: number,
+  height: number,
+  minMidi = GRAPH_MIDI_MIN,
+  maxMidi = GRAPH_MIDI_MAX,
+): { topY: number; bottomY: number } {
+  const halfSemitones = centsTolerance / 100;
+  const topY = midiToGraphY(expectedMidi + halfSemitones, height, minMidi, maxMidi);
+  const bottomY = midiToGraphY(expectedMidi - halfSemitones, height, minMidi, maxMidi);
+  return { topY, bottomY };
+}
+
 export class PitchGraphCanvas {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
@@ -69,6 +100,7 @@ export class PitchGraphCanvas {
     this.opts = {
       windowSeconds: opts.windowSeconds ?? 10,
       backgroundColor: opts.backgroundColor ?? '#0d162a',
+      bandCentsTolerance: opts.bandCentsTolerance ?? DEFAULT_BAND_CENTS_TOLERANCE,
     };
     this.canvas = document.createElement('canvas');
     this.canvas.style.width = '100%';
@@ -102,6 +134,10 @@ export class PitchGraphCanvas {
     this.opts.windowSeconds = Math.max(2, Math.min(30, sec));
   }
 
+  setBandCentsTolerance(cents: number): void {
+    this.opts.bandCentsTolerance = Math.max(10, Math.min(200, cents));
+  }
+
   clear(): void {
     this.samples = [];
     this.redraw(performance.now() / 1000);
@@ -124,31 +160,71 @@ export class PitchGraphCanvas {
     this.drawKeyboardScale(plotLeft, height);
     this.drawYGrid(plotLeft, plotWidth, height);
     this.drawXGrid(nowSec, plotLeft, plotWidth, height);
-    this.drawExpectedTrace(nowSec, plotLeft, plotWidth, height);
+    // Band must be drawn before the sung trace so the trace renders on top.
+    this.drawTargetBand(nowSec, plotLeft, plotWidth, height);
     this.drawTrace(nowSec, plotLeft, plotWidth, height);
   }
 
-  private drawExpectedTrace(nowSec: number, plotLeft: number, plotWidth: number, height: number): void {
-    if (this.samples.length < 2) return;
+  /**
+   * Draws the target-note band as a semi-transparent blue filled rectangle
+   * for each contiguous segment where the expected MIDI note is the same.
+   * A thin centre line is drawn inside the band for pitch precision.
+   *
+   * Layer order (bottom → top): band fill → centre line → sung trace.
+   */
+  private drawTargetBand(nowSec: number, plotLeft: number, plotWidth: number, height: number): void {
+    if (this.samples.length === 0) return;
 
-    this.ctx.lineWidth = 1.5;
-    this.ctx.strokeStyle = 'rgba(117, 196, 255, 0.9)';
+    const tolerance = this.opts.bandCentsTolerance;
 
-    for (let i = 1; i < this.samples.length; i += 1) {
-      const prev = this.samples[i - 1];
-      const next = this.samples[i];
-      if (prev?.expectedMidi === null || next?.expectedMidi === null) continue;
+    // Walk samples; flush a band rectangle whenever expectedMidi changes or
+    // a sample has no expected note.
+    let segStart: number | null = null;
+    let segEnd: number | null = null;
+    let segMidi: number | null = null;
 
-      const x1 = plotLeft + timeToGraphX(prev.tSec, nowSec, plotWidth, this.opts.windowSeconds);
-      const y1 = midiToGraphY(prev.expectedMidi, height);
-      const x2 = plotLeft + timeToGraphX(next.tSec, nowSec, plotWidth, this.opts.windowSeconds);
-      const y2 = midiToGraphY(next.expectedMidi, height);
+    const flushSegment = (): void => {
+      if (segStart === null || segEnd === null || segMidi === null) return;
+      const x1 = plotLeft + timeToGraphX(segStart, nowSec, plotWidth, this.opts.windowSeconds);
+      const x2 = plotLeft + timeToGraphX(segEnd, nowSec, plotWidth, this.opts.windowSeconds);
+      const { topY, bottomY } = targetBandY(segMidi, tolerance, height);
+      const bandHeight = Math.max(1, bottomY - topY);
 
+      // Band fill
+      this.ctx.fillStyle = 'rgba(100, 180, 255, 0.18)';
+      this.ctx.fillRect(x1, topY, x2 - x1, bandHeight);
+
+      // Centre line — exact expected pitch for precision reference
+      const centreY = midiToGraphY(segMidi, height);
+      this.ctx.strokeStyle = 'rgba(100, 180, 255, 0.75)';
+      this.ctx.lineWidth = 1.5;
       this.ctx.beginPath();
-      this.ctx.moveTo(x1, y1);
-      this.ctx.lineTo(x2, y2);
+      this.ctx.moveTo(x1, centreY);
+      this.ctx.lineTo(x2, centreY);
       this.ctx.stroke();
+    };
+
+    for (const sample of this.samples) {
+      if (sample.expectedMidi === null) {
+        flushSegment();
+        segStart = null;
+        segEnd = null;
+        segMidi = null;
+        continue;
+      }
+
+      if (segMidi !== null && sample.expectedMidi !== segMidi) {
+        flushSegment();
+        segStart = sample.tSec;
+        segEnd = sample.tSec;
+        segMidi = sample.expectedMidi;
+      } else {
+        if (segStart === null) segStart = sample.tSec;
+        segEnd = sample.tSec;
+        segMidi = sample.expectedMidi;
+      }
     }
+    flushSegment();
   }
 
   private drawKeyboardScale(plotLeft: number, height: number): void {
