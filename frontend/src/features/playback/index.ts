@@ -176,7 +176,6 @@ function mount(_slot: HTMLElement): void {
         });
       } else {
         sessionSummaryTracker.startSession();
-        await startPlayback(getSelectedDeviceId());
         const audioTimeSec = engine.ctx.currentTime;
         const response = await startPlayback(getSelectedDeviceId());
         emitPlaybackSyncEvent({
@@ -294,10 +293,7 @@ function mount(_slot: HTMLElement): void {
     btnRewind.click();
     btnPlay.click();
   });
-    syncPauseButton();
-  });
 
-  warningDismiss.addEventListener('click', () => { headphoneWarning.classList.add('hidden'); });
   syncPauseButton();
 
   window.addEventListener('keydown', (e) => {
