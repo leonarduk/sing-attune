@@ -56,4 +56,34 @@ describe('score-session store', () => {
 
     expect(onPartChanged).not.toHaveBeenCalled();
   });
+
+  it('deduplicates and unsubscribes score session callbacks', async () => {
+    const store = await import('./score-session');
+    const onLoaded = vi.fn();
+    const onCleared = vi.fn();
+
+    const unsubscribeLoadedA = store.onScoreLoaded(onLoaded);
+    const unsubscribeLoadedB = store.onScoreLoaded(onLoaded);
+    const unsubscribeClearedA = store.onScoreCleared(onCleared);
+    const unsubscribeClearedB = store.onScoreCleared(onCleared);
+
+    const session = buildSession('Soprano');
+    store.setSession(session);
+    store.clearSession();
+
+    expect(onLoaded).toHaveBeenCalledTimes(1);
+    expect(onCleared).toHaveBeenCalledTimes(1);
+
+    unsubscribeLoadedA();
+    unsubscribeLoadedB();
+    unsubscribeClearedA();
+    unsubscribeClearedB();
+
+    store.setSession(session);
+    store.clearSession();
+
+    expect(onLoaded).toHaveBeenCalledTimes(1);
+    expect(onCleared).toHaveBeenCalledTimes(1);
+  });
+
 });
