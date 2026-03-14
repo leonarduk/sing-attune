@@ -26,6 +26,7 @@ import { syntheticPitchFrameAt } from '../../pitch/synthetic';
 import { PitchTimelineSync } from '../../pitch/timeline-sync';
 import { parsePitchSocketMessage, reconnectDelayMs, type PitchFrame } from '../../pitch/socket';
 import { midiToFrequency, midiToNoteName } from '../../pitch/note-name';
+import { SessionRangeTracker } from '../../pitch/session-range';
 import {
   DEFAULT_STABLE_NOTE_SETTINGS,
   StableNoteDetector,
@@ -62,6 +63,12 @@ let syntheticModeEnabled = false;
 let selectedDeviceId: number | null = null;
 let recordingError: string | null = null;
 let lastStableMidi: number | null = null;
+let sessionRangeSummaryText = 'Last session range: —';
+let wasPlayingLastTick = false;
+let phraseSummaryTracker: PhraseSummaryTracker | null = null;
+let diagnosticsModeEnabled = false;
+const stablePitchTracker = new StablePitchTracker();
+const sessionRangeTracker = new SessionRangeTracker();
 let phraseSummaryTracker: PhraseSummaryTracker | null = null;
 let diagnosticsModeEnabled = false;
 const stablePitchTracker = new StablePitchTracker();
@@ -94,6 +101,36 @@ function updatePitchReadout(): void {
   const rawNoteLabel = midiToNoteName(lastPitchFrame.midi);
   const stableNoteLabel = lastStableMidi === null ? '—' : midiToNoteName(lastStableMidi);
   el.textContent = `Raw: ${rawLabel} (${rawNoteLabel}) · Stable: ${stableLabel} (${stableNoteLabel})`;
+}
+
+function updateSessionRangeReadout(): void {
+  const el = document.getElementById('session-range-readout') as HTMLSpanElement;
+  const summary = sessionRangeTracker.summary();
+  if (!summary) {
+    el.textContent = 'Session range: —';
+    return;
+  }
+  const low = midiToNoteName(summary.lowMidi);
+  const high = midiToNoteName(summary.highMidi);
+  el.textContent = `Session range: ${low} → ${high} (${summary.semitoneSpan} st / ${summary.octaveSpan.toFixed(2)} oct)`;
+}
+
+function updateSessionRangeSummary(): void {
+  const el = document.getElementById('session-range-summary') as HTMLSpanElement;
+  el.textContent = sessionRangeSummaryText;
+}
+
+function finalizeSessionRangeSummary(): void {
+  const summary = sessionRangeTracker.summary();
+  if (!summary) {
+    sessionRangeSummaryText = 'Last session range: no stable notes captured.';
+  } else {
+    const low = midiToNoteName(summary.lowMidi);
+    const high = midiToNoteName(summary.highMidi);
+    sessionRangeSummaryText =
+      `Last session range: ${low} → ${high} (${summary.semitoneSpan} semitones, ${summary.octaveSpan.toFixed(2)} octaves)`;
+  }
+  updateSessionRangeSummary();
 }
 
 // ── Pitch frame handling ───────────────────────────────────────────────────
@@ -132,6 +169,9 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
   const displayFrame = { ...frame, midi: overlayMidi };
   pitchOverlay?.pushFrame(displayFrame, getFrameXPosition(frame.t));
   pitchGraph?.pushFrame(frame, expectedMidiForFrame(frame.t));
+  if (sessionRangeTracker.ingest(frame, overlaySettings.confidenceThreshold)) {
+    updateSessionRangeReadout();
+  }
   sessionSummaryTracker.recordFrame(frame);
   window.dispatchEvent(new CustomEvent('stable-pitch-frame', {
     detail: {
@@ -151,6 +191,62 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
 
 function shouldStreamPitch(): boolean {
   return syntheticModeEnabled || diagnosticsModeEnabled || pitchOverlay !== null;
+}
+
+// ── Diagnostics ──────────────────────────────────────────────────────────────
+
+function renderMiniKeyboard(activeMidi: number | null): void {
+  const keyboardEl = document.getElementById('diag-keyboard') as HTMLDivElement;
+  if (keyboardEl.childElementCount === 0) {
+    const startMidi = 48;
+    for (let i = 0; i < 24; i += 1) {
+      const midi = startMidi + i;
+      const keyEl = document.createElement('div');
+      keyEl.className = 'diag-key';
+      if ([1, 3, 6, 8, 10].includes(midi % 12)) keyEl.classList.add('black');
+      keyEl.dataset.midi = String(midi);
+      keyboardEl.appendChild(keyEl);
+    }
+  }
+  for (const child of Array.from(keyboardEl.children)) {
+    if (!(child instanceof HTMLDivElement)) continue;
+    child.classList.toggle('active', activeMidi !== null && Number(child.dataset.midi) === activeMidi);
+  }
+}
+
+function clearDiagnostics(): void {
+  (document.getElementById('diag-note') as HTMLDivElement).textContent = '—';
+  (document.getElementById('diag-cents') as HTMLDivElement).textContent = '—';
+  const stabilityEl = document.getElementById('diag-stability') as HTMLDivElement;
+  stabilityEl.textContent = 'No signal';
+  stabilityEl.classList.remove('unstable');
+  (document.getElementById('diag-held') as HTMLDivElement).textContent = '0.0s';
+  (document.getElementById('diag-confidence') as HTMLDivElement).textContent = '0.00';
+  (document.getElementById('diag-confidence-fill') as HTMLDivElement).style.width = '0%';
+  stablePitchTracker.reset();
+  renderMiniKeyboard(null);
+}
+
+function updateDiagnostics(frame: { t: number; midi: number; conf: number }): void {
+  if (!diagnosticsModeEnabled) return;
+  const noteEl = document.getElementById('diag-note') as HTMLDivElement;
+  const centsEl = document.getElementById('diag-cents') as HTMLDivElement;
+  const stabilityEl = document.getElementById('diag-stability') as HTMLDivElement;
+  const heldEl = document.getElementById('diag-held') as HTMLDivElement;
+  const confEl = document.getElementById('diag-confidence') as HTMLDivElement;
+  const confFillEl = document.getElementById('diag-confidence-fill') as HTMLDivElement;
+
+  const state = stablePitchTracker.push(frame, overlaySettings.confidenceThreshold);
+  noteEl.textContent = state.noteName;
+  centsEl.textContent = `${state.cents >= 0 ? '+' : ''}${state.cents.toFixed(1)} cents`;
+  stabilityEl.textContent = state.stable ? 'Stable' : 'Unstable';
+  stabilityEl.classList.toggle('unstable', !state.stable);
+  heldEl.textContent = `${(state.heldMs / 1000).toFixed(1)}s`;
+  confEl.textContent = frame.conf.toFixed(2);
+  confFillEl.style.width = `${Math.max(0, Math.min(100, frame.conf * 100))}%`;
+  renderMiniKeyboard(state.activeMidi);
+}
+
 }
 
 // ── Diagnostics ──────────────────────────────────────────────────────────────
@@ -319,6 +415,11 @@ function startPitchGraphLoop(): void {
       const playbackSec = Math.max(0, session.engine.ctx.currentTime - session.engine.startAudioTime);
       pitchGraphNowSec = Math.max(pitchGraphNowSec, playbackSec);
     }
+    const isPlaying = !!session?.engine.playing;
+    if (wasPlayingLastTick && !isPlaying) {
+      finalizeSessionRangeSummary();
+    }
+    wasPlayingLastTick = isPlaying;
     pitchGraph?.tick(pitchGraphNowSec);
     pitchGraphRafId = requestAnimationFrame(tick);
   };
@@ -456,6 +557,7 @@ function mount(_slot: HTMLElement): void {
   clearPhraseSummaryPanel();
 
   onScoreCleared(() => {
+    finalizeSessionRangeSummary();
     if (!diagnosticsModeEnabled) closePitchSocket();
     pitchOverlay?.destroy();
     pitchOverlay = null;
@@ -465,10 +567,13 @@ function mount(_slot: HTMLElement): void {
     lastStableMidi = null;
     stableNoteDetector.reset();
     pitchGraphNowSec = 0;
+    wasPlayingLastTick = false;
+    sessionRangeTracker.reset();
     sessionSummaryTracker.reset();
     phraseSummaryTracker = null;
     clearPhraseSummaryPanel();
     updatePitchReadout();
+    updateSessionRangeReadout();
     clearDiagnostics();
     if (diagnosticsModeEnabled) connectPitchSocket();
   });
@@ -486,8 +591,11 @@ function mount(_slot: HTMLElement): void {
     lastStableMidi = null;
     stableNoteDetector.reset();
     pitchGraphNowSec = 0;
+    wasPlayingLastTick = false;
+    sessionRangeTracker.reset();
     clearPhraseSummaryPanel();
     updatePitchReadout();
+    updateSessionRangeReadout();
     clearDiagnostics();
     connectPitchSocket();
   });
@@ -539,6 +647,8 @@ function mount(_slot: HTMLElement): void {
   settingsSynthEl.checked = syntheticModeEnabled;
   updateSettingsLabels();
   updatePitchReadout();
+  updateSessionRangeReadout();
+  updateSessionRangeSummary();
   refreshRecordingControls(ctrl);
 
   btnSettings.addEventListener('click', async (event) => {
