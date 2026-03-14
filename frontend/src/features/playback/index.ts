@@ -18,6 +18,7 @@
 import { onScoreCleared, onScoreLoaded, getSession } from '../../services/score-session';
 import { setStatus } from '../../services/backend';
 import { recordBeatSample, resetProjection, getCursorX } from '../../services/cursor-projection';
+import { finishPracticeSessionCapture, startPracticeSessionCapture } from '../../services/progress-history';
 import { emitPlaybackSyncEvent } from '../../services/playback-sync';
 import { beatToMs, postPlayback, startPlayback, seekPlayback } from '../../transport/controls';
 import { sessionSummaryTracker, type SessionSummary } from '../../practice/session-summary';
@@ -132,8 +133,21 @@ function mount(_slot: HTMLElement): void {
   const summaryRetry     = document.getElementById('btn-summary-retry')  as HTMLButtonElement;
   const summaryReplay    = document.getElementById('btn-summary-replay') as HTMLButtonElement;
 
-  function syncPauseButton(): void {
+  // Merge into a single onScoreCleared callback so both always fire together,
+  // regardless of whether the implementation replaces or appends listeners.
+  onScoreCleared(() => { stopCursorRaf(); finishPracticeSessionCapture(); });
+
+  function syncTransportButtons(): void {
     const session = getSession();
+
+    // Play: enabled only when a score is loaded and not already playing.
+    if (!session || session.engine.state === 'playing') {
+      btnPlay.disabled = true;
+    } else {
+      btnPlay.disabled = false;
+    }
+
+    // Pause/Resume: enabled when playing or paused.
     if (!session) {
       btnPause.disabled = true;
       btnPause.innerHTML = '&#9646;&#9646; Pause';
@@ -153,8 +167,8 @@ function mount(_slot: HTMLElement): void {
     btnPause.innerHTML = '&#9646;&#9646; Pause';
   }
 
-  onScoreLoaded(() => { syncPauseButton(); });
-  onScoreCleared(() => { stopCursorRaf(); syncPauseButton(); });
+  onScoreLoaded(() => { syncTransportButtons(); });
+  onScoreCleared(() => { stopCursorRaf(); syncTransportButtons(); });
 
   btnPlay.addEventListener('click', async () => {
     const session = getSession();
@@ -176,6 +190,7 @@ function mount(_slot: HTMLElement): void {
         });
       } else {
         sessionSummaryTracker.startSession();
+        startPracticeSessionCapture(session.model.title, session.selectedPart);
         const audioTimeSec = engine.ctx.currentTime;
         const response = await startPlayback(getSelectedDeviceId());
         emitPlaybackSyncEvent({
@@ -189,7 +204,7 @@ function mount(_slot: HTMLElement): void {
       }
       engine.play(fromBeat);
       startCursorRaf();
-      syncPauseButton();
+      syncTransportButtons();
     } catch (err) {
       setStatus(`playback start failed: ${String(err)}`, 'error');
       console.error('Play failed:', err);
@@ -224,7 +239,7 @@ function mount(_slot: HTMLElement): void {
         engine.play(engine.startBeat);
         startCursorRaf();
       }
-      syncPauseButton();
+      syncTransportButtons();
     } catch (err) {
       setStatus(`pause failed: ${String(err)}`, 'error');
       console.error('Pause failed:', err);
@@ -238,6 +253,7 @@ function mount(_slot: HTMLElement): void {
       const audioTimeSec = session.engine.ctx.currentTime;
       const response = await postPlayback('/playback/stop');
       session.engine.stop();
+      finishPracticeSessionCapture();
       emitPlaybackSyncEvent({
         type: 'stop',
         tMs: response.t_ms,
@@ -250,6 +266,7 @@ function mount(_slot: HTMLElement): void {
       const summary = sessionSummaryTracker.finishSession();
       if (summary) showSessionSummary(summary);
       syncPauseButton();
+      syncTransportButtons();
     } catch (err) {
       setStatus(`stop failed: ${String(err)}`, 'error');
       console.error('Stop failed:', err);
@@ -273,6 +290,7 @@ function mount(_slot: HTMLElement): void {
       console.error('Rewind failed:', err);
     }
     session.engine.stop();
+    finishPracticeSessionCapture();
     stopCursorRaf();
     session.cursor.stop();
     session.cursor.osmd.cursor.show();
@@ -295,6 +313,11 @@ function mount(_slot: HTMLElement): void {
   });
 
   syncPauseButton();
+    syncTransportButtons();
+  });
+
+  warningDismiss.addEventListener('click', () => { headphoneWarning.classList.add('hidden'); });
+  syncTransportButtons();
 
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
