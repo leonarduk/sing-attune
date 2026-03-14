@@ -16,7 +16,7 @@
  * playback feature) to preserve feature isolation.
  */
 import { onScoreLoaded, onScoreCleared, getSession } from '../../services/score-session';
-import { setStatus, showErrorBanner } from '../../services/backend';
+import { showErrorBanner } from '../../services/backend';
 import { getFrameXPosition } from '../../services/cursor-projection';
 import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from '../../pitch/overlay';
 import { PitchGraphCanvas } from '../../pitch/graph';
@@ -24,6 +24,7 @@ import { expectedNoteAtBeat } from '../../pitch/accuracy';
 import { syntheticPitchFrameAt } from '../../pitch/synthetic';
 import { parsePitchFrame, reconnectDelayMs } from '../../pitch/socket';
 import { midiToFrequency, midiToNoteName } from '../../pitch/note-name';
+import { StablePitchTracker, midiToCentsOffset } from '../../pitch/diagnostics';
 import { elapsedToBeat } from '../../score/timing';
 import { type NoteModel } from '../../score/renderer';
 import { resolveSelectedDeviceId, type AudioInputDevice } from '../../audio/devices';
@@ -50,6 +51,9 @@ let showNoteNames = false;
 let syntheticModeEnabled = false;
 let selectedDeviceId: number | null = null;
 let recordingError: string | null = null;
+let diagnosticsModeEnabled = false;
+
+const stablePitchTracker = new StablePitchTracker();
 
 const overlaySettings: OverlaySettings = {
   confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
@@ -85,6 +89,64 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
   }
   pitchOverlay?.pushFrame(frame, getFrameXPosition(frame.t));
   pitchGraph?.pushFrame(frame, expectedMidiForFrame(frame.t));
+  updateDiagnostics(frame);
+}
+
+function shouldStreamPitch(): boolean {
+  return syntheticModeEnabled || diagnosticsModeEnabled || pitchOverlay !== null;
+}
+
+function renderMiniKeyboard(activeMidi: number | null): void {
+  const keyboardEl = document.getElementById('diag-keyboard') as HTMLDivElement;
+  if (keyboardEl.childElementCount === 0) {
+    const startMidi = 48;
+    for (let i = 0; i < 24; i += 1) {
+      const midi = startMidi + i;
+      const keyEl = document.createElement('div');
+      keyEl.className = 'diag-key';
+      if ([1, 3, 6, 8, 10].includes(midi % 12)) keyEl.classList.add('black');
+      keyEl.dataset.midi = String(midi);
+      keyboardEl.appendChild(keyEl);
+    }
+  }
+  for (const child of Array.from(keyboardEl.children)) {
+    if (!(child instanceof HTMLDivElement)) continue;
+    child.classList.toggle('active', activeMidi !== null && Number(child.dataset.midi) === activeMidi);
+  }
+}
+
+function clearDiagnostics(): void {
+  (document.getElementById('diag-note') as HTMLDivElement).textContent = '—';
+  (document.getElementById('diag-cents') as HTMLDivElement).textContent = '—';
+  const stabilityEl = document.getElementById('diag-stability') as HTMLDivElement;
+  stabilityEl.textContent = 'No signal';
+  stabilityEl.classList.remove('unstable');
+  (document.getElementById('diag-held') as HTMLDivElement).textContent = '0.0s';
+  (document.getElementById('diag-confidence') as HTMLDivElement).textContent = '0.00';
+  (document.getElementById('diag-confidence-fill') as HTMLDivElement).style.width = '0%';
+  stablePitchTracker.reset();
+  renderMiniKeyboard(null);
+}
+
+function updateDiagnostics(frame: { t: number; midi: number; conf: number }): void {
+  const noteEl = document.getElementById('diag-note') as HTMLDivElement;
+  const centsEl = document.getElementById('diag-cents') as HTMLDivElement;
+  const stabilityEl = document.getElementById('diag-stability') as HTMLDivElement;
+  const heldEl = document.getElementById('diag-held') as HTMLDivElement;
+  const confEl = document.getElementById('diag-confidence') as HTMLDivElement;
+  const confFillEl = document.getElementById('diag-confidence-fill') as HTMLDivElement;
+
+  const state = stablePitchTracker.push(frame, overlaySettings.confidenceThreshold);
+  const noteName = midiToNoteName(frame.midi);
+  const cents = midiToCentsOffset(frame.midi);
+  noteEl.textContent = noteName;
+  centsEl.textContent = `${cents >= 0 ? '+' : ''}${cents.toFixed(1)} cents`;
+  stabilityEl.textContent = state.stable ? 'Stable' : 'Unstable';
+  stabilityEl.classList.toggle('unstable', !state.stable);
+  heldEl.textContent = `${(state.heldMs / 1000).toFixed(1)}s`;
+  confEl.textContent = frame.conf.toFixed(2);
+  confFillEl.style.width = `${Math.max(0, Math.min(100, frame.conf * 100))}%`;
+  renderMiniKeyboard(state.activeMidi);
 }
 
 // ── WebSocket ────────────────────────────────────────────────────────────────
@@ -98,7 +160,7 @@ function closePitchSocket(): void {
 }
 
 function connectPitchSocket(): void {
-  if (!pitchOverlay || syntheticModeEnabled) return;
+  if (!shouldStreamPitch() || syntheticModeEnabled) return;
   shouldReconnectPitchSocket = true;
   if (pitchReconnectTimer !== null) { window.clearTimeout(pitchReconnectTimer); pitchReconnectTimer = null; }
   if (pitchWs && (pitchWs.readyState === WebSocket.OPEN ||
@@ -109,7 +171,7 @@ function connectPitchSocket(): void {
   pitchWs.onerror = () => { pitchWs?.close(); };
   pitchWs.onclose = () => {
     pitchWs = null;
-    if (!shouldReconnectPitchSocket || !pitchOverlay) return;
+    if (!shouldReconnectPitchSocket || !shouldStreamPitch()) return;
     pitchReconnectAttempts += 1;
     pitchReconnectTimer = window.setTimeout(() => {
       pitchReconnectTimer = null;
@@ -224,6 +286,8 @@ function mount(_slot: HTMLElement): void {
   const scoreContainerEl    = document.getElementById('score-container')           as HTMLDivElement;
   const pitchGraphCanvasEl  = document.getElementById('pitch-graph-canvas')        as HTMLDivElement;
   const settingsPanelEl     = document.getElementById('settings-panel')            as HTMLDivElement;
+  const diagnosticsPanelEl  = document.getElementById('pitch-diagnostics-panel')    as HTMLElement;
+  const diagnosticsToggleEl = document.getElementById('btn-diagnostics')            as HTMLButtonElement;
   const btnSettings         = document.getElementById('btn-settings')              as HTMLButtonElement;
   const settingsDeviceEl    = document.getElementById('settings-device')          as HTMLSelectElement;
   const settingsConfEl      = document.getElementById('settings-confidence')      as HTMLInputElement;
@@ -251,15 +315,19 @@ function mount(_slot: HTMLElement): void {
 
   pitchGraph = new PitchGraphCanvas(pitchGraphCanvasEl);
   startPitchGraphLoop();
+  renderMiniKeyboard(null);
+  clearDiagnostics();
 
   onScoreCleared(() => {
-    closePitchSocket();
+    if (!diagnosticsModeEnabled) closePitchSocket();
     pitchOverlay?.destroy();
     pitchOverlay = null;
     pitchGraph?.clear();
     lastPitchFrame = null;
     pitchGraphNowSec = 0;
     updatePitchReadout();
+    clearDiagnostics();
+    if (diagnosticsModeEnabled) connectPitchSocket();
   });
 
   onScoreLoaded((session) => {
@@ -271,7 +339,20 @@ function mount(_slot: HTMLElement): void {
     lastPitchFrame = null;
     pitchGraphNowSec = 0;
     updatePitchReadout();
+    clearDiagnostics();
     connectPitchSocket();
+  });
+
+  diagnosticsToggleEl.addEventListener('click', () => {
+    diagnosticsModeEnabled = !diagnosticsModeEnabled;
+    diagnosticsPanelEl.classList.toggle('visible', diagnosticsModeEnabled);
+    diagnosticsToggleEl.classList.toggle('active', diagnosticsModeEnabled);
+    if (diagnosticsModeEnabled) {
+      connectPitchSocket();
+    } else if (!pitchOverlay) {
+      closePitchSocket();
+      clearDiagnostics();
+    }
   });
 
   // Settings panel init
@@ -322,7 +403,7 @@ function mount(_slot: HTMLElement): void {
   settingsSynthEl.addEventListener('change', () => {
     syntheticModeEnabled = settingsSynthEl.checked;
     closePitchSocket();
-    if (!syntheticModeEnabled) connectPitchSocket();
+    if (!syntheticModeEnabled && shouldStreamPitch()) connectPitchSocket();
   });
 
   // Recording
