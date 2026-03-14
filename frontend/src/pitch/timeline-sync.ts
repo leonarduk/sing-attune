@@ -46,7 +46,8 @@ export class PitchTimelineSync {
 
   isFrameStale(frameMs: number, nowAudioTimeSec: number, visibleWindowMs: number): boolean {
     const nowFrameMs = this.audioToFrameTime(nowAudioTimeSec);
-    if (nowFrameMs === null) return false;
+    // No anchor yet: drop the frame rather than render it in the wrong position.
+    if (nowFrameMs === null) return true;
     return frameMs < (nowFrameMs - visibleWindowMs);
   }
 }

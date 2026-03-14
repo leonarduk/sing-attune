@@ -123,11 +123,13 @@ function bindPlaybackSync(): void {
       return;
     }
     if (event.syncOffsetMs === null && !syncOffsetWarningShown) {
-      console.info('Pitch sync offset unavailable; using default offset 0ms until protocol in issue #27 is implemented.');
+      console.warn('Pitch sync offset unavailable; using default offset 0ms until protocol in issue #27 is implemented.');
       syncOffsetWarningShown = true;
     }
     timelineSync.setSyncOffsetMs(event.syncOffsetMs ?? 0);
-    pitchGraphNowSec = event.tMs / 1000;
+    // Use audioTimeSec (AudioContext seconds) as the graph scroll cursor —
+    // event.tMs is backend-relative milliseconds and must not be used here.
+    pitchGraphNowSec = event.audioTimeSec;
     timelineSync.reanchor(event.tMs, event.audioTimeSec);
     pitchOverlay?.clear();
     pitchGraph?.clear();
