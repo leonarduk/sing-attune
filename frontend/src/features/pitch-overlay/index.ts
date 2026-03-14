@@ -19,7 +19,7 @@ import { onScoreLoaded, onScoreCleared, getSession } from '../../services/score-
 import { onPlaybackSyncEvent } from '../../services/playback-sync';
 import { showErrorBanner } from '../../services/backend';
 import { getFrameXPosition } from '../../services/cursor-projection';
-import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from '../../pitch/overlay';
+import { DEFAULT_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from '../../pitch/overlay';
 import { PitchGraphCanvas } from '../../pitch/graph';
 import { expectedNoteAtBeat } from '../../pitch/accuracy';
 import { syntheticPitchFrameAt } from '../../pitch/synthetic';
@@ -59,7 +59,7 @@ let playbackSyncUnsubscribe: (() => void) | null = null;
 let syncOffsetWarningShown = false;
 
 const overlaySettings: OverlaySettings = {
-  confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
+  confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
   trailMs: 2000,
 };
 
