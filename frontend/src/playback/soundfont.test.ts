@@ -13,6 +13,17 @@ describe('SoundfontLoader.parseNoteMap', () => {
     });
   });
 
+
+
+  it('parses when sample payload contains braces before object end', () => {
+    const js = 'MIDI.Soundfont.acoustic_grand_piano = {"A0":"data:audio/mp3;base64,QQ==","A1":"value}still-string"};';
+
+    expect(SoundfontLoader.parseNoteMap(js)).toEqual({
+      A0: 'data:audio/mp3;base64,QQ==',
+      A1: 'value}still-string',
+    });
+  });
+
   it('throws when no soundfont assignment is present', () => {
     expect(() => SoundfontLoader.parseNoteMap('<!doctype html>403 Forbidden')).toThrow(
       'Could not parse soundfont JS: no JSON object found',

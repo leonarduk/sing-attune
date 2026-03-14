@@ -99,6 +99,48 @@
     }
     #warning-dismiss:hover { background: rgba(230,81,0,0.3); }
 
+    /* ── Session summary modal ── */
+    #session-summary-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(7, 10, 22, 0.75);
+      z-index: 60;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    #session-summary-modal.hidden { display: none; }
+    #session-summary-card {
+      width: min(560px, 100%);
+      background: var(--color-surface);
+      border: 1px solid #1a5276;
+      border-radius: 10px;
+      padding: 16px;
+      box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4);
+    }
+    #session-summary-card h2 {
+      color: var(--color-accent);
+      font-size: 1rem;
+      margin-bottom: 10px;
+    }
+    #session-summary-content {
+      white-space: pre-wrap;
+      color: #d6dff7;
+      font-size: 0.86rem;
+      line-height: 1.4;
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      background: #0d162a;
+      padding: 10px;
+      margin-bottom: 12px;
+    }
+    #session-summary-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
     /* ── Toolbar (left sidebar) ── */
     #toolbar {
       width: 250px;
@@ -164,6 +206,11 @@
     }
     #session-range-summary { color: #a8b7cf; font-size: 0.75rem; }
 
+    #btn-diagnostics.active {
+      background: #1f6f8b;
+      border-color: #53b7d8;
+    }
+
     #btn-settings { margin-top: auto; }
 
     #toolbar label { font-size: 0.8rem; color: var(--color-text-muted); }
@@ -228,6 +275,62 @@
       border: 1px solid #1a5276;
       border-radius: 6px;
       overflow: hidden;
+    }
+
+    /* ── Diagnostics panel ── */
+    #pitch-diagnostics-panel {
+      display: none;
+      background: #0d162a;
+      border-bottom: 1px solid var(--color-border);
+      padding: 10px 20px;
+    }
+    #pitch-diagnostics-panel.visible { display: block; }
+    .diag-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .diag-card {
+      border: 1px solid #1a5276;
+      border-radius: 6px;
+      padding: 8px;
+      background: rgba(12, 36, 68, 0.45);
+    }
+    .diag-label { font-size: 0.74rem; color: #94a5c4; margin-bottom: 4px; }
+    .diag-value { font-size: 1rem; color: #e4ecfa; }
+    .diag-value.unstable { color: #ffb74d; }
+    #diag-confidence-meter {
+      width: 100%;
+      height: 8px;
+      border-radius: 999px;
+      background: #18253d;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+    #diag-confidence-fill {
+      height: 100%;
+      width: 0;
+      background: #4caf50;
+      transition: width 80ms linear;
+    }
+    #diag-keyboard {
+      display: grid;
+      grid-template-columns: repeat(24, minmax(12px, 1fr));
+      gap: 2px;
+      width: 100%;
+    }
+    .diag-key {
+      height: 22px;
+      border-radius: 3px;
+      border: 1px solid #263a61;
+      background: #f1f4fb;
+    }
+    .diag-key.black { background: #364866; }
+    .diag-key.active {
+      border-color: #64b5f6;
+      background: #42a5f5;
+      box-shadow: 0 0 8px rgba(100,181,246,0.75);
     }
 
     /* ── Main score area ── */
@@ -303,6 +406,35 @@
     }
 
     #file-input { display: none; }
+
+    /* ── Progress history panel ── */
+    #progress-history-panel {
+      flex-shrink: 0;
+      max-height: 260px;
+      overflow: auto;
+      border-top: 1px solid var(--color-border);
+      background: #0f1b33;
+      padding: 8px 20px 12px;
+      font-size: 0.78rem;
+    }
+    #progress-history-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .progress-actions { display: flex; gap: 6px; }
+    .progress-actions .transport-btn { width: auto; padding: 4px 8px; font-size: 0.74rem; }
+    #progress-summary { color: #a8b7cf; margin-bottom: 8px; }
+    #progress-range-chart { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+    .range-row { display: grid; grid-template-columns: 82px 1fr; gap: 8px; align-items: center; color: #a8b7cf; }
+    .range-track { position: relative; height: 8px; background: rgba(26,82,118,0.25); border-radius: 999px; }
+    .range-bar { position: absolute; top: 0; bottom: 0; background: rgba(76,175,80,0.85); border-radius: 999px; }
+    #progress-history-list { display: grid; gap: 6px; }
+    .progress-item { border: 1px solid #1a5276; border-radius: 6px; padding: 6px 8px; color: #d7e0ef; }
+    .progress-empty { color: var(--color-text-muted); }
+
   </style>
 </head>
 <body>
@@ -317,6 +449,18 @@
   <div id="headphone-warning" class="hidden">
     <span>🎧 Use headphones — speakers cause mic bleed and will break pitch detection.</span>
     <button id="warning-dismiss">Dismiss</button>
+  </div>
+
+  <div id="session-summary-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="session-summary-title">
+    <div id="session-summary-card">
+      <h2 id="session-summary-title">Practice summary</h2>
+      <pre id="session-summary-content">No summary available.</pre>
+      <div id="session-summary-actions">
+        <button id="btn-summary-close" class="transport-btn">Close</button>
+        <button id="btn-summary-replay" class="transport-btn">Replay</button>
+        <button id="btn-summary-retry" class="transport-btn">Retry</button>
+      </div>
+    </div>
   </div>
 
   <div id="app-layout">
@@ -375,6 +519,7 @@
       </div>
 
       <button id="btn-browse"   class="transport-btn">Browse…</button>
+      <button id="btn-diagnostics" class="transport-btn">Pitch diagnostics</button>
       <button id="btn-settings" class="transport-btn">⚙ Settings</button>
 
       <span id="pitch-readout" aria-live="polite">Detected: —</span>
@@ -391,11 +536,27 @@
       </div>
       <div class="settings-row">
         <label for="settings-confidence">Confidence threshold: <span id="settings-confidence-label">0.60</span></label>
-        <input id="settings-confidence" type="range" min="0.6" max="0.95" step="0.05" value="0.6" />
+        <input id="settings-confidence" type="range" min="0" max="0.95" step="0.05" value="0.6" />
       </div>
       <div class="settings-row">
         <label for="settings-trail">Pitch trail length: <span id="settings-trail-label">2.0s</span></label>
         <input id="settings-trail" type="range" min="0.5" max="5" step="0.5" value="2" />
+      </div>
+      <div class="settings-row">
+        <label for="settings-stable-confidence">Stable note min confidence: <span id="settings-stable-confidence-label">0.60</span></label>
+        <input id="settings-stable-confidence" type="range" min="0.4" max="0.95" step="0.05" value="0.6" />
+      </div>
+      <div class="settings-row">
+        <label for="settings-stable-cluster">Stable note cluster tolerance: <span id="settings-stable-cluster-label">35 cents</span></label>
+        <input id="settings-stable-cluster" type="range" min="10" max="120" step="5" value="35" />
+      </div>
+      <div class="settings-row">
+        <label for="settings-stable-hold">Stable note hold duration: <span id="settings-stable-hold-label">160 ms</span></label>
+        <input id="settings-stable-hold" type="range" min="40" max="800" step="20" value="160" />
+      </div>
+      <div class="settings-row">
+        <label for="settings-stable-window">Stable note window: <span id="settings-stable-window-label">320 ms</span></label>
+        <input id="settings-stable-window" type="range" min="80" max="1500" step="20" value="320" />
       </div>
       <div class="settings-row">
         <label><input id="settings-show-note-names" type="checkbox" /> Show note names in pitch readout</label>
@@ -426,6 +587,33 @@
         <div id="pitch-graph-canvas"></div>
       </section>
 
+      <section id="pitch-diagnostics-panel" aria-label="Pitch diagnostics panel">
+        <div class="diag-grid">
+          <div class="diag-card">
+            <div class="diag-label">Detected note</div>
+            <div id="diag-note" class="diag-value">—</div>
+          </div>
+          <div class="diag-card">
+            <div class="diag-label">Cents deviation</div>
+            <div id="diag-cents" class="diag-value">—</div>
+          </div>
+          <div class="diag-card">
+            <div class="diag-label">Pitch stability</div>
+            <div id="diag-stability" class="diag-value">No signal</div>
+          </div>
+          <div class="diag-card">
+            <div class="diag-label">Held note timer</div>
+            <div id="diag-held" class="diag-value">0.0s</div>
+          </div>
+          <div class="diag-card">
+            <div class="diag-label">Confidence</div>
+            <div id="diag-confidence" class="diag-value">0.00</div>
+            <div id="diag-confidence-meter"><div id="diag-confidence-fill"></div></div>
+          </div>
+        </div>
+        <div id="diag-keyboard" aria-label="Mini keyboard"></div>
+      </section>
+
       <!-- Score / drop-zone area -->
       <main>
         <div id="score-loading" aria-live="polite">Loading score…</div>
@@ -449,6 +637,7 @@
       <div id="slot-playback"      class="feature-slot"></div>
       <div id="slot-part-selector" class="feature-slot"></div>
       <div id="slot-pitch-overlay" class="feature-slot"></div>
+      <div id="slot-audio-preflight" class="feature-slot"></div>
     </div>
 
   </div>

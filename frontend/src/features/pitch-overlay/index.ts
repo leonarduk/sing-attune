@@ -69,6 +69,9 @@ let phraseSummaryTracker: PhraseSummaryTracker | null = null;
 let diagnosticsModeEnabled = false;
 const stablePitchTracker = new StablePitchTracker();
 const sessionRangeTracker = new SessionRangeTracker();
+let phraseSummaryTracker: PhraseSummaryTracker | null = null;
+let diagnosticsModeEnabled = false;
+const stablePitchTracker = new StablePitchTracker();
 const timelineSync = new PitchTimelineSync();
 let playbackSyncUnsubscribe: (() => void) | null = null;
 let syncOffsetWarningShown = false;
@@ -188,6 +191,62 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
 
 function shouldStreamPitch(): boolean {
   return syntheticModeEnabled || diagnosticsModeEnabled || pitchOverlay !== null;
+}
+
+// ── Diagnostics ──────────────────────────────────────────────────────────────
+
+function renderMiniKeyboard(activeMidi: number | null): void {
+  const keyboardEl = document.getElementById('diag-keyboard') as HTMLDivElement;
+  if (keyboardEl.childElementCount === 0) {
+    const startMidi = 48;
+    for (let i = 0; i < 24; i += 1) {
+      const midi = startMidi + i;
+      const keyEl = document.createElement('div');
+      keyEl.className = 'diag-key';
+      if ([1, 3, 6, 8, 10].includes(midi % 12)) keyEl.classList.add('black');
+      keyEl.dataset.midi = String(midi);
+      keyboardEl.appendChild(keyEl);
+    }
+  }
+  for (const child of Array.from(keyboardEl.children)) {
+    if (!(child instanceof HTMLDivElement)) continue;
+    child.classList.toggle('active', activeMidi !== null && Number(child.dataset.midi) === activeMidi);
+  }
+}
+
+function clearDiagnostics(): void {
+  (document.getElementById('diag-note') as HTMLDivElement).textContent = '—';
+  (document.getElementById('diag-cents') as HTMLDivElement).textContent = '—';
+  const stabilityEl = document.getElementById('diag-stability') as HTMLDivElement;
+  stabilityEl.textContent = 'No signal';
+  stabilityEl.classList.remove('unstable');
+  (document.getElementById('diag-held') as HTMLDivElement).textContent = '0.0s';
+  (document.getElementById('diag-confidence') as HTMLDivElement).textContent = '0.00';
+  (document.getElementById('diag-confidence-fill') as HTMLDivElement).style.width = '0%';
+  stablePitchTracker.reset();
+  renderMiniKeyboard(null);
+}
+
+function updateDiagnostics(frame: { t: number; midi: number; conf: number }): void {
+  if (!diagnosticsModeEnabled) return;
+  const noteEl = document.getElementById('diag-note') as HTMLDivElement;
+  const centsEl = document.getElementById('diag-cents') as HTMLDivElement;
+  const stabilityEl = document.getElementById('diag-stability') as HTMLDivElement;
+  const heldEl = document.getElementById('diag-held') as HTMLDivElement;
+  const confEl = document.getElementById('diag-confidence') as HTMLDivElement;
+  const confFillEl = document.getElementById('diag-confidence-fill') as HTMLDivElement;
+
+  const state = stablePitchTracker.push(frame, overlaySettings.confidenceThreshold);
+  noteEl.textContent = state.noteName;
+  centsEl.textContent = `${state.cents >= 0 ? '+' : ''}${state.cents.toFixed(1)} cents`;
+  stabilityEl.textContent = state.stable ? 'Stable' : 'Unstable';
+  stabilityEl.classList.toggle('unstable', !state.stable);
+  heldEl.textContent = `${(state.heldMs / 1000).toFixed(1)}s`;
+  confEl.textContent = frame.conf.toFixed(2);
+  confFillEl.style.width = `${Math.max(0, Math.min(100, frame.conf * 100))}%`;
+  renderMiniKeyboard(state.activeMidi);
+}
+
 }
 
 // ── Diagnostics ──────────────────────────────────────────────────────────────

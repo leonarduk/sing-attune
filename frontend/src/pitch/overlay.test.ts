@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_CONFIDENCE_THRESHOLD,
   MAX_CONFIDENCE_THRESHOLD,
   MAX_TRAIL_MS,
   MIN_CONFIDENCE_THRESHOLD,
@@ -13,7 +14,7 @@ describe('normalizeOverlaySettings', () => {
       confidenceThreshold: 0.1,
       trailMs: 50,
     })).toEqual({
-      confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
+      confidenceThreshold: 0.1,
       trailMs: MIN_TRAIL_MS,
     });
 
@@ -31,7 +32,7 @@ describe('normalizeOverlaySettings', () => {
       confidenceThreshold: Number.NaN,
       trailMs: Number.POSITIVE_INFINITY,
     })).toEqual({
-      confidenceThreshold: MIN_CONFIDENCE_THRESHOLD,
+      confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
       trailMs: 2000,
     });
   });
