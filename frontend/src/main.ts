@@ -414,6 +414,13 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
   lastPitchFrame = { midi: frame.midi };
   updatePitchReadout();
 
+  const frameSec = frame.t / 1000;
+  if (Number.isFinite(frameSec) && frameSec >= 0) {
+    // Keep graph time anchored to the same timeline as incoming pitch frames
+    // so traces can span the full rolling window even if playback state lags.
+    pitchGraphNowSec = Math.max(pitchGraphNowSec, frameSec);
+  }
+
   const expectedMidi = expectedMidiForFrame(frame.t);
   pitchOverlay?.pushFrame(
     frame,
