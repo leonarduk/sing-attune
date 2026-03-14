@@ -4,7 +4,6 @@ Day 6: Playback state machine + real WebSocket pitch stream.
 """
 
 import asyncio
-import tempfile
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
@@ -13,6 +12,7 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 from .score.parser import parse_musicxml
+from .score.upload import persist_upload_to_temp
 from .audio.capture import list_input_devices, default_input_device_id
 from .audio.pipeline import PlaybackPipeline, _CLIENT_QUEUE_MAXSIZE
 
@@ -224,10 +224,7 @@ async def load_score(file: UploadFile = File(...)) -> JSONResponse:
             detail=f"Unsupported file type '{suffix}'. Upload a .xml or .mxl MusicXML file.",
         )
 
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp_path = Path(tmp.name)
-        content = await file.read()
-        tmp.write(content)
+    tmp_path = await persist_upload_to_temp(file, suffix)
 
     try:
         score_model = parse_musicxml(tmp_path)

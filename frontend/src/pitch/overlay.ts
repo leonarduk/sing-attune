@@ -3,8 +3,9 @@ import { elapsedToBeat } from '../score/timing';
 import { classifyPitchColor, expectedNoteAtBeat, MIN_CONFIDENCE_FOR_DOT, type DotColor } from './accuracy';
 import { createPitchInterpreter, noteKey, type PitchInterpreter } from './interpretation';
 
-export const MIN_CONFIDENCE_THRESHOLD = MIN_CONFIDENCE_FOR_DOT;
+export const MIN_CONFIDENCE_THRESHOLD = 0;
 export const MAX_CONFIDENCE_THRESHOLD = 0.95;
+export const DEFAULT_CONFIDENCE_THRESHOLD = MIN_CONFIDENCE_FOR_DOT;
 export const MIN_TRAIL_MS = 500;
 export const MAX_TRAIL_MS = 5000;
 
@@ -22,7 +23,7 @@ export interface OverlaySettings {
 export function normalizeOverlaySettings(settings: OverlaySettings): OverlaySettings {
   const threshold = Number.isFinite(settings.confidenceThreshold)
     ? settings.confidenceThreshold
-    : MIN_CONFIDENCE_THRESHOLD;
+    : DEFAULT_CONFIDENCE_THRESHOLD;
   const trailMs = Number.isFinite(settings.trailMs)
     ? settings.trailMs
     : 2000;
@@ -65,7 +66,7 @@ export class PitchOverlay {
     this.midiMin = 48;
     this.midiMax = 84;
     this.setPart(part);
-    this.settings = normalizeOverlaySettings(settings ?? { confidenceThreshold: MIN_CONFIDENCE_THRESHOLD, trailMs: 2000 });
+    this.settings = normalizeOverlaySettings(settings ?? { confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD, trailMs: 2000 });
     this.interpreter = createPitchInterpreter();
 
     this.canvas = document.createElement('canvas');
