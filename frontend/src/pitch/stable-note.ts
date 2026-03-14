@@ -68,23 +68,28 @@ export class StableNoteDetector {
     }
 
     this.pruneWindow(frame.t);
-    const modalMidi = this.modalClusterMidi();
+    const dominant = this.dominantClusterCentroid();
 
-    if (modalMidi === null) {
+    if (dominant === null) {
       this.candidateMidi = null;
       this.candidateStartMs = null;
       this.stableMidi = null;
       return { rawMidi: frame.midi, stableMidi: null };
     }
 
-    if (this.candidateMidi === null || !this.withinTolerance(modalMidi, this.candidateMidi)) {
-      this.candidateMidi = modalMidi;
+    if (this.candidateMidi === null || !this.withinTolerance(dominant, this.candidateMidi)) {
+      this.candidateMidi = dominant;
       this.candidateStartMs = frame.t;
     }
 
-    const holdMs = frame.t - (this.candidateStartMs ?? frame.t);
-    if (holdMs >= this.settings.holdDurationMs && this.candidateMidi !== null) {
-      this.stableMidi = this.candidateMidi;
+    // Explicit null guard: holdMs is only meaningful once a candidate start
+    // time has been recorded. The `?? frame.t` fallback would make holdMs=0,
+    // which could satisfy a very small holdDurationMs prematurely.
+    if (this.candidateStartMs !== null && this.candidateMidi !== null) {
+      const holdMs = frame.t - this.candidateStartMs;
+      if (holdMs >= this.settings.holdDurationMs) {
+        this.stableMidi = this.candidateMidi;
+      }
     }
 
     return { rawMidi: frame.midi, stableMidi: this.stableMidi };
@@ -95,13 +100,30 @@ export class StableNoteDetector {
     this.windowFrames = this.windowFrames.filter((frame) => frame.t >= cutoff);
   }
 
-  private modalClusterMidi(): number | null {
+  /**
+   * Returns the centroid of the highest-count cluster in the current window,
+   * breaking ties in favour of the most recently updated cluster.
+   *
+   * Clustering is single-pass greedy: each frame is assigned to the first
+   * existing cluster whose *fixed* centroid (snapshotted before the frame is
+   * added) is within tolerance, or a new cluster is created. This means the
+   * result is order-dependent for frames right on the boundary, which is
+   * acceptable for this use-case — we only need a stable dominant pitch
+   * estimate, not a globally optimal partition.
+   *
+   * Complexity: O(n * m) where n = window frames, m = clusters. For default
+   * settings (320 ms window, ~30 fps) that is at most ~10 frames; even at the
+   * maximum 1500 ms window it remains ~45 frames, so no concern in practice.
+   */
+  private dominantClusterCentroid(): number | null {
     if (this.windowFrames.length === 0) return null;
 
     const clusters: Cluster[] = [];
     for (const frame of this.windowFrames) {
       let matched = false;
       for (const cluster of clusters) {
+        // Snapshot centroid before testing so that adding this frame does not
+        // shift the centroid used to evaluate subsequent frames in this pass.
         const centroid = cluster.sumMidi / cluster.count;
         if (this.withinTolerance(frame.midi, centroid)) {
           cluster.count += 1;

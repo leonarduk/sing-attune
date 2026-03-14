@@ -59,14 +59,14 @@ describe('StableNoteDetector', () => {
       smoothingWindowMs: 500,
     });
 
-    // Populate window at t=0..200; hold satisfied → stable = 60
+    // Populate window at t=0..200; hold satisfied -> stable = 60
     detector.pushFrame({ t: 0,   midi: 60, conf: 0.9 });
     detector.pushFrame({ t: 100, midi: 60, conf: 0.9 });
     const stableState = detector.pushFrame({ t: 200, midi: 60, conf: 0.9 });
     expect(stableState.stableMidi).not.toBeNull();
 
-    // Shrink window to 100ms — frames at t=0 and t=100 fall outside cutoff
-    // (cutoff = 200 - 100 = 100, so t=0 and t=100 are pruned, only t=200 remains).
+    // Shrink window to 100ms: frames at t=0 and t=100 fall outside cutoff
+    // (cutoff = 200 - 100 = 100), only t=200 remains.
     // Stable value should survive because candidateStartMs is not reset by applySettings.
     detector.applySettings({
       minConfidence: 0.5,
@@ -87,7 +87,36 @@ describe('StableNoteDetector', () => {
     expect(beforeSwitch.stableMidi).toBeCloseTo(60, 1);
 
     const afterSwitch = detector.pushFrame({ t: 410, midi: 64, conf: 0.9 });
-    // 410-300=110ms > 80ms hold → should have switched
+    // 410-300=110ms > 80ms hold -> should have switched
     expect(afterSwitch.stableMidi).toBeCloseTo(64, 1);
+  });
+
+  it('clustering dominant cluster is consistent regardless of frame arrival order', () => {
+    // Two distinct pitch clusters: A around midi 60, B around midi 63.
+    // Cluster A has more frames so it should always win, regardless of order.
+    const settings = {
+      minConfidence: 0.5,
+      clusteringToleranceCents: 100, // 1 semitone: keeps clusters separate
+      holdDurationMs: 50,
+      smoothingWindowMs: 1000,
+    };
+
+    // Forward order: A frames first, then B
+    const detectorFwd = new StableNoteDetector(settings);
+    detectorFwd.pushFrame({ t: 0,   midi: 60.0, conf: 0.9 }); // A
+    detectorFwd.pushFrame({ t: 20,  midi: 60.1, conf: 0.9 }); // A
+    detectorFwd.pushFrame({ t: 40,  midi: 60.0, conf: 0.9 }); // A
+    detectorFwd.pushFrame({ t: 60,  midi: 63.0, conf: 0.9 }); // B
+    const fwdResult = detectorFwd.pushFrame({ t: 100, midi: 60.05, conf: 0.9 }); // A - hold met
+    expect(fwdResult.stableMidi).toBeCloseTo(60.0, 0);
+
+    // Interleaved order: A and B frames mixed
+    const detectorMix = new StableNoteDetector(settings);
+    detectorMix.pushFrame({ t: 0,   midi: 63.0, conf: 0.9 }); // B
+    detectorMix.pushFrame({ t: 20,  midi: 60.0, conf: 0.9 }); // A
+    detectorMix.pushFrame({ t: 40,  midi: 60.1, conf: 0.9 }); // A
+    detectorMix.pushFrame({ t: 60,  midi: 60.0, conf: 0.9 }); // A
+    const mixResult = detectorMix.pushFrame({ t: 100, midi: 60.05, conf: 0.9 }); // A - hold met
+    expect(mixResult.stableMidi).toBeCloseTo(60.0, 0);
   });
 });
