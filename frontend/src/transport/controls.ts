@@ -1,21 +1,29 @@
 import { beatToSeconds } from '../playback/engine';
 import type { ScoreModel } from '../score/renderer';
 
-
-export async function startPlayback(deviceId: number | null): Promise<void> {
-  const query = deviceId === null ? '' : `?device_id=${encodeURIComponent(String(deviceId))}`;
-  const res = await fetch(`/playback/start${query}`, { method: 'POST' });
-  if (!res.ok) throw new Error(`Playback command failed: /playback/start (HTTP ${res.status})`);
+export interface PlaybackCommandResponse {
+  state: string;
+  t_ms: number;
+  [key: string]: unknown;
 }
 
-export async function postPlayback(path: string): Promise<void> {
+async function postPlaybackCommand(path: string): Promise<PlaybackCommandResponse> {
   const res = await fetch(path, { method: 'POST' });
   if (!res.ok) throw new Error(`Playback command failed: ${path} (HTTP ${res.status})`);
+  return await res.json() as PlaybackCommandResponse;
 }
 
-export async function seekPlayback(tMs: number): Promise<void> {
-  const res = await fetch(`/playback/seek?t_ms=${encodeURIComponent(tMs.toFixed(1))}`, { method: 'POST' });
-  if (!res.ok) throw new Error(`Playback command failed: /playback/seek (HTTP ${res.status})`);
+export async function startPlayback(deviceId: number | null): Promise<PlaybackCommandResponse> {
+  const query = deviceId === null ? '' : `?device_id=${encodeURIComponent(String(deviceId))}`;
+  return await postPlaybackCommand(`/playback/start${query}`);
+}
+
+export async function postPlayback(path: string): Promise<PlaybackCommandResponse> {
+  return await postPlaybackCommand(path);
+}
+
+export async function seekPlayback(tMs: number): Promise<PlaybackCommandResponse> {
+  return await postPlaybackCommand(`/playback/seek?t_ms=${encodeURIComponent(tMs.toFixed(1))}`);
 }
 
 export async function setPlaybackTempo(multiplier: number): Promise<void> {

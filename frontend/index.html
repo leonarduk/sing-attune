@@ -232,6 +232,47 @@
       position: relative;
     }
 
+    #phrase-summary-panel {
+      flex-shrink: 0;
+      border-top: 1px solid var(--color-border);
+      background: #111a30;
+      padding: 10px 20px;
+      min-height: 66px;
+    }
+    .phrase-summary-empty {
+      color: var(--color-text-muted);
+      font-size: 0.82rem;
+    }
+    .phrase-summary-card {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 0.82rem;
+    }
+    .phrase-summary-title {
+      color: #dce7ff;
+      font-weight: 600;
+    }
+    .phrase-summary-notes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .phrase-badge {
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      font-size: 0.76rem;
+      white-space: nowrap;
+    }
+    .phrase-badge-green { background: rgba(76, 175, 80, 0.2); border-color: #4caf50; }
+    .phrase-badge-amber { background: rgba(255, 167, 38, 0.2); border-color: #ffa726; }
+    .phrase-badge-red { background: rgba(229, 57, 53, 0.2); border-color: #e53935; }
+    .phrase-summary-legend {
+      color: #93a8ca;
+      font-size: 0.74rem;
+    }
+
     /* ── Feature mount slots ── */
     /* Slots are invisible structural anchors; features build their own DOM. */
     .feature-slot { display: contents; }
@@ -403,6 +444,10 @@
         </div>
         <div id="score-container"></div>
       </main>
+
+      <section id="phrase-summary-panel" aria-live="polite">
+        <p class="phrase-summary-empty">Phrase summary will appear after a phrase completes.</p>
+      </section>
 
       <!--
         Feature mount slots.

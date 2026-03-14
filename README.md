@@ -1,6 +1,7 @@
 # sing-attune
 
 [![codecov](https://codecov.io/gh/leonarduk/sing-attune/branch/main/graph/badge.svg)](https://codecov.io/gh/leonarduk/sing-attune)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 **Practice your choir part. Hear the notes. Sing along. See your pitch in real time.**
 
@@ -203,4 +204,4 @@ Full build plan: [IMPLEMENTATION.md](IMPLEMENTATION.md)
 
 ## Licence
 
-Apache-2.0 — permissive open-source licensing with an explicit patent grant.
+Licensed under the [Apache License 2.0](LICENSE) — permissive open-source licensing with an explicit patent grant.
