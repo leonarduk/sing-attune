@@ -27,7 +27,7 @@ describe('progress history', () => {
     expect(summary?.minMidi).toBe(60);
     expect(summary?.maxMidi).toBe(67);
     expect(summary?.averageConfidence).toBeCloseTo(0.8, 8);
-    expect(summary?.singingDurationMs).toBe(900);
+    expect(summary?.singingDurationMs).toBe(1000);
 
     const stored = loadPracticeHistory();
     expect(stored).toHaveLength(1);
@@ -41,9 +41,22 @@ describe('progress history', () => {
     capturePitchFrame({ t: 5200, midi: 58, conf: 0.8 });
 
     const summary = finishPracticeSessionCapture();
-    expect(summary?.singingDurationMs).toBe(200);
+    expect(summary?.singingDurationMs).toBe(300);
   });
 
+
+  it('ignores overlapping captures until the active one is finished', () => {
+    startPracticeSessionCapture('First Piece', 'Tenor', new Date('2026-01-01T12:00:00.000Z'));
+    startPracticeSessionCapture('Second Piece', 'Bass', new Date('2026-01-01T13:00:00.000Z'));
+    capturePitchFrame({ t: 0, midi: 62, conf: 0.9 });
+
+    const summary = finishPracticeSessionCapture();
+    expect(summary?.pieceName).toBe('First Piece');
+
+    const stored = loadPracticeHistory();
+    expect(stored).toHaveLength(1);
+    expect(stored[0].pieceName).toBe('First Piece');
+  });
   it('exports stored history as JSON', () => {
     startPracticeSessionCapture('Test Piece', 'Tenor', new Date('2026-01-01T12:00:00.000Z'));
     capturePitchFrame({ t: 0, midi: 60, conf: 0.7 });

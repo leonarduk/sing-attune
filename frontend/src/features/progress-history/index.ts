@@ -2,6 +2,8 @@ import { subscribePracticeHistory, exportPracticeHistory, type PracticeSessionSu
 import { midiToNoteName } from '../../pitch/note-name';
 import { type Feature } from '../../feature-types';
 
+let unsubscribeHistory: (() => void) | null = null;
+
 function formatDuration(ms: number): string {
   const totalSec = Math.round(ms / 1000);
   const min = Math.floor(totalSec / 60);
@@ -24,8 +26,14 @@ function buildCsv(sessions: PracticeSessionSummary[]): string {
     s.averageConfidence.toFixed(3),
     String(Math.round(s.singingDurationMs)),
   ]);
+  const escapeCsvValue = (value: string): string => `"${value
+    .replaceAll('\r\n', '\n')
+    .replaceAll('\r', '\n')
+    .replaceAll('\n', ' ')
+    .replaceAll('"', '""')}"`;
+
   return [header, ...rows]
-    .map((r) => r.map((value) => `"${value.replaceAll('"', '""')}"`).join(','))
+    .map((r) => r.map((value) => escapeCsvValue(value)).join(','))
     .join('\n');
 }
 
@@ -70,7 +78,7 @@ function mount(slot: HTMLElement): void {
       const minMidi = Math.min(...withRange.map((s) => s.minMidi as number));
       const maxMidi = Math.max(...withRange.map((s) => s.maxMidi as number));
       const span = Math.max(1, maxMidi - minMidi);
-      rangeChartEl.innerHTML = withRange.slice(0, 12).map((s) => {
+      rangeChartEl.innerHTML = withRange.slice(0, 20).map((s) => {
         const start = (((s.minMidi as number) - minMidi) / span) * 100;
         const width = (((s.maxMidi as number) - (s.minMidi as number)) / span) * 100;
         return `<div class="range-row"><span>${new Date(s.timestamp).toLocaleDateString()}</span><div class="range-track"><div class="range-bar" style="left:${start}%;width:${Math.max(width, 1)}%"></div></div></div>`;
@@ -110,8 +118,6 @@ function mount(slot: HTMLElement): void {
   });
 
 }
-
-let unsubscribeHistory: (() => void) | null = null;
 
 function unmount(): void {
   unsubscribeHistory?.();

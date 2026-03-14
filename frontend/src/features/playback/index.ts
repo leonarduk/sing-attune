@@ -139,7 +139,6 @@ function mount(_slot: HTMLElement): void {
         });
       } else {
         startPracticeSessionCapture(session.model.title, session.selectedPart);
-        await startPlayback(getSelectedDeviceId());
         const audioTimeSec = engine.ctx.currentTime;
         const response = await startPlayback(getSelectedDeviceId());
         emitPlaybackSyncEvent({

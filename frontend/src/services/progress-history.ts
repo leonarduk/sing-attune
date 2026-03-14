@@ -24,6 +24,7 @@ interface ActiveCapture {
 const STORAGE_KEY = 'sing-attune.progress-history.v1';
 const MAX_SAVED_SESSIONS = 250;
 const MAX_FRAME_GAP_MS = 2000;
+const DEFAULT_FRAME_DURATION_MS = 100;
 
 let activeCapture: ActiveCapture | null = null;
 const listeners = new Set<(sessions: PracticeSessionSummary[]) => void>();
@@ -103,7 +104,9 @@ export function capturePitchFrame(frame: { t: number; midi: number; conf: number
   activeCapture.confidenceSum += frame.conf;
   activeCapture.confidenceCount += 1;
 
-  if (activeCapture.lastFrameTMs !== null && frame.t >= activeCapture.lastFrameTMs) {
+  if (activeCapture.lastFrameTMs === null) {
+    activeCapture.singingDurationMs += DEFAULT_FRAME_DURATION_MS;
+  } else if (frame.t >= activeCapture.lastFrameTMs) {
     const delta = frame.t - activeCapture.lastFrameTMs;
     if (delta <= MAX_FRAME_GAP_MS) activeCapture.singingDurationMs += delta;
   }
