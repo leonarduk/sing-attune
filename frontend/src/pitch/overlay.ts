@@ -1,6 +1,8 @@
 import type { ScoreModel, NoteModel } from '../score/renderer';
 import { elapsedToBeat } from '../score/timing';
 import { classifyPitchColor, expectedNoteAtBeat, MIN_CONFIDENCE_FOR_DOT, type DotColor } from './accuracy';
+import { expectedNoteAtBeat, type DotColor } from './accuracy';
+import { createPitchInterpreter, noteKey, type PitchInterpreter } from './interpretation';
 
 export const MIN_CONFIDENCE_THRESHOLD = MIN_CONFIDENCE_FOR_DOT;
 export const MAX_CONFIDENCE_THRESHOLD = 0.95;
@@ -55,6 +57,7 @@ export class PitchOverlay {
   private midiMax: number;
   private dots: Dot[] = [];
   private settings: OverlaySettings;
+  private readonly interpreter: PitchInterpreter;
 
   constructor(container: HTMLDivElement, model: ScoreModel, part: string, settings?: OverlaySettings) {
     this.container = container;
@@ -64,6 +67,7 @@ export class PitchOverlay {
     this.midiMax = 84;
     this.setPart(part);
     this.settings = normalizeOverlaySettings(settings ?? { confidenceThreshold: MIN_CONFIDENCE_THRESHOLD, trailMs: 2000 });
+    this.interpreter = createPitchInterpreter();
 
     this.canvas = document.createElement('canvas');
     this.canvas.style.position = 'absolute';
@@ -83,6 +87,7 @@ export class PitchOverlay {
 
   updatePart(part: string): void {
     this.setPart(part);
+    this.interpreter.reset();
     this.dots = [];
     this.redraw();
   }
@@ -100,6 +105,7 @@ export class PitchOverlay {
   }
 
   clear(): void {
+    this.interpreter.reset();
     this.dots = [];
     this.redraw();
   }
@@ -111,10 +117,17 @@ export class PitchOverlay {
     // No dot during rests or before the selected part's first note
     if (expected === null) return;
 
-    const color = classifyPitchColor(frame.midi, expected.midi, frame.conf, this.settings.confidenceThreshold);
-    const y = this.midiToY(frame.midi);
+    const interpreted = this.interpreter.processFrame({
+      t: frame.t,
+      midi: frame.midi,
+      conf: frame.conf,
+      expectedMidi: expected.midi,
+      expectedNoteKey: noteKey(expected.beat_start, expected.midi, expected.part),
+      confidenceThreshold: this.settings.confidenceThreshold,
+    });
+    const y = this.midiToY(interpreted.filteredMidi);
 
-    this.dots.push({ x: cursorX, y, color, wallMs: performance.now() });
+    this.dots.push({ x: cursorX, y, color: interpreted.color, wallMs: performance.now() });
     this.prune();
     this.redraw();
   }
