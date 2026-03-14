@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parsePitchFrame, reconnectDelayMs } from './socket';
+import { parsePitchFrame, parsePitchSocketMessage, reconnectDelayMs } from './socket';
 
 describe('reconnectDelayMs', () => {
   it('uses exponential backoff capped at max delay', () => {
@@ -23,5 +23,25 @@ describe('parsePitchFrame', () => {
     expect(parsePitchFrame({})).toBeNull();
     expect(parsePitchFrame({ t: '0.1', midi: 60, conf: 0.8 })).toBeNull();
     expect(parsePitchFrame({ t: 0.1, midi: 60 })).toBeNull();
+  });
+});
+
+describe('parsePitchSocketMessage', () => {
+  it('classifies control messages', () => {
+    expect(parsePitchSocketMessage({ status: 'connected' })).toEqual({ kind: 'status' });
+    expect(parsePitchSocketMessage({ ping: true })).toEqual({ kind: 'ping' });
+  });
+
+  it('returns frame messages for valid pitch payloads', () => {
+    expect(parsePitchSocketMessage({ t: 100, midi: 60.2, conf: 0.9 })).toEqual({
+      kind: 'frame',
+      frame: { t: 100, midi: 60.2, conf: 0.9 },
+    });
+  });
+
+  it('classifies malformed payloads as unknown', () => {
+    expect(parsePitchSocketMessage('abc')).toEqual({ kind: 'unknown' });
+    expect(parsePitchSocketMessage({ ping: 'true' })).toEqual({ kind: 'unknown' });
+    expect(parsePitchSocketMessage({ status: 'ok' })).toEqual({ kind: 'unknown' });
   });
 });
