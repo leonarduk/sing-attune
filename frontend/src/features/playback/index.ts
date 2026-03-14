@@ -167,6 +167,24 @@ function mount(_slot: HTMLElement): void {
     btnPause.innerHTML = '&#9646;&#9646; Pause';
   }
 
+  function syncPauseButton(): void {
+    const session = getSession();
+    if (!session || session.engine.state === 'stopped') {
+      btnPause.disabled = true;
+      btnPause.innerHTML = '&#9646;&#9646; Pause';
+      return;
+    }
+    if (session.engine.state === 'playing') {
+      btnPause.disabled = false;
+      btnPause.innerHTML = '&#9646;&#9646; Pause';
+      return;
+    }
+    if (session.engine.state === 'paused') {
+      btnPause.disabled = false;
+      btnPause.innerHTML = '&#9654; Resume';
+    }
+  }
+
   onScoreLoaded(() => { syncTransportButtons(); });
   onScoreCleared(() => { stopCursorRaf(); syncTransportButtons(); });
 
@@ -297,26 +315,29 @@ function mount(_slot: HTMLElement): void {
     headphoneWarning.classList.add('hidden');
     sessionSummaryTracker.reset();
     hideSessionSummary();
+    syncPauseButton();
+    syncTransportButtons();
   });
 
   warningDismiss.addEventListener('click', () => { headphoneWarning.classList.add('hidden'); });
   summaryClose.addEventListener('click', () => { hideSessionSummary(); });
-  summaryRetry.addEventListener('click', () => {
-    hideSessionSummary();
-    btnRewind.click();
-    btnPlay.click();
-  });
+
+  // Replay: rewind and play again, preserving session stats for review.
   summaryReplay.addEventListener('click', () => {
     hideSessionSummary();
     btnRewind.click();
     btnPlay.click();
   });
 
-  syncPauseButton();
-    syncTransportButtons();
+  // Retry: reset session stats for a clean attempt, then rewind and play.
+  summaryRetry.addEventListener('click', () => {
+    hideSessionSummary();
+    sessionSummaryTracker.reset();
+    btnRewind.click();
+    btnPlay.click();
   });
 
-  warningDismiss.addEventListener('click', () => { headphoneWarning.classList.add('hidden'); });
+  syncPauseButton();
   syncTransportButtons();
 
   window.addEventListener('keydown', (e) => {
