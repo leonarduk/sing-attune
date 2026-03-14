@@ -88,8 +88,11 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
   pitchOverlay?.pushFrame(frame, getFrameXPosition(frame.t));
   pitchGraph?.pushFrame(frame, expectedMidiForFrame(frame.t));
   const completedPhrases = phraseSummaryTracker?.pushFrame(frame) ?? [];
-  if (completedPhrases.length > 0) {
-    renderPhraseSummary(completedPhrases[completedPhrases.length - 1]);
+  // Render all completed summaries — multiple can flush in a single frame after
+  // a seek or discontinuity. Only the last one will remain visible, but each
+  // call updates the panel so the most-recently-completed phrase is shown.
+  for (const summary of completedPhrases) {
+    renderPhraseSummary(summary);
   }
 }
 
