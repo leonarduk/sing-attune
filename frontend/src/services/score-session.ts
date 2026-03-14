@@ -5,22 +5,17 @@
  * the objects features need. Features subscribe via `onScoreLoaded()` and
  * can read the current session synchronously via `getSession()`.
  *
- * This replaces the tangle of shared module-level variables that previously
- * lived in monolithic main.ts and had to be threaded through every function
- * by closure.
- *
  * Design notes:
- * - Deliberately NOT a full event-emitter/RxJS observable — that would be
- *   overkill. A single callback list is sufficient.
+ * - Deliberately NOT a full event-emitter/RxJS observable — overkill here.
+ *   A single callback list is sufficient.
  * - Sessions are immutable snapshots; mutation happens inside the objects
  *   themselves (engine, cursor, etc.), not in the store.
  * - `clearSession()` is called before each new score load so features can
  *   clean up prior state.
  */
-import { type ScoreModel } from '../score/renderer';
+import { type ScoreModel, ScoreRenderer } from '../score/renderer';
 import { ScoreCursor } from '../score/cursor';
 import { PlaybackEngine } from '../playback/engine';
-import { ScoreRenderer } from '../score/renderer';
 
 export interface ScoreSession {
   model: ScoreModel;
@@ -63,23 +58,24 @@ export function getSession(): ScoreSession | null {
 }
 
 /**
- * Register a callback to be called whenever a new score session is ready.
- * If a session already exists at registration time, the callback is invoked
- * immediately (useful for features that register after the score loads).
+ * Register a callback fired whenever a new score session becomes ready.
+ * If a session already exists at registration time the callback fires
+ * immediately — useful for features that mount after a score has loaded.
  */
 export function onScoreLoaded(cb: SessionCallback): void {
   loadedCallbacks.push(cb);
   if (current) cb(current);
 }
 
-/** Register a callback to be called before each session tear-down. */
+/** Register a callback fired just before each session tear-down. */
 export function onScoreCleared(cb: ClearCallback): void {
   clearCallbacks.push(cb);
 }
 
 /**
- * Update the selectedPart on the current session and re-notify listeners.
- * Called by the part-selector feature; pitch-overlay and playback observe it.
+ * Update selectedPart on the current session snapshot and re-notify all
+ * onScoreLoaded subscribers. Called by the part-selector feature so
+ * pitch-overlay can react without a direct feature-to-feature coupling.
  */
 export function updateSelectedPart(part: string): void {
   if (!current) return;

@@ -6,15 +6,14 @@
  *
  * main.ts never changes.
  */
+import { type Feature } from './feature-types';
+
 import { scoreLoaderFeature  } from './features/score-loader/index';
 import { playbackFeature     } from './features/playback/index';
 import { partSelectorFeature } from './features/part-selector/index';
 import { pitchOverlayFeature } from './features/pitch-overlay/index';
 
-// Re-export so external consumers can import Feature from registry if they want.
 export type { Feature } from './feature-types';
-
-import { type Feature } from './feature-types';
 
 export const features: Feature[] = [
   scoreLoaderFeature,
