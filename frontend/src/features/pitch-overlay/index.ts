@@ -37,6 +37,7 @@ import { type NoteModel } from '../../score/renderer';
 import { PhraseSummaryTracker, type PhraseSummary } from '../../pitch/phrase-summary';
 import { resolveSelectedDeviceId, type AudioInputDevice } from '../../audio/devices';
 import { PracticeRecorder } from '../../audio/recorder';
+import { sessionSummaryTracker } from '../../practice/session-summary';
 import { capturePitchFrame } from '../../services/progress-history';
 import { type Feature } from '../../feature-types';
 
@@ -131,6 +132,7 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
   const displayFrame = { ...frame, midi: overlayMidi };
   pitchOverlay?.pushFrame(displayFrame, getFrameXPosition(frame.t));
   pitchGraph?.pushFrame(frame, expectedMidiForFrame(frame.t));
+  sessionSummaryTracker.recordFrame(frame);
   window.dispatchEvent(new CustomEvent('stable-pitch-frame', {
     detail: {
       t: frame.t,
@@ -463,6 +465,7 @@ function mount(_slot: HTMLElement): void {
     lastStableMidi = null;
     stableNoteDetector.reset();
     pitchGraphNowSec = 0;
+    sessionSummaryTracker.reset();
     phraseSummaryTracker = null;
     clearPhraseSummaryPanel();
     updatePitchReadout();
@@ -475,6 +478,7 @@ function mount(_slot: HTMLElement): void {
     pitchOverlay = new PitchOverlay(
       scoreContainerEl, session.model, session.selectedPart, overlaySettings);
     activePartNotes = session.model.notes.filter((n) => n.part === session.selectedPart);
+    sessionSummaryTracker.setContext(session.model.tempo_marks, activePartNotes);
     phraseSummaryTracker = new PhraseSummaryTracker(activePartNotes, session.model.tempo_marks);
     pitchGraph?.clear();
     timelineSync.reset();
