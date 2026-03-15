@@ -240,6 +240,7 @@ function buildModal(): HTMLDivElement {
   wrapper.innerHTML = `
     <div class="audio-preflight-backdrop"></div>
     <div class="audio-preflight-dialog" role="dialog" aria-modal="true" aria-labelledby="audio-preflight-title">
+      <button id="audio-preflight-close" class="audio-preflight-close" aria-label="Close audio setup">✕</button>
       <h2 id="audio-preflight-title">Audio setup</h2>
       <p class="audio-preflight-help">Before rehearsal, confirm your mic and latency setup.</p>
       <div id="audio-preflight-permission" class="audio-preflight-status">Microphone permission not requested yet.</div>
@@ -270,6 +271,7 @@ function buildModal(): HTMLDivElement {
       <div class="audio-preflight-tip">🎧 Use headphones to avoid feedback and mic bleed.</div>
       <div id="audio-preflight-error" class="audio-preflight-error" role="alert"></div>
       <div class="audio-preflight-actions">
+        <button id="audio-preflight-cancel" class="transport-btn">Cancel</button>
         <button id="audio-preflight-request" class="transport-btn">Allow microphone</button>
         <button id="audio-preflight-test" class="transport-btn">Test my mic</button>
         <button id="audio-preflight-continue" class="transport-btn" disabled>Start rehearsal</button>
@@ -300,6 +302,20 @@ function ensureStyles(): void {
       box-shadow: 0 8px 40px rgba(0, 0, 0, 0.35);
     }
     .audio-preflight-help { margin-top: 0; color: #b9d8ef; }
+    .audio-preflight-close {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      border: 1px solid #2f5f88;
+      border-radius: 6px;
+      background: transparent;
+      color: #eaf6ff;
+      font-size: 1rem;
+      line-height: 1;
+      padding: 4px 8px;
+      cursor: pointer;
+    }
+    .audio-preflight-close:hover { background: rgba(255, 255, 255, 0.1); }
     .audio-preflight-row { display: grid; grid-template-columns: 170px 1fr; gap: 10px; align-items: center; margin: 10px 0; }
     .audio-meter { height: 12px; border-radius: 10px; border: 1px solid #1a5276; background: #111; overflow: hidden; }
     .audio-meter-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #2ecc71, #f1c40f, #e74c3c); transition: width 60ms linear; }
@@ -368,6 +384,9 @@ function mount(_slot: HTMLElement): void {
   octaveCompCheckboxEl = document.getElementById('audio-preflight-octave-comp') as HTMLInputElement;
 
   const requestButton = document.getElementById('audio-preflight-request') as HTMLButtonElement;
+  const cancelButton = document.getElementById('audio-preflight-cancel') as HTMLButtonElement;
+  const closeButton = document.getElementById('audio-preflight-close') as HTMLButtonElement;
+  const backdrop = modalEl.querySelector('.audio-preflight-backdrop') as HTMLDivElement;
   const latencyEl = document.getElementById('audio-preflight-latency') as HTMLInputElement;
 
   const latencyMs = loadPreflightLatencyMs();
@@ -383,6 +402,18 @@ function mount(_slot: HTMLElement): void {
 
   requestButton.addEventListener('click', () => {
     void requestPermissionAndDevices();
+  });
+
+  cancelButton.addEventListener('click', () => {
+    closeModal(false);
+  });
+
+  closeButton.addEventListener('click', () => {
+    closeModal(false);
+  });
+
+  backdrop.addEventListener('click', () => {
+    closeModal(false);
   });
 
   deviceSelectEl.addEventListener('change', () => {
