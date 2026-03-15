@@ -206,6 +206,18 @@
     }
     #session-range-summary { color: #a8b7cf; font-size: 0.75rem; }
 
+    #warmup-panel {
+      border: 1px solid #1a5276;
+      border-radius: 6px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      background: #122542;
+    }
+    #warmup-panel label { font-size: 0.75rem; }
+    #warmup-status { font-size: 0.75rem; color: #b9cceb; min-height: 1em; }
+    #btn-start-rehearsal.hidden { display: none; }
     #btn-diagnostics.active {
       background: #1f6f8b;
       border-color: #53b7d8;
@@ -524,6 +536,19 @@
       <button id="btn-settings" class="transport-btn">⚙ Settings</button>
 
       <span id="pitch-readout" aria-live="polite">Detected: —</span>
+
+      <div id="warmup-panel">
+        <label for="warmup-duration">Warm-up duration:</label>
+        <select id="warmup-duration">
+          <option value="60">1 min</option>
+          <option value="120" selected>2 min</option>
+          <option value="180">3 min</option>
+        </select>
+        <button id="btn-start-warmup" class="transport-btn">🎵 Start warm-up</button>
+        <button id="btn-start-rehearsal" class="transport-btn hidden">Start rehearsal</button>
+        <span id="warmup-status" aria-live="polite">Warm-up idle.</span>
+      </div>
+
       <span id="session-range-readout" aria-live="polite">Session range: —</span>
       <span id="session-range-summary" aria-live="polite">Last session range: —</span>
       <span id="score-info"></span>
