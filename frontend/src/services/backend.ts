@@ -7,14 +7,46 @@
 import { setAppStatus } from './status';
 
 const errorBannerEl = document.getElementById('error-banner') as HTMLDivElement;
+const errorBannerMessageEl = document.getElementById('error-banner-message') as HTMLSpanElement | null;
+const errorBannerDismissEl = document.getElementById('error-banner-dismiss') as HTMLButtonElement | null;
 
-export function showErrorBanner(message: string): void {
-  errorBannerEl.textContent = message;
+type ShowErrorBannerOptions = {
+  dismissible?: boolean;
+};
+
+if (errorBannerDismissEl) {
+  errorBannerDismissEl.addEventListener('click', () => {
+    clearErrorBanner();
+  });
+}
+
+export function showErrorBanner(message: string, options: ShowErrorBannerOptions = {}): void {
+  const { dismissible = false } = options;
+
+  if (errorBannerMessageEl) {
+    errorBannerMessageEl.textContent = message;
+  } else {
+    errorBannerEl.textContent = message;
+  }
+
+  if (errorBannerDismissEl) {
+    errorBannerDismissEl.classList.toggle('hidden', !dismissible);
+  }
+
   errorBannerEl.classList.add('visible');
 }
 
 export function clearErrorBanner(): void {
-  errorBannerEl.textContent = '';
+  if (errorBannerMessageEl) {
+    errorBannerMessageEl.textContent = '';
+  } else {
+    errorBannerEl.textContent = '';
+  }
+
+  if (errorBannerDismissEl) {
+    errorBannerDismissEl.classList.add('hidden');
+  }
+
   errorBannerEl.classList.remove('visible');
 }
 
