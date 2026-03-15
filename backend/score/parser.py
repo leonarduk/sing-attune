@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import zipfile
 import xml.etree.ElementTree as ET
+import re
 from pathlib import Path
 
 from music21 import converter, meter, tempo as m21tempo
@@ -156,7 +157,7 @@ def _extract_parts(score: Score) -> tuple[list[Note], list[str]]:
     seen_names: set[str] = set()
 
     for part in score.parts:
-        raw_name = part.partName or "Unknown"
+        raw_name = _normalize_part_name(part.partName or "Unknown")
         # Deduplicate grand-staff piano (appears as two parts with same name)
         if raw_name in seen_names:
             continue
@@ -176,6 +177,12 @@ def _extract_parts(score: Score) -> tuple[list[Note], list[str]]:
     # Sort by beat position for predictable consumption
     all_notes.sort(key=lambda n: (n.beat_start, n.part))
     return all_notes, part_names
+
+
+def _normalize_part_name(name: str) -> str:
+    """Normalise common compact vocal labels like ``PARTI`` to ``PART I``."""
+    normalized = name.strip()
+    return re.sub(r"^(PART)\s*([IVX]+)$", r"\1 \2", normalized, flags=re.IGNORECASE)
 
 
 def _make_note(
