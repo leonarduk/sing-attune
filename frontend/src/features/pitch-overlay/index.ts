@@ -111,9 +111,8 @@ function updatePitchReadout(): void {
   const beat = session.engine.currentBeat;
   const expected = expectedNoteAtBeat(beat, activePartNotes);
 
-  el.textContent = `Detected: ${sungLabel}`;
-
   if (!expected) {
+    el.textContent = `Detected: ${sungLabel} — No target note`;
     readout.classList.remove('in-tune', 'out-of-tune');
     readout.classList.add('no-target');
     readout.textContent = `Sung: ${sungLabel} | Expected: —`;
@@ -122,6 +121,9 @@ function updatePitchReadout(): void {
 
   const centsError = (lastPitchFrame.midi - expected.midi) * 100;
   const inTune = Math.abs(centsError) <= GREEN_CENTS_THRESHOLD;
+  const accuracyLabel = inTune ? 'In tune' : centsError > 0 ? 'Sharp' : 'Flat';
+
+  el.textContent = `Detected: ${sungLabel} — ${accuracyLabel}`;
   readout.classList.toggle('in-tune', inTune);
   readout.classList.toggle('out-of-tune', !inTune);
   readout.classList.remove('no-target');

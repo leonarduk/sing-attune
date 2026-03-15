@@ -96,6 +96,12 @@ export function targetBandY(
   return { topY, bottomY };
 }
 
+export function traceLineDash(color: GraphTraceColor): number[] {
+  if (color === 'red') return [7, 4];
+  if (color === 'grey') return [2, 4];
+  return [];
+}
+
 export class PitchGraphCanvas {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
@@ -347,17 +353,20 @@ export class PitchGraphCanvas {
       const y2 = midiToGraphY(next.midi, height, this.viewRangeMinMidi, this.viewRangeMaxMidi);
 
       this.ctx.strokeStyle = this.cssColor(next.color);
+      this.ctx.setLineDash(traceLineDash(next.color));
       this.ctx.beginPath();
       this.ctx.moveTo(x1, y1);
       this.ctx.lineTo(x2, y2);
       this.ctx.stroke();
     }
+
+    this.ctx.setLineDash([]);
   }
 
   private cssColor(color: GraphTraceColor): string {
-    if (color === 'green') return '#4caf50';
-    if (color === 'red') return '#ef5350';
-    return '#9e9e9e';
+    if (color === 'green') return '#39d98a';
+    if (color === 'red') return '#ff9f1c';
+    return '#9aa4b2';
   }
 
   private resize = (): void => {
