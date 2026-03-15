@@ -77,6 +77,41 @@ function setRequestButtonVisibility(shouldShow: boolean): void {
   requestButtonEl.style.display = shouldShow ? '' : 'none';
 }
 
+type MicrophonePermissionState = PermissionState | 'unsupported';
+
+async function getMicrophonePermissionState(): Promise<MicrophonePermissionState> {
+  if (!navigator.permissions?.query) return 'unsupported';
+
+  try {
+    const status = await navigator.permissions.query({
+      // `microphone` is supported in modern browsers but not yet in TS libdom.
+      name: 'microphone' as PermissionName,
+    });
+    return status.state;
+  } catch {
+    return 'unsupported';
+  }
+}
+
+async function syncPermissionUiFromBrowserState(): Promise<void> {
+  const permissionState = await getMicrophonePermissionState();
+  if (permissionState === 'granted') {
+    setPermissionStatus('Microphone permission granted.');
+    setRequestButtonVisibility(false);
+    if (continueButtonEl) continueButtonEl.disabled = false;
+    return;
+  }
+
+  if (permissionState === 'denied') {
+    setPermissionStatus('Microphone permission denied or unavailable.');
+    setRequestButtonVisibility(true);
+    if (continueButtonEl) continueButtonEl.disabled = true;
+    return;
+  }
+
+  setRequestButtonVisibility(true);
+}
+
 function cleanupMonitor(): void {
   meterRunToken += 1;
   if (meterRaf !== null) {
@@ -340,6 +375,7 @@ async function openModal(): Promise<boolean> {
     window.removeEventListener('keydown', onEscape);
     removeEscapeListener = null;
   };
+  void syncPermissionUiFromBrowserState();
   void requestPermissionAndDevices();
   return new Promise<boolean>((resolve) => {
     resolver = resolve;
@@ -393,6 +429,8 @@ function mount(_slot: HTMLElement): void {
     void requestPermissionAndDevices();
   });
 
+  void syncPermissionUiFromBrowserState();
+
   deviceSelectEl.addEventListener('change', () => {
     selectedDeviceId = deviceSelectEl?.value ?? null;
     persistPreflightDeviceId(selectedDeviceId);
@@ -444,6 +482,9 @@ export const __audioPreflightInternals = {
   isPreflightModalHidden,
   openModal,
   closeModal,
+  setRequestButtonVisibility,
+  getMicrophonePermissionState,
+  syncPermissionUiFromBrowserState,
 };
 
 function isPreflightModalHidden(): boolean {
