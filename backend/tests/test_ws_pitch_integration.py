@@ -88,12 +88,16 @@ def test_injected_frame_fans_out_to_two_clients(
 def test_add_client_without_running_loop_is_safe() -> None:
     """add_client called outside any event loop must not raise; _loop stays None."""
     pipeline = PlaybackPipeline(engine=Engine.PYIN)
-    assert pipeline._loop is None  # noqa: SLF001
+    # Force _loop to None in case a loop is already running in the test process.
+    pipeline._loop = None  # noqa: SLF001
 
     q: asyncio.Queue = asyncio.Queue()
-    # No event loop is running in this synchronous context — the RuntimeError
-    # branch in add_client must be swallowed and _loop must remain None.
-    pipeline.add_client(q)
+    # Patch get_running_loop to simulate no running loop — exercises the
+    # RuntimeError branch in add_client.
+    import unittest.mock as mock
+
+    with mock.patch("backend.audio.pipeline.asyncio.get_running_loop", side_effect=RuntimeError):
+        pipeline.add_client(q)
 
     assert pipeline._loop is None  # noqa: SLF001
     pipeline.remove_client(q)
@@ -101,40 +105,38 @@ def test_add_client_without_running_loop_is_safe() -> None:
 
 def test_fan_out_suppresses_exception_from_bad_queue() -> None:
     """_fan_out_payload must not propagate if a client queue's put_nowait raises."""
-    loop = asyncio.new_event_loop()
+    pipeline = PlaybackPipeline(engine=Engine.PYIN)
+
+    q: asyncio.Queue = asyncio.Queue()
+    pipeline.add_client(q)
+
+    # Build a mock loop that is "running" and captures call_soon_threadsafe calls.
+    mock_loop = MagicMock()
+    mock_loop.is_running.return_value = True
+    captured_callbacks: list = []
+
+    def _capture(cb, *args):
+        captured_callbacks.append((cb, args))
+
+    mock_loop.call_soon_threadsafe.side_effect = _capture
+
+    # Inject mock loop AFTER add_client so it overrides whatever loop was set.
+    pipeline._loop = mock_loop  # noqa: SLF001
+
+    pipeline.inject_frame(t_ms=1.0, midi=60.0, conf=0.9)
+
+    assert len(captured_callbacks) == 1, "Expected one call_soon_threadsafe call"
+
+    # Now execute the scheduled callback with a raising put_nowait — exercises
+    # the bare `except Exception: pass` branch in _fan_out_payload.
+    cb, args = captured_callbacks[0]
+    original_put = q.put_nowait
+    q.put_nowait = MagicMock(side_effect=RuntimeError("simulated bad queue"))
     try:
-        pipeline = PlaybackPipeline(engine=Engine.PYIN)
-        pipeline._loop = loop  # noqa: SLF001
-
-        bad_queue = MagicMock(spec=asyncio.Queue)
-
-        def _raise(*_args, **_kwargs):
-            raise RuntimeError("simulated bad queue")
-
-        # call_soon_threadsafe schedules the callback; we need it to actually run
-        # and hit the except branch.  Run the callback synchronously via a real
-        # loop so the exception fires inside _fan_out_payload's except clause.
-        captured_callbacks: list = []
-
-        def _capture(cb, *args):
-            captured_callbacks.append((cb, args))
-
-        loop.call_soon_threadsafe = _capture  # type: ignore[method-assign]
-
-        pipeline.add_client(bad_queue)
-        # inject_frame calls _fan_out_payload → call_soon_threadsafe captured above
-        pipeline.inject_frame(t_ms=1.0, midi=60.0, conf=0.9)
-
-        # Now execute the captured callback with a raising put_nowait to hit except
-        assert len(captured_callbacks) == 1
-        cb, args = captured_callbacks[0]
-        bad_queue.put_nowait = _raise
-        # Should not raise — exception must be suppressed
-        try:
-            cb(*args)
-        except Exception:  # noqa: BLE001
-            pytest.fail("_fan_out_payload did not suppress the exception")
-
-        pipeline.remove_client(bad_queue)
+        cb(*args)
+    except Exception:  # noqa: BLE001
+        pytest.fail("_fan_out_payload did not suppress the exception from put_nowait")
     finally:
-        loop.close()
+        q.put_nowait = original_put
+
+    pipeline.remove_client(q)
