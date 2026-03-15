@@ -88,17 +88,21 @@ function mount(slot: HTMLElement): void {
     const previousSession = getSession();
     if (!previousSession) return;
 
-    try {
-      if (previousSession.engine.state === 'playing' || previousSession.engine.state === 'paused') {
+    // Stop frontend audio unconditionally — this is the critical operation.
+    // engine.stop() calls _stopSources() which wraps each src.stop() in
+    // try/catch, so it cannot throw.
+    previousSession.engine.stop();
+    previousSession.cursor.stop();
+    previousSession.cursor.osmd.cursor.show();
+
+    // Best-effort backend notification so the pipeline resets its state.
+    // Failure is non-fatal — audio is already silent.
+    if (previousSession.engine.state !== 'idle') {
+      try {
         await postPlayback('/playback/stop');
+      } catch (err) {
+        console.warn('Score swap: backend stop notification failed (non-fatal):', err);
       }
-    } catch (err) {
-      setStatus(`playback stop failed during score swap: ${String(err)}`, 'error');
-      console.error('Score swap playback stop failed:', err);
-    } finally {
-      previousSession.engine.stop();
-      previousSession.cursor.stop();
-      previousSession.cursor.osmd.cursor.show();
     }
   }
 
