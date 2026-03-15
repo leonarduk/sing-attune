@@ -20,12 +20,13 @@ import { setAppStatus } from '../../services/status';
 import { recordBeatSample, resetProjection, getCursorX } from '../../services/cursor-projection';
 import { finishPracticeSessionCapture, startPracticeSessionCapture } from '../../services/progress-history';
 import { emitPlaybackSyncEvent } from '../../services/playback-sync';
-import { beatToMs, postPlayback, setPlaybackTempo, startPlayback, seekPlayback } from '../../transport/controls';
+import { beatToMs, postPlayback, startPlayback, seekPlayback } from '../../transport/controls';
 import { sessionSummaryTracker, type SessionSummary } from '../../practice/session-summary';
 import { type Feature } from '../../feature-types';
 import { ensureAudioPreflightReady } from '../../services/audio-preflight';
 import { clearLoopRegion, getLoopRegion, setLoopEnd, setLoopStart } from '../../services/loop-region';
 import { installMediaSession, updateMediaSessionMetadata, updateMediaSessionState } from '../../media-session';
+import { applyTempoChange } from '../../services/tempo';
 
 // ── Cursor RAF ──────────────────────────────────────────────────────────────────
 
@@ -150,36 +151,13 @@ async function seekByBeats(delta: number): Promise<void> {
 
 
 async function adjustTempoByStep(stepPercent: number): Promise<void> {
-  const session = getSession();
-  if (!session) return;
-
   const tempoSliderEl = document.getElementById('tempo-slider') as HTMLInputElement | null;
-  const tempoLabelEl = document.getElementById('tempo-label') as HTMLSpanElement | null;
-  if (!tempoSliderEl || !tempoLabelEl) return;
+  if (!tempoSliderEl) return;
 
   const currentPercent = parseInt(tempoSliderEl.value, 10);
   if (Number.isNaN(currentPercent)) return;
 
-  const nextPercent = Math.max(50, Math.min(125, currentPercent + stepPercent));
-  if (nextPercent === currentPercent) return;
-
-  const previousMultiplier = session.engine.tempoMultiplier;
-  const nextMultiplier = nextPercent / 100;
-
-  tempoSliderEl.value = String(nextPercent);
-  tempoLabelEl.textContent = `${nextPercent}%`;
-
-  session.engine.setTempoMultiplier(nextMultiplier);
-  try {
-    await setPlaybackTempo(nextMultiplier);
-  } catch (err) {
-    session.engine.setTempoMultiplier(previousMultiplier);
-    const previousPercent = Math.round(previousMultiplier * 100);
-    tempoSliderEl.value = String(previousPercent);
-    tempoLabelEl.textContent = `${previousPercent}%`;
-    setAppStatus(`tempo update failed: ${String(err)}`, 'error');
-    console.error('Tempo update failed:', err);
-  }
+  await applyTempoChange(currentPercent + stepPercent);
 }
 
 function getSelectedDeviceId(): number | null {
