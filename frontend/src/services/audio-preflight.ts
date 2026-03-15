@@ -1,5 +1,7 @@
 const PRE_FLIGHT_DEVICE_KEY = 'sing-attune.preflight.deviceId';
 const PRE_FLIGHT_LATENCY_KEY = 'sing-attune.preflight.latencyMs';
+const USER_VOICE_TYPE_KEY = 'userVoiceType';
+const USER_OCTAVE_COMP_KEY = 'sing-attune.preflight.octaveCompensation';
 
 const DEFAULT_LATENCY_MS = 0;
 
@@ -62,4 +64,33 @@ export function persistPreflightLatencyMs(value: number): void {
   if (!storage) return;
   const clamped = Math.round(Math.min(500, Math.max(-250, value)));
   storage.setItem(PRE_FLIGHT_LATENCY_KEY, String(clamped));
+}
+
+export function loadUserVoiceTypeId(): string | null {
+  const storage = getStorage();
+  if (!storage) return null;
+  const value = storage.getItem(USER_VOICE_TYPE_KEY);
+  return value && value.trim() !== '' ? value : null;
+}
+
+export function persistUserVoiceTypeId(voiceTypeId: string | null): void {
+  const storage = getStorage();
+  if (!storage) return;
+  if (!voiceTypeId) {
+    storage.removeItem(USER_VOICE_TYPE_KEY);
+    return;
+  }
+  storage.setItem(USER_VOICE_TYPE_KEY, voiceTypeId);
+}
+
+export function loadOctaveCompensationEnabled(): boolean {
+  const storage = getStorage();
+  if (!storage) return false;
+  return storage.getItem(USER_OCTAVE_COMP_KEY) === '1';
+}
+
+export function persistOctaveCompensationEnabled(enabled: boolean): void {
+  const storage = getStorage();
+  if (!storage) return;
+  storage.setItem(USER_OCTAVE_COMP_KEY, enabled ? '1' : '0');
 }
