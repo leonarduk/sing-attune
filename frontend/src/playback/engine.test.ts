@@ -99,6 +99,81 @@ describe('scheduleNotes', () => {
     expect(events[0].startAt).toBeCloseTo(10, 6);
     expect(events[1].startAt).toBeCloseTo(12, 6);
   });
+
+  it('applies positive latency offset to event start times', () => {
+    const events = scheduleNotes(notes, BPM120, 0, 10, 1, 0.2);
+    expect(events[0].startAt).toBeCloseTo(10.2, 6);
+    expect(events[1].startAt).toBeCloseTo(11.2, 6);
+  });
+
+  it('applies negative latency offset to event start times', () => {
+    const events = scheduleNotes(notes, BPM120, 0, 10, 1, -0.1);
+    expect(events[0].startAt).toBeCloseTo(9.9, 6);
+    expect(events[1].startAt).toBeCloseTo(10.9, 6);
+  });
+});
+
+describe('PlaybackEngine latency compensation', () => {
+  it('loads preflight latency fresh on each play call', () => {
+    const starts: number[] = [];
+
+    class FakeBufferSource {
+      buffer: AudioBuffer | null = null;
+      detune = { value: 0 };
+      connect(): void {}
+      start(when?: number): void { starts.push(when ?? 0); }
+      stop(): void {}
+    }
+
+    class FakeAudioContext {
+      currentTime = 100;
+      state: AudioContextState = 'running';
+      destination = {} as AudioDestinationNode;
+      createBufferSource(): AudioBufferSourceNode {
+        return new FakeBufferSource() as unknown as AudioBufferSourceNode;
+      }
+      createGain(): GainNode {
+        return { gain: { value: 1 }, connect(): void {} } as unknown as GainNode;
+      }
+      createOscillator(): OscillatorNode {
+        return {} as OscillatorNode;
+      }
+      resume(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+
+    class FakeSoundfont {
+      getBuffer(): AudioBuffer {
+        return {} as AudioBuffer;
+      }
+      getNearestSampledMidi(midi: number): number {
+        return midi;
+      }
+    }
+
+    window.localStorage.setItem('sing-attune.preflight.latencyMs', '200');
+    const ctx = new FakeAudioContext();
+    const engine = new PlaybackEngine(
+      ctx as unknown as AudioContext,
+      new FakeSoundfont() as unknown as import('./soundfont').SoundfontLoader,
+    );
+    const notes: import('../score/renderer').NoteModel[] = [
+      { midi: 60, beat_start: 0, duration: 1, measure: 1, part: 'PART I', lyric: null },
+    ];
+
+    engine.schedule(notes, BPM120, 'PART I', 1);
+    engine.play(0);
+    expect(starts[0]).toBeCloseTo(100.3, 6);
+
+    engine.stop();
+    ctx.currentTime = 200;
+    window.localStorage.setItem('sing-attune.preflight.latencyMs', '-100');
+    engine.play(0);
+    expect(starts[1]).toBeCloseTo(200.005, 6);
+
+    window.localStorage.removeItem('sing-attune.preflight.latencyMs');
+  });
 });
 
 describe('PlaybackEngine part selection', () => {
