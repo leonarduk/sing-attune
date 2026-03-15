@@ -1,43 +1,46 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ScoreSession } from './score-session';
 
-const setPlaybackTempoMock = vi.fn(async () => ({}));
-const setAppStatusMock = vi.fn();
-const getSessionMock = vi.fn(() => null);
-const setTempoMultiplierMock = vi.fn();
+const mocks = vi.hoisted(() => ({
+  setPlaybackTempo: vi.fn(async (_tempo: number) => ({})),
+  setAppStatus: vi.fn(),
+  getSession: vi.fn((): ScoreSession | null => null),
+  setTempoMultiplier: vi.fn(),
+}));
 
 vi.mock('./score-session', () => ({
-  getSession: () => getSessionMock(),
+  getSession: mocks.getSession,
 }));
 
 vi.mock('./status', () => ({
-  setAppStatus: (...args: unknown[]) => setAppStatusMock(...args),
+  setAppStatus: mocks.setAppStatus,
 }));
 
 vi.mock('../transport/controls', () => ({
-  setPlaybackTempo: (...args: unknown[]) => setPlaybackTempoMock(...args),
+  setPlaybackTempo: mocks.setPlaybackTempo,
 }));
 
 import { applyTempoChange } from './tempo';
 
 describe('applyTempoChange', () => {
   beforeEach(() => {
-    setPlaybackTempoMock.mockReset();
-    setPlaybackTempoMock.mockImplementation(async () => ({}));
-    setAppStatusMock.mockReset();
-    setTempoMultiplierMock.mockReset();
-    getSessionMock.mockReset();
+    mocks.setPlaybackTempo.mockReset();
+    mocks.setPlaybackTempo.mockImplementation(async () => ({}));
+    mocks.setAppStatus.mockReset();
+    mocks.setTempoMultiplier.mockReset();
+    mocks.getSession.mockReset();
 
     document.body.innerHTML = `
       <input id="tempo-slider" value="100" />
       <span id="tempo-label">100%</span>
     `;
 
-    getSessionMock.mockReturnValue({
+    mocks.getSession.mockReturnValue({
       engine: {
         tempoMultiplier: 1,
-        setTempoMultiplier: setTempoMultiplierMock,
+        setTempoMultiplier: mocks.setTempoMultiplier,
       },
-    });
+    } as unknown as ScoreSession);
   });
 
   it('clamps the tempo percent and syncs backend', async () => {
@@ -48,23 +51,37 @@ describe('applyTempoChange', () => {
 
     expect(slider.value).toBe('125');
     expect(label.textContent).toBe('125%');
-    expect(setTempoMultiplierMock).toHaveBeenCalledWith(1.25);
-    expect(setPlaybackTempoMock).toHaveBeenCalledWith(1.25);
+    expect(mocks.setTempoMultiplier).toHaveBeenCalledWith(1.25);
+    expect(mocks.setPlaybackTempo).toHaveBeenCalledWith(1.25);
   });
 
   it('rolls back engine and UI on backend sync failure', async () => {
     const error = new Error('boom');
-    setPlaybackTempoMock.mockRejectedValueOnce(error);
+    mocks.setPlaybackTempo.mockRejectedValueOnce(error);
 
     await applyTempoChange(90);
 
     const slider = document.getElementById('tempo-slider') as HTMLInputElement;
     const label = document.getElementById('tempo-label') as HTMLSpanElement;
 
-    expect(setTempoMultiplierMock).toHaveBeenNthCalledWith(1, 0.9);
-    expect(setTempoMultiplierMock).toHaveBeenNthCalledWith(2, 1);
+    expect(mocks.setTempoMultiplier).toHaveBeenNthCalledWith(1, 0.9);
+    expect(mocks.setTempoMultiplier).toHaveBeenNthCalledWith(2, 1);
     expect(slider.value).toBe('100');
     expect(label.textContent).toBe('100%');
-    expect(setAppStatusMock).toHaveBeenCalledWith('tempo update failed: Error: boom', 'error');
+    expect(mocks.setAppStatus).toHaveBeenCalledWith('tempo update failed: Error: boom', 'error');
+  });
+
+  it('does nothing when no session exists', async () => {
+    mocks.getSession.mockReturnValueOnce(null);
+
+    await applyTempoChange(120);
+
+    const slider = document.getElementById('tempo-slider') as HTMLInputElement;
+    const label = document.getElementById('tempo-label') as HTMLSpanElement;
+
+    expect(slider.value).toBe('100');
+    expect(label.textContent).toBe('100%');
+    expect(mocks.setTempoMultiplier).not.toHaveBeenCalled();
+    expect(mocks.setPlaybackTempo).not.toHaveBeenCalled();
   });
 });
