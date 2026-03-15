@@ -33,7 +33,8 @@ def _tensorflow_cuda_dlls() -> list[tuple[str, str]]:
 
 
 datas = collect_data_files("music21", includes=["corpus/**"])
-datas += collect_data_files("backend")
+# Bundle local backend package source explicitly (collect_data_files expects installed packages)
+datas += [("backend", "backend")]
 
 binaries = collect_dynamic_libs("torch")
 binaries += collect_dynamic_libs("torchaudio")
@@ -41,6 +42,7 @@ binaries += _tensorflow_cuda_dlls()
 
 hiddenimports = collect_submodules("torchcrepe")
 hiddenimports += collect_submodules("librosa")
+hiddenimports += collect_submodules("aubio")
 hiddenimports += [
     "backend.main",
     "backend.audio.capture",
