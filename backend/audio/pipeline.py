@@ -216,6 +216,11 @@ class PlaybackPipeline:
     # ── WebSocket client management ────────────────────────────────────────────
 
     def add_client(self, q: asyncio.Queue) -> None:
+        if self._loop is None:
+            try:
+                self._loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
         with self._clients_lock:
             self._clients.add(q)
         log.debug("WS client added (%d total)", len(self._clients))
@@ -265,6 +270,20 @@ class PlaybackPipeline:
             "midi": round(frame.midi, 3),
             "conf": round(frame.confidence, 3),
         }
+
+        self._fan_out_payload(payload)
+
+    def inject_frame(self, *, t_ms: float, midi: float, conf: float) -> None:
+        """Inject a synthetic frame payload for tests without touching internals."""
+        payload = {
+            "t": round(t_ms, 1),
+            "midi": round(midi, 3),
+            "conf": round(conf, 3),
+        }
+        self._fan_out_payload(payload)
+
+    def _fan_out_payload(self, payload: dict[str, float]) -> None:
+        """Send a frame payload to all connected WebSocket clients."""
 
         loop = self._loop
         if loop is None or not loop.is_running():
