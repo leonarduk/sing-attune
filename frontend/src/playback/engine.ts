@@ -345,18 +345,8 @@ export class PlaybackEngine {
    * behind ctx.currentTime) are also skipped to avoid scheduling overruns.
    */
   private _scheduleFrom(fromBeat: number, originTime: number): void {
-    const originOffsetS = beatToSeconds(fromBeat, this._tempoMarks, this._tempoMultiplier);
-
-    for (const note of this._allNotes) {
-      // Skip notes that ended before the resume point
-      if (note.beat_start + note.duration <= fromBeat) continue;
-
-      const noteStartOffsetS =
-        beatToSeconds(note.beat_start, this._tempoMarks, this._tempoMultiplier) - originOffsetS;
-      const startAt = originTime + noteStartOffsetS;
-
     const events = scheduleNotes(
-      this._notes,
+      this._allNotes,
       this._tempoMarks,
       fromBeat,
       originTime,
