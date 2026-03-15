@@ -111,9 +111,8 @@ function updatePitchReadout(): void {
   const beat = session.engine.currentBeat;
   const expected = expectedNoteAtBeat(beat, activePartNotes);
 
-  el.textContent = `Detected: ${sungLabel}`;
-
   if (!expected) {
+    el.textContent = `Detected: ${sungLabel} — No target note`;
     readout.classList.remove('in-tune', 'out-of-tune');
     readout.classList.add('no-target');
     readout.textContent = `Sung: ${sungLabel} | Expected: —`;
@@ -122,6 +121,9 @@ function updatePitchReadout(): void {
 
   const centsError = (lastPitchFrame.midi - expected.midi) * 100;
   const inTune = Math.abs(centsError) <= GREEN_CENTS_THRESHOLD;
+  const accuracyLabel = inTune ? 'In tune' : centsError > 0 ? 'Sharp' : 'Flat';
+
+  el.textContent = `Detected: ${sungLabel} — ${accuracyLabel}`;
   readout.classList.toggle('in-tune', inTune);
   readout.classList.toggle('out-of-tune', !inTune);
   readout.classList.remove('no-target');
@@ -604,22 +606,38 @@ function mount(_slot: HTMLElement): void {
   refreshRecordingControls(ctrl);
   updateWarmupUi('Warm-up idle.');
 
+  async function openSettingsPanel(): Promise<void> {
+    settingsPanelEl.classList.add('visible');
+    btnSettings.setAttribute('aria-expanded', 'true');
+    await refreshAudioSettings(settingsDeviceEl, settingsEngineEl);
+  }
+
+  function closeSettingsPanel(): void {
+    if (!settingsPanelEl.classList.contains('visible')) return;
+    settingsPanelEl.classList.remove('visible');
+    btnSettings.setAttribute('aria-expanded', 'false');
+    btnSettings.focus();
+  }
+
   btnSettings.addEventListener('click', async (event) => {
     event.stopPropagation();
-    const visible = settingsPanelEl.classList.toggle('visible');
-    if (visible) await refreshAudioSettings(settingsDeviceEl, settingsEngineEl);
+    if (settingsPanelEl.classList.contains('visible')) {
+      closeSettingsPanel();
+      return;
+    }
+    await openSettingsPanel();
   });
-  btnSettingsClose.addEventListener('click', () => { settingsPanelEl.classList.remove('visible'); });
+  btnSettingsClose.addEventListener('click', () => { closeSettingsPanel(); });
   settingsPanelEl.addEventListener('click', (e) => { e.stopPropagation(); });
   window.addEventListener('click', (e) => {
     if (!settingsPanelEl.classList.contains('visible')) return;
     const target = e.target;
     if (!(target instanceof Node)) return;
     if (settingsPanelEl.contains(target) || btnSettings.contains(target)) return;
-    settingsPanelEl.classList.remove('visible');
+    closeSettingsPanel();
   });
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') settingsPanelEl.classList.remove('visible');
+    if (e.key === 'Escape') closeSettingsPanel();
   });
   settingsDeviceEl.addEventListener('change', () => {
     const v = settingsDeviceEl.value;

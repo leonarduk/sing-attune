@@ -30,6 +30,7 @@
  */
 import { elapsedToBeat } from '../score/timing';
 import type { NoteModel, TempoMark } from '../score/renderer';
+import { loadPreflightLatencyMs } from '../services/audio-preflight';
 import type { SoundfontLoader } from './soundfont';
 
 /** Seconds per beat at the given BPM */
@@ -81,6 +82,7 @@ export function scheduleNotes(
   fromBeat: number,
   originTime: number,
   tempoMultiplier: number,
+  latencyOffsetS = 0,
 ): ScheduledNoteEvent[] {
   const originOffsetS = beatToSeconds(fromBeat, tempoMarks, tempoMultiplier);
   return notes
@@ -94,7 +96,7 @@ export function scheduleNotes(
         RELEASE_TAIL_S;
       return {
         note,
-        startAt: originTime + noteStartOffsetS,
+        startAt: originTime + noteStartOffsetS + latencyOffsetS,
         durationS: noteDurS,
       };
     });
@@ -134,6 +136,7 @@ export class PlaybackEngine {
   private _tempoMarks: TempoMark[] = [];
   private _tempoMultiplier = 1;
   private _transposeSemitones = 0;
+  private _latencyOffsetS = 0;
 
   constructor(ctx: AudioContext, sf: SoundfontLoader) {
     this.ctx = ctx;
@@ -214,6 +217,7 @@ export class PlaybackEngine {
   play(fromBeat = 0): void {
     if (this._state === 'playing') return;
     if (this.ctx.state === 'suspended') void this.ctx.resume();
+    this._latencyOffsetS = loadPreflightLatencyMs() / 1000;
     this._startBeat = fromBeat;
     this._startAudioTime = this.ctx.currentTime + SCHEDULE_OFFSET_S;
     this._scheduleFrom(fromBeat, this._startAudioTime);
@@ -345,22 +349,13 @@ export class PlaybackEngine {
    * behind ctx.currentTime) are also skipped to avoid scheduling overruns.
    */
   private _scheduleFrom(fromBeat: number, originTime: number): void {
-    const originOffsetS = beatToSeconds(fromBeat, this._tempoMarks, this._tempoMultiplier);
-
-    for (const note of this._allNotes) {
-      // Skip notes that ended before the resume point
-      if (note.beat_start + note.duration <= fromBeat) continue;
-
-      const noteStartOffsetS =
-        beatToSeconds(note.beat_start, this._tempoMarks, this._tempoMultiplier) - originOffsetS;
-      const startAt = originTime + noteStartOffsetS;
-
     const events = scheduleNotes(
-      this._notes,
+      this._allNotes,
       this._tempoMarks,
       fromBeat,
       originTime,
       this._tempoMultiplier,
+      this._latencyOffsetS,
     );
 
     for (const event of events) {

@@ -17,6 +17,8 @@
  */
 import { onScoreCleared, onScoreLoaded, getSession } from '../../services/score-session';
 import { setAppStatus } from '../../services/status';
+import { onPartChanged, onScoreCleared, onScoreLoaded, getSession } from '../../services/score-session';
+import { setStatus } from '../../services/backend';
 import { recordBeatSample, resetProjection, getCursorX } from '../../services/cursor-projection';
 import { finishPracticeSessionCapture, startPracticeSessionCapture } from '../../services/progress-history';
 import { emitPlaybackSyncEvent } from '../../services/playback-sync';
@@ -25,6 +27,7 @@ import { sessionSummaryTracker, type SessionSummary } from '../../practice/sessi
 import { type Feature } from '../../feature-types';
 import { ensureAudioPreflightReady } from '../../services/audio-preflight';
 import { clearLoopRegion, getLoopRegion, setLoopEnd, setLoopStart } from '../../services/loop-region';
+import { installMediaSession, updateMediaSessionMetadata, updateMediaSessionState } from '../../media-session';
 
 // ── Cursor RAF ──────────────────────────────────────────────────────────────────
 
@@ -59,8 +62,48 @@ async function restartLoopPlayback(): Promise<void> {
 let cursorRafId: number | null = null;
 let unsubscribeScoreLoaded: (() => void) | null = null;
 let unsubscribeScoreCleared: (() => void) | null = null;
+let unsubscribePartChanged: (() => void) | null = null;
 let removeKeydownListener: (() => void) | null = null;
 let loopSeekInFlight = false;
+
+function getCurrentBpm(): number {
+  const session = getSession();
+  if (!session) return 120;
+  const firstTempoMark = session.model.tempo_marks[0];
+  return firstTempoMark?.bpm ?? 120;
+}
+
+function secondsToBeats(seconds: number): number {
+  const session = getSession();
+  if (!session) return 0;
+  const bpm = getCurrentBpm();
+  return seconds * (bpm * session.engine.tempoMultiplier / 60);
+}
+
+async function seekToBeat(targetBeat: number): Promise<void> {
+  const session = getSession();
+  if (!session) return;
+  const { engine, cursor, model } = session;
+  const clampedBeat = Math.max(0, Math.min(model.total_beats, targetBeat));
+  try {
+    const audioTimeSec = engine.ctx.currentTime;
+    const response = await seekPlayback(beatToMs(clampedBeat, model, engine.tempoMultiplier));
+    emitPlaybackSyncEvent({
+      type: 'seek',
+      tMs: response.t_ms,
+      audioTimeSec,
+      syncOffsetMs: null,
+    });
+  } catch (err) {
+    setStatus(`seek failed: ${String(err)}`, 'error');
+    console.error('Seek failed:', err);
+    return;
+  }
+
+  engine.seekToBeat(clampedBeat);
+  cursor.seekToBeat(clampedBeat);
+  if (engine.state !== 'playing') stopCursorRaf();
+}
 
 function startCursorRaf(): void {
   stopCursorRaf();
@@ -99,7 +142,7 @@ function stopCursorRaf(): void {
 async function seekByBeats(delta: number): Promise<void> {
   const session = getSession();
   if (!session) return;
-  const { engine, cursor, model } = session;
+  const { engine, model } = session;
   const stepBeats = model.time_signatures[0]?.numerator ?? 4;
   const targetBeat = Math.max(0,
     Math.min(model.total_beats, engine.currentBeat + delta * stepBeats));
@@ -120,6 +163,7 @@ async function seekByBeats(delta: number): Promise<void> {
   engine.seekToBeat(targetBeat);
   cursor.seekToBeat(targetBeat);
   if (engine.state !== 'playing') stopCursorRaf();
+  await seekToBeat(targetBeat);
 }
 
 
@@ -212,6 +256,27 @@ function mount(_slot: HTMLElement): void {
   const summaryRetry     = document.getElementById('btn-summary-retry')  as HTMLButtonElement;
   const summaryReplay    = document.getElementById('btn-summary-replay') as HTMLButtonElement;
 
+  installMediaSession({
+    play: () => {
+      const session = getSession();
+      if (!session || session.engine.state === 'playing') return;
+      btnPlay.click();
+    },
+    pause: () => {
+      const session = getSession();
+      if (!session || session.engine.state !== 'playing') return;
+      btnPause.click();
+    },
+    stop: () => {
+      const session = getSession();
+      if (!session) return;
+      btnStop.click();
+    },
+    seekTo: (seconds) => {
+      void seekToBeat(secondsToBeats(seconds));
+    },
+  });
+
 
   function syncTransportButtons(): void {
     const session = getSession();
@@ -243,11 +308,15 @@ function mount(_slot: HTMLElement): void {
     btnPause.innerHTML = '&#9646;&#9646; Pause';
   }
 
-  const unsubscribeLoaded = onScoreLoaded(() => { syncTransportButtons(); });
+  const unsubscribeLoaded = onScoreLoaded((session) => {
+    updateMediaSessionMetadata(session.model.title, session.selectedPart);
+    syncTransportButtons();
+  });
   const unsubscribeCleared = onScoreCleared(() => {
     stopCursorRaf();
     finishPracticeSessionCapture();
     clearLoopRegion();
+    updateMediaSessionState('none');
     syncTransportButtons();
   });
 
@@ -271,11 +340,19 @@ function mount(_slot: HTMLElement): void {
 
   unsubscribeScoreLoaded?.();
   unsubscribeScoreCleared?.();
-  unsubscribeScoreLoaded = onScoreLoaded(() => { syncTransportButtons(); });
+  unsubscribePartChanged?.();
+  unsubscribeScoreLoaded = onScoreLoaded((session) => {
+    updateMediaSessionMetadata(session.model.title, session.selectedPart);
+    syncTransportButtons();
+  });
+  unsubscribePartChanged = onPartChanged((session) => {
+    updateMediaSessionMetadata(session.model.title, session.selectedPart);
+  });
   unsubscribeScoreCleared = onScoreCleared(() => {
     stopCursorRaf();
     finishPracticeSessionCapture();
     clearLoopRegion();
+    updateMediaSessionState('none');
     syncTransportButtons();
   });
 
@@ -317,6 +394,7 @@ function mount(_slot: HTMLElement): void {
         cursor.osmd.cursor.show();
       }
       engine.play(fromBeat);
+      updateMediaSessionState('playing');
       startCursorRaf();
       syncTransportButtons();
     } catch (err) {
@@ -340,6 +418,7 @@ function mount(_slot: HTMLElement): void {
           syncOffsetMs: null,
         });
         engine.pause();
+        updateMediaSessionState('paused');
         stopCursorRaf();
       } else if (engine.state === 'paused') {
         const audioTimeSec = engine.ctx.currentTime;
@@ -351,6 +430,7 @@ function mount(_slot: HTMLElement): void {
           syncOffsetMs: null,
         });
         engine.play(engine.startBeat);
+        updateMediaSessionState('playing');
         startCursorRaf();
       }
       syncTransportButtons();
@@ -367,6 +447,7 @@ function mount(_slot: HTMLElement): void {
       const audioTimeSec = session.engine.ctx.currentTime;
       const response = await postPlayback('/playback/stop');
       session.engine.stop();
+      updateMediaSessionState('none');
       finishPracticeSessionCapture();
       emitPlaybackSyncEvent({
         type: 'stop',
@@ -404,6 +485,7 @@ function mount(_slot: HTMLElement): void {
       console.error('Rewind failed:', err);
     }
     session.engine.stop();
+    updateMediaSessionState('none');
     finishPracticeSessionCapture();
     stopCursorRaf();
     session.cursor.stop();
@@ -486,6 +568,8 @@ function unmount(): void {
   unsubscribeScoreLoaded = null;
   unsubscribeScoreCleared?.();
   unsubscribeScoreCleared = null;
+  unsubscribePartChanged?.();
+  unsubscribePartChanged = null;
   removeKeydownListener?.();
   removeKeydownListener = null;
 }
