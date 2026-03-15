@@ -180,6 +180,7 @@ export class PlaybackEngine {
     _partName: string,
     tempoMultiplier = 1,
   ): void {
+    this._clearPartGains();
     this._allNotes = notes;
     for (const note of this._allNotes) {
       this._ensurePartGain(note.part);
@@ -332,6 +333,13 @@ export class PlaybackEngine {
     gain.connect(this.ctx.destination);
     this._partGains.set(partName, gain);
     return gain;
+  }
+
+  private _clearPartGains(): void {
+    for (const gain of this._partGains.values()) {
+      gain.disconnect();
+    }
+    this._partGains.clear();
   }
 
   private _beatAtTime(audioTime: number): number {

@@ -113,6 +113,139 @@ describe('scheduleNotes', () => {
   });
 });
 
+describe('PlaybackEngine part gain lifecycle', () => {
+  it('disconnects stale part GainNodes when scheduling a new note set', () => {
+    const disconnected: string[] = [];
+
+    class FakeBufferSource {
+      buffer: AudioBuffer | null = null;
+      detune = { value: 0 };
+      connect(): void {}
+      start(): void {}
+      stop(): void {}
+    }
+
+    class FakeGain {
+      constructor(private readonly id: string) {}
+      gain = { value: 1 };
+      connect(): void {}
+      disconnect(): void {
+        disconnected.push(this.id);
+      }
+    }
+
+    class FakeAudioContext {
+      currentTime = 0;
+      state: AudioContextState = 'running';
+      destination = {} as AudioDestinationNode;
+      private gainCount = 0;
+      createBufferSource(): AudioBufferSourceNode {
+        return new FakeBufferSource() as unknown as AudioBufferSourceNode;
+      }
+      createGain(): GainNode {
+        this.gainCount += 1;
+        return new FakeGain(`gain-${this.gainCount}`) as unknown as GainNode;
+      }
+      resume(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+
+    class FakeSoundfont {
+      getBuffer(): AudioBuffer {
+        return {} as AudioBuffer;
+      }
+      getNearestSampledMidi(midi: number): number {
+        return midi;
+      }
+    }
+
+    const ctx = new FakeAudioContext();
+    const engine = new PlaybackEngine(
+      ctx as unknown as AudioContext,
+      new FakeSoundfont() as unknown as import('./soundfont').SoundfontLoader,
+    );
+
+    engine.schedule(
+      [
+        { midi: 60, beat_start: 0, duration: 1, measure: 1, part: 'PART I', lyric: null },
+        { midi: 62, beat_start: 1, duration: 1, measure: 1, part: 'PART II', lyric: null },
+      ],
+      BPM120,
+      'PART I',
+      1,
+    );
+
+    expect(disconnected).toEqual([]);
+
+    engine.schedule(
+      [{ midi: 64, beat_start: 0, duration: 1, measure: 1, part: 'PART I', lyric: null }],
+      BPM120,
+      'PART I',
+      1,
+    );
+
+    expect(disconnected).toEqual(['gain-1', 'gain-2']);
+  });
+
+  it('creates part GainNodes on demand via setPartGain after schedule', () => {
+    const created: string[] = [];
+
+    class FakeGain {
+      constructor(private readonly id: string) {}
+      gain = { value: 1 };
+      connect(): void {}
+      disconnect(): void {}
+    }
+
+    class FakeAudioContext {
+      currentTime = 0;
+      state: AudioContextState = 'running';
+      destination = {} as AudioDestinationNode;
+      private gainCount = 0;
+      createBufferSource(): AudioBufferSourceNode {
+        return {} as AudioBufferSourceNode;
+      }
+      createGain(): GainNode {
+        this.gainCount += 1;
+        const id = `gain-${this.gainCount}`;
+        created.push(id);
+        return new FakeGain(id) as unknown as GainNode;
+      }
+      resume(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+
+    class FakeSoundfont {
+      getBuffer(): AudioBuffer {
+        return {} as AudioBuffer;
+      }
+      getNearestSampledMidi(midi: number): number {
+        return midi;
+      }
+    }
+
+    const engine = new PlaybackEngine(
+      new FakeAudioContext() as unknown as AudioContext,
+      new FakeSoundfont() as unknown as import('./soundfont').SoundfontLoader,
+    );
+
+    engine.schedule(
+      [{ midi: 60, beat_start: 0, duration: 1, measure: 1, part: 'PART I', lyric: null }],
+      BPM120,
+      'PART I',
+      1,
+    );
+
+    expect(created).toEqual(['gain-1']);
+
+    engine.setPartGain('PART III', 0.35);
+    expect(created).toEqual(['gain-1', 'gain-2']);
+  });
+});
+
+
 describe('PlaybackEngine latency compensation', () => {
   it('loads preflight latency fresh on each play call', () => {
     const starts: number[] = [];
