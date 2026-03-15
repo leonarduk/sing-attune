@@ -37,6 +37,17 @@ interface GridLine {
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const KEYBOARD_GUTTER_PX = 56;
 
+function midiToNoteName(midi: number): string {
+  const rounded = Math.round(midi);
+  const note = NOTE_NAMES[((rounded % 12) + 12) % 12] ?? 'C';
+  const octave = Math.floor(rounded / 12) - 1;
+  return `${note}${octave}`;
+}
+
+export function buildPitchGraphAriaLabel(minMidi: number, maxMidi: number, windowSeconds: number): string {
+  return `Real-time pitch graph showing your sung pitch (${midiToNoteName(minMidi)}–${midiToNoteName(maxMidi)}) over a ${windowSeconds}-second rolling window`;
+}
+
 function midiToScaleLabel(midi: number): string | null {
   const note = NOTE_NAMES[midi % 12];
   if (note.includes('#')) return null;
@@ -119,6 +130,9 @@ export class PitchGraphCanvas {
       bandCentsTolerance: opts.bandCentsTolerance ?? DEFAULT_BAND_CENTS_TOLERANCE,
     };
     this.canvas = document.createElement('canvas');
+    this.canvas.setAttribute('role', 'img');
+    this.canvas.setAttribute('aria-label', buildPitchGraphAriaLabel(this.fullRangeMinMidi, this.fullRangeMaxMidi, this.opts.windowSeconds));
+    this.canvas.textContent = 'Real-time pitch graph';
     this.canvas.style.width = '100%';
     this.canvas.style.height = '100%';
 
@@ -148,6 +162,7 @@ export class PitchGraphCanvas {
 
   setWindowSeconds(sec: number): void {
     this.opts.windowSeconds = Math.max(2, Math.min(30, sec));
+    this.updateAriaLabel();
   }
 
   setBandCentsTolerance(cents: number): void {
@@ -164,12 +179,18 @@ export class PitchGraphCanvas {
     this.fullRangeMinMidi = minMidi;
     this.fullRangeMaxMidi = maxMidi;
     this.resetViewport();
+    this.updateAriaLabel();
   }
 
   resetRange(): void {
     this.fullRangeMinMidi = GRAPH_MIDI_MIN;
     this.fullRangeMaxMidi = GRAPH_MIDI_MAX;
     this.resetViewport();
+    this.updateAriaLabel();
+  }
+
+  private updateAriaLabel(): void {
+    this.canvas.setAttribute('aria-label', buildPitchGraphAriaLabel(this.fullRangeMinMidi, this.fullRangeMaxMidi, this.opts.windowSeconds));
   }
 
   autoCenterOnMidi(expectedMidi: number | null): void {
