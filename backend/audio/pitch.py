@@ -18,6 +18,7 @@ import time
 import threading
 import queue
 import logging
+import os
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Callable
@@ -48,16 +49,55 @@ class Engine(Enum):
     PYIN = auto()
 
 
+@dataclass(frozen=True)
+class EngineRuntimeInfo:
+    engine: Engine
+    cuda: bool
+    device: str
+    mode: str
+
+
+def resolve_engine_runtime(force_cpu: bool = False) -> EngineRuntimeInfo:
+    """Resolve active engine from env + runtime override + CUDA availability."""
+    env_engine = os.getenv("PITCH_ENGINE", "").strip().lower()
+    env_forces_cpu = env_engine in {"aubio", "pyin", "cpu"}
+    cuda_available = torch.cuda.is_available()
+
+    if force_cpu or env_forces_cpu:
+        reason = "runtime override" if force_cpu else "PITCH_ENGINE"
+        log.info("CPU mode forced via %s — using librosa pYIN (CPU)", reason)
+        return EngineRuntimeInfo(
+            engine=Engine.PYIN,
+            cuda=cuda_available,
+            device="CPU",
+            mode="forced_cpu",
+        )
+
+    if cuda_available:
+        device_name = torch.cuda.get_device_name(0)
+        log.info("CUDA available — using torchcrepe (GPU: %s)", device_name)
+        return EngineRuntimeInfo(
+            engine=Engine.TORCHCREPE,
+            cuda=True,
+            device=device_name,
+            mode="auto",
+        )
+
+    log.info("No CUDA — using librosa pYIN (CPU)")
+    return EngineRuntimeInfo(
+        engine=Engine.PYIN,
+        cuda=False,
+        device="CPU",
+        mode="auto",
+    )
+
+
 def select_engine() -> Engine:
     """
     Auto-select pitch engine based on hardware availability.
     torchcrepe on CPU is ~200ms/frame — too slow for real-time; fall back to pYIN.
     """
-    if torch.cuda.is_available():
-        log.info("CUDA available — using torchcrepe (GPU)")
-        return Engine.TORCHCREPE
-    log.info("No CUDA — using librosa pYIN (CPU)")
-    return Engine.PYIN
+    return resolve_engine_runtime().engine
 
 
 # ── Data types ─────────────────────────────────────────────────────────────────
