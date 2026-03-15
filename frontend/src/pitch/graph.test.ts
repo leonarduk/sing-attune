@@ -8,6 +8,7 @@ import {
   pruneSamples,
   targetBandY,
   timeToGraphX,
+  traceLineDash,
 } from './graph';
 import { classifyGraphTraceColor, centsError, GRAPH_IN_TUNE_CENTS } from './graph-colors';
 
@@ -98,5 +99,14 @@ describe('targetBandY', () => {
     const pixelsPerSemitone = height / (GRAPH_MIDI_MAX - GRAPH_MIDI_MIN);
     const expectedHeightPx = (2 * cents / 100) * pixelsPerSemitone;
     expect(bandHeightPx).toBeCloseTo(expectedHeightPx, 1);
+  });
+});
+
+
+describe('traceLineDash', () => {
+  it('uses solid, dashed, and dotted line styles for accessibility', () => {
+    expect(traceLineDash('green')).toEqual([]);
+    expect(traceLineDash('red')).toEqual([7, 4]);
+    expect(traceLineDash('grey')).toEqual([2, 4]);
   });
 });
