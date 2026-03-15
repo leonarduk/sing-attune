@@ -224,6 +224,11 @@ function hideSessionSummary(): void {
   modal?.classList.add('hidden');
 }
 
+function isSessionSummaryOpen(): boolean {
+  const modal = document.getElementById('session-summary-modal') as HTMLDivElement | null;
+  return Boolean(modal && !modal.classList.contains('hidden'));
+}
+
 // ── mount ─────────────────────────────────────────────────────────────────
 
 function mount(_slot: HTMLElement): void {
@@ -510,6 +515,12 @@ function mount(_slot: HTMLElement): void {
     const target = e.target as HTMLElement | null;
     const tag = target?.tagName;
     if (target?.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+    if (e.code === 'Escape' && isSessionSummaryOpen()) {
+      e.preventDefault();
+      hideSessionSummary();
+      return;
+    }
 
     const session = getSession();
     if (!session) return;
