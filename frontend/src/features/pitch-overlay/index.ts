@@ -380,7 +380,10 @@ function startPitchGraphLoop(): void {
       const elapsedSec = session?.engine.playing
         ? Math.max(0, session.engine.ctx.currentTime - session.engine.startAudioTime)
         : warmupElapsedMs / 1000;
-      handleIncomingPitchFrame(syntheticPitchFrameAt(elapsedSec, expectedMidiForFrame(elapsedSec * 1000)));
+      const frameMs = session?.engine.playing
+        ? (timelineSync.audioToFrameTime(session.engine.ctx.currentTime) ?? (elapsedSec * 1000))
+        : (elapsedSec * 1000);
+      handleIncomingPitchFrame(syntheticPitchFrameAt(elapsedSec, expectedMidiForFrame(frameMs), frameMs));
     }
     if (session?.engine.playing) {
       const playbackSec = Math.max(0, session.engine.ctx.currentTime - session.engine.startAudioTime);
