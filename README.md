@@ -87,7 +87,8 @@ This keeps the backend real-time pipeline simple while score-aware interpretatio
 | Score playback (Web Audio) | 🔲 Day 9 |
 | Real-time pitch overlay | ✅ Done (Day 10) |
 | Transport controls | 🔲 Day 11 |
-| Electron packaging | 🟡 In progress (Day 16a backend launcher) |
+| Electron packaging | 🟡 Day 16 in progress |
+| Backend standalone binary (PyInstaller) | ✅ Done (Day 16b) |
 
 ---
 
@@ -160,7 +161,28 @@ API docs: http://localhost:8000/docs
 | Score rendering | OpenSheetMusicDisplay (OSMD) |
 | Score playback | Web Audio API + piano soundfont |
 | Frontend | Vite, TypeScript |
-| Desktop packaging | Electron (planned) |
+| Desktop packaging | Electron + PyInstaller backend binary |
+
+---
+
+## Backend packaging (Day 16b)
+
+Build a standalone backend binary with PyInstaller:
+
+```powershell
+just build-backend
+```
+
+Output is written to `dist/sing-attune-backend/` and can be launched with:
+
+```powershell
+./dist/sing-attune-backend/sing-attune-backend
+```
+
+### Bundle size
+
+- Measured local build (`dist/sing-attune-backend`): **~250 MB**
+- Expected Windows GPU build with torchcrepe + CUDA DLLs: **~200 MB** (issue estimate; varies by CUDA/torch versions)
 
 ---
 
