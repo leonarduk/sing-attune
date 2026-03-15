@@ -204,6 +204,13 @@ class PlaybackPipeline:
             current_state = self._state
             if was_running:
                 device_id = self._capture.device_id if self._capture else None
+                # Snapshot elapsed time before teardown so we can restore it.
+                if current_state == PlaybackState.PLAYING:
+                    self._elapsed_ms += (
+                        (time.monotonic() - self._play_monotonic)
+                        * 1000.0
+                        * self._tempo_multiplier
+                    )
                 self._teardown_locked()
                 self._pitch = PitchPipeline(
                     engine=self._engine,
@@ -216,6 +223,8 @@ class PlaybackPipeline:
                 self._pitch.start()
                 if current_state == PlaybackState.PLAYING:
                     self._capture.start()
+                    # Reset the play anchor so elapsed_ms continues smoothly.
+                    self._play_monotonic = time.monotonic()
                 self._state = current_state
             log.info(
                 "PlaybackPipeline engine updated — engine=%s mode=%s device=%s",
