@@ -57,7 +57,7 @@ function showSoundfontRetryBanner(): void {
           clearErrorBanner();
           setAppStatus('soundfont ready', 'success');
           showToast('Soundfont loaded successfully.', {
-            variant: 'success',
+            variant: 'info',
             dedupeKey: 'soundfont-recovered',
           });
         })
