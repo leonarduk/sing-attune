@@ -43,6 +43,10 @@ def _vocal_notes(score: ScoreModel):
     return [n for n in score.notes if "piano" not in n.part.lower()]
 
 
+def _part_notes(score: ScoreModel, part_name: str):
+    return [n for n in score.notes if n.part.upper() == part_name.upper()]
+
+
 # ---------------------------------------------------------------------------
 # Full score tests
 # ---------------------------------------------------------------------------
@@ -85,6 +89,43 @@ class TestParseFullScore:
     def test_notes_sorted_by_beat(self):
         beats = [n.beat_start for n in self.score.notes]
         assert beats == sorted(beats)
+
+
+@pytest.mark.skipif(not FULL_SCORE.exists(), reason="Full score not found")
+class TestHomewardBoundRealScoreCoverage:
+
+    def setup_method(self):
+        self.score = parse_musicxml(FULL_SCORE)
+
+    def test_part_ii_initial_silence_has_no_notes_before_beat_29(self):
+        part_ii = _part_notes(self.score, "PART II")
+        assert part_ii, "Expected PART II notes in Homeward Bound"
+        assert min(n.beat_start for n in part_ii) == pytest.approx(29.0, abs=0.5)
+        assert [n for n in part_ii if n.beat_start < 29.0] == []
+
+    def test_part_i_anacrusis_enters_at_beat_5(self):
+        part_i = _part_notes(self.score, "PART I")
+        assert part_i, "Expected PART I notes in Homeward Bound"
+        assert part_i[0].beat_start == pytest.approx(5.0, abs=0.5)
+
+    def test_contains_tied_note_boundaries_with_held_pitch(self):
+        for part_name in ("PART I", "PART II"):
+            notes = _part_notes(self.score, part_name)
+            tied_boundaries = [
+                (a, b)
+                for a, b in zip(notes, notes[1:])
+                if a.midi == b.midi and (a.beat_start + a.duration) == pytest.approx(b.beat_start)
+            ]
+            assert tied_boundaries, f"Expected at least one tie-like boundary in {part_name}"
+
+    def test_repeat_expansion_does_not_shorten_score(self):
+        raw_score = converter.parse(str(FULL_SCORE))
+        assert self.score.total_beats >= raw_score.duration.quarterLength
+
+    def test_part_ii_range_matches_tenor_octave_compensation_flow(self):
+        part_ii_midis = [n.midi for n in _part_notes(self.score, "PART II")]
+        assert min(part_ii_midis) >= 58
+        assert max(part_ii_midis) <= 72
 
 
 # ---------------------------------------------------------------------------
