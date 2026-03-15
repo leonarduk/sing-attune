@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from music21 import bar, meter, note, stream
 
-from backend.score.parser import _expand_repeats, parse_musicxml
+from backend.score.parser import _expand_repeats, _normalize_part_name, parse_musicxml
 from backend.score.model import ScoreModel
 from backend.score.timeline import Timeline
 
@@ -21,6 +21,18 @@ SCORES_DIR = Path(__file__).parent.parent.parent / "musescore"
 FULL_SCORE   = SCORES_DIR / "homeward_bound.mxl"
 PART_I       = SCORES_DIR / "homeward_bound-PARTI.mxl"
 PART_II      = SCORES_DIR / "homeward_bound-PART_II.mxl"
+
+
+class TestPartNameNormalisation:
+
+    def test_inserts_space_for_compact_roman_numerals(self):
+        assert _normalize_part_name("PARTI") == "PART I"
+
+    def test_preserves_existing_whitespace(self):
+        assert _normalize_part_name("PART II") == "PART II"
+
+    def test_leaves_non_part_names_unchanged(self):
+        assert _normalize_part_name("PIANO") == "PIANO"
 
 
 # ---------------------------------------------------------------------------

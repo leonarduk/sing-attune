@@ -13,6 +13,7 @@
 import { ScoreRenderer, type ScoreModel } from '../../score/renderer';
 import { ScoreCursor } from '../../score/cursor';
 import { PlaybackEngine } from '../../playback/engine';
+import './score-loader.css';
 import {
   getAudioContext,
   getSoundfont,
@@ -107,7 +108,7 @@ function mount(slot: HTMLElement): void {
   function resetDropZoneToIdle(): void {
     dropZoneEl.innerHTML = dropZoneIdleMarkup;
     dropZoneEl.classList.remove('hidden', 'drag-over');
-    scoreLoadingEl.textContent = 'Loading score…';
+    scoreLoadingEl.textContent = 'No score loaded.';
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────

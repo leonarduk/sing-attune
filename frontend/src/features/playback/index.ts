@@ -350,7 +350,10 @@ function mount(_slot: HTMLElement): void {
 
   btnPlay.addEventListener('click', async () => {
     const session = getSession();
-    if (!session) return;
+    if (!session) {
+      setAppStatus('Load a score first', 'warning');
+      return;
+    }
     const { engine, cursor } = session;
     if (engine.state === 'playing') return;
     const preflightReady = await ensureAudioPreflightReady();
