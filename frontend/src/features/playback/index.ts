@@ -224,6 +224,23 @@ function hideSessionSummary(): void {
   modal?.classList.add('hidden');
 }
 
+function setPauseButtonState(button: HTMLButtonElement, state: 'idle' | 'playing' | 'paused'): void {
+  if (state === 'playing') {
+    button.disabled = false;
+    button.innerHTML = '&#9646;&#9646; Pause (Space)';
+    return;
+  }
+
+  if (state === 'paused') {
+    button.disabled = false;
+    button.innerHTML = '&#9654; Resume (Space)';
+    return;
+  }
+
+  button.disabled = true;
+  button.innerHTML = '&#9646;&#9646; Pause';
+}
+
 function isSessionSummaryOpen(): boolean {
   const modal = document.getElementById('session-summary-modal') as HTMLDivElement | null;
   return Boolean(modal && !modal.classList.contains('hidden'));
@@ -282,22 +299,10 @@ function mount(_slot: HTMLElement): void {
 
     // Pause/Resume: enabled when playing or paused.
     if (!session) {
-      btnPause.disabled = true;
-      btnPause.innerHTML = '&#9646;&#9646; Pause (Space)';
+      setPauseButtonState(btnPause, 'idle');
       return;
     }
-    if (playbackState === 'playing') {
-      btnPause.disabled = false;
-      btnPause.innerHTML = '&#9646;&#9646; Pause (Space)';
-      return;
-    }
-    if (playbackState === 'paused') {
-      btnPause.disabled = false;
-      btnPause.innerHTML = '&#9654; Resume (Space)';
-      return;
-    }
-    btnPause.disabled = true;
-    btnPause.innerHTML = '&#9646;&#9646; Pause (Space)';
+    setPauseButtonState(btnPause, playbackState);
   }
 
   const unsubscribeLoaded = onScoreLoaded((session) => {
@@ -315,18 +320,15 @@ function mount(_slot: HTMLElement): void {
   function syncPauseButton(): void {
     const session = getSession();
     if (!session || session.engine.state === 'idle') {
-      btnPause.disabled = true;
-      btnPause.innerHTML = '&#9646;&#9646; Pause (Space)';
+      setPauseButtonState(btnPause, 'idle');
       return;
     }
     if (session.engine.state === 'playing') {
-      btnPause.disabled = false;
-      btnPause.innerHTML = '&#9646;&#9646; Pause (Space)';
+      setPauseButtonState(btnPause, 'playing');
       return;
     }
     if (session.engine.state === 'paused') {
-      btnPause.disabled = false;
-      btnPause.innerHTML = '&#9654; Resume (Space)';
+      setPauseButtonState(btnPause, 'paused');
     }
   }
 
