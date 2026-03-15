@@ -10,7 +10,7 @@
  * a direct coupling between the two features.
  */
 import { onScoreLoaded, onScoreCleared, getSession, updateSelectedPart } from '../../services/score-session';
-import { setStatus } from '../../services/backend';
+import { setAppStatus } from '../../services/status';
 import { getVisiblePartOptions } from '../../part-options';
 import { setPlaybackTempo, setPlaybackTranspose } from '../../transport/controls';
 import { type Feature } from '../../feature-types';
@@ -51,7 +51,7 @@ function mount(_slot: HTMLElement): void {
     } catch (err) {
       engine.setTempoMultiplier(previousMultiplier);
       applyTempoUi(Math.round(previousMultiplier * 100));
-      setStatus(`tempo update failed: ${String(err)}`, 'error');
+      setAppStatus(`tempo update failed: ${String(err)}`, 'error');
       console.error('Tempo update failed:', err);
     }
   }
@@ -128,7 +128,7 @@ function mount(_slot: HTMLElement): void {
     try {
       await setPlaybackTranspose(semitones);
     } catch (err) {
-      setStatus(`transpose sync failed: ${String(err)}`, 'error');
+      setAppStatus(`transpose sync failed: ${String(err)}`, 'error');
       console.error('Transpose sync failed:', err);
     }
   });

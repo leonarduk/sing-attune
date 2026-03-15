@@ -57,10 +57,11 @@
       flex-shrink: 0;
     }
     header h1 { font-size: 1.1rem; color: var(--color-accent); }
-    #status { font-size: 0.8rem; color: var(--color-text-muted); margin-left: auto; }
-    #status.ok      { color: #4caf50; }
-    #status.error   { color: var(--color-accent); }
-    #status.loading { color: #ffa726; }
+    #app-status { margin-left: auto; }
+    #app-status-text { font-size: 0.8rem; color: var(--color-text-muted); }
+    #app-status-text[data-tone="success"] { color: #4caf50; }
+    #app-status-text[data-tone="error"] { color: var(--color-accent); }
+    #app-status-text[data-tone="warning"] { color: #ffa726; }
 
     /* ── Error banner ── */
     #error-banner {
@@ -545,7 +546,9 @@
 
   <header>
     <h1>sing-attune</h1>
-    <span id="status">checking backend…</span>
+    <div id="app-status" role="status" aria-live="polite" aria-atomic="true">
+      <span id="app-status-text">checking backend…</span>
+    </div>
   </header>
 
   <div id="error-banner" role="alert"></div>

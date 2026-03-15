@@ -16,7 +16,7 @@
  * importing from this feature.
  */
 import { onPartChanged, onScoreCleared, onScoreLoaded, getSession } from '../../services/score-session';
-import { setStatus } from '../../services/backend';
+import { setAppStatus } from '../../services/status';
 import { recordBeatSample, resetProjection, getCursorX } from '../../services/cursor-projection';
 import { finishPracticeSessionCapture, startPracticeSessionCapture } from '../../services/progress-history';
 import { emitPlaybackSyncEvent } from '../../services/playback-sync';
@@ -48,7 +48,7 @@ async function restartLoopPlayback(): Promise<void> {
       syncOffsetMs: null,
     });
   } catch (err) {
-    setStatus(`loop seek failed: ${String(err)}`, 'error');
+    setAppStatus(`loop seek failed: ${String(err)}`, 'error');
     console.error('Loop seek failed:', err);
     return;
   }
@@ -93,7 +93,7 @@ async function seekToBeat(targetBeat: number): Promise<void> {
       syncOffsetMs: null,
     });
   } catch (err) {
-    setStatus(`seek failed: ${String(err)}`, 'error');
+    setAppStatus(`seek failed: ${String(err)}`, 'error');
     console.error('Seek failed:', err);
     return;
   }
@@ -177,7 +177,7 @@ async function adjustTempoByStep(stepPercent: number): Promise<void> {
     const previousPercent = Math.round(previousMultiplier * 100);
     tempoSliderEl.value = String(previousPercent);
     tempoLabelEl.textContent = `${previousPercent}%`;
-    setStatus(`tempo update failed: ${String(err)}`, 'error');
+    setAppStatus(`tempo update failed: ${String(err)}`, 'error');
     console.error('Tempo update failed:', err);
   }
 }
@@ -344,7 +344,7 @@ function mount(_slot: HTMLElement): void {
     if (engine.state === 'playing') return;
     const preflightReady = await ensureAudioPreflightReady();
     if (!preflightReady) {
-      setStatus('Audio setup is required before starting playback.', 'error');
+      setAppStatus('Audio setup is required before starting playback.', 'error');
       return;
     }
     headphoneWarning.classList.remove('hidden');
@@ -379,7 +379,7 @@ function mount(_slot: HTMLElement): void {
       startCursorRaf();
       syncTransportButtons();
     } catch (err) {
-      setStatus(`playback start failed: ${String(err)}`, 'error');
+      setAppStatus(`playback start failed: ${String(err)}`, 'error');
       console.error('Play failed:', err);
     }
   });
@@ -416,7 +416,7 @@ function mount(_slot: HTMLElement): void {
       }
       syncTransportButtons();
     } catch (err) {
-      setStatus(`pause failed: ${String(err)}`, 'error');
+      setAppStatus(`pause failed: ${String(err)}`, 'error');
       console.error('Pause failed:', err);
     }
   });
@@ -444,7 +444,7 @@ function mount(_slot: HTMLElement): void {
       syncPauseButton();
       syncTransportButtons();
     } catch (err) {
-      setStatus(`stop failed: ${String(err)}`, 'error');
+      setAppStatus(`stop failed: ${String(err)}`, 'error');
       console.error('Stop failed:', err);
     }
   });
@@ -462,7 +462,7 @@ function mount(_slot: HTMLElement): void {
         syncOffsetMs: null,
       });
     } catch (err) {
-      setStatus(`rewind failed: ${String(err)}`, 'error');
+      setAppStatus(`rewind failed: ${String(err)}`, 'error');
       console.error('Rewind failed:', err);
     }
     session.engine.stop();
