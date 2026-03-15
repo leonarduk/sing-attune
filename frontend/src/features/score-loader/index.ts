@@ -194,7 +194,7 @@ function mount(slot: HTMLElement): void {
 
     // Kick off soundfont loading early (idempotent) so it overlaps with parse.
     ensureSoundfontLoaded((err) => {
-      showErrorBanner('Soundfont failed to load; using synth fallback audio.');
+      showErrorBanner('Soundfont failed to load; using synth fallback audio.', { dismissible: true });
       setAppStatus('soundfont unavailable — using synthesised tones', 'error');
       showToast('Soundfont unavailable — using synthesised tones', {
         variant: 'warning',
