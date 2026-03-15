@@ -213,17 +213,31 @@ class _FakeMicCapture:
     """No-op replacement for MicCapture — accepts the same constructor args."""
     def __init__(self, device_id=None, on_window=None):
         self.device_id = device_id
-    def start(self): pass
-    def stop(self): pass
+        self.started = False
+        self.stopped = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stopped = True
 
 
 class _FakePitchPipeline:
     """No-op replacement for PitchPipeline — accepts the same constructor args."""
     def __init__(self, engine=None, on_frame=None):
         self.engine = engine
-    def start(self): pass
-    def stop(self): pass
-    def push(self, _): pass
+        self.started = False
+        self.stopped = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stopped = True
+
+    def push(self, _):
+        pass
 
 
 class TestSetForceCpu:
@@ -271,8 +285,12 @@ class TestSetForceCpu:
 
         assert p.state == PlaybackState.PLAYING
         assert p.force_cpu is True
+        assert original_capture.stopped is True
+        assert original_pitch.stopped is True
         assert p._capture is not original_capture
         assert p._pitch is not original_pitch
+        assert p._capture.started is True
+        assert p._pitch.started is True
 
     def test_set_force_cpu_when_paused_rebuilds_and_restores_paused(self, monkeypatch):
         """PAUSED: teardown + rebuild, state restored to PAUSED, capture NOT started."""
@@ -292,8 +310,12 @@ class TestSetForceCpu:
 
         assert p.state == PlaybackState.PAUSED
         assert p.force_cpu is True
+        assert original_capture.stopped is True
+        assert original_pitch.stopped is True
         assert p._capture is not original_capture
         assert p._pitch is not original_pitch
+        assert p._capture.started is False
+        assert p._pitch.started is True
 
     def test_set_force_cpu_preserves_device_id(self, monkeypatch):
         """device_id from the old capture must be forwarded to the new MicCapture."""
@@ -575,20 +597,42 @@ class TestWebSocketEndpoint:
 class _MockCapture:
     """Minimal stand-in for MicCapture used where no construction args are needed."""
     device_id = None
-    def start(self): pass
-    def stop(self): pass
+    def __init__(self):
+        self.started = False
+        self.stopped = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stopped = True
 
 
 class _MockCaptureWithDeviceId:
     """Stand-in for MicCapture when the device_id value needs to be inspected."""
     def __init__(self, device_id):
         self.device_id = device_id
-    def start(self): pass
-    def stop(self): pass
+        self.started = False
+        self.stopped = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stopped = True
 
 
 class _MockPitch:
     """Stands in for PitchPipeline — no inference."""
-    def start(self): pass
-    def stop(self): pass
-    def push(self, _): pass
+    def __init__(self):
+        self.started = False
+        self.stopped = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stopped = True
+
+    def push(self, _):
+        pass
