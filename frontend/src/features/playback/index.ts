@@ -28,6 +28,7 @@ import { ensureAudioPreflightReady } from '../../services/audio-preflight';
 // ── Cursor RAF ──────────────────────────────────────────────────────────────────
 
 let cursorRafId: number | null = null;
+let removeKeydownListener: (() => void) | null = null;
 
 function startCursorRaf(): void {
   stopCursorRaf();
@@ -134,10 +135,6 @@ function mount(_slot: HTMLElement): void {
   const summaryRetry     = document.getElementById('btn-summary-retry')  as HTMLButtonElement;
   const summaryReplay    = document.getElementById('btn-summary-replay') as HTMLButtonElement;
 
-  // Merge into a single onScoreCleared callback so both always fire together,
-  // regardless of whether the implementation replaces or appends listeners.
-  onScoreCleared(() => { stopCursorRaf(); finishPracticeSessionCapture(); });
-
   function syncTransportButtons(): void {
     const session = getSession();
 
@@ -168,6 +165,13 @@ function mount(_slot: HTMLElement): void {
     btnPause.innerHTML = '&#9646;&#9646; Pause';
   }
 
+  const unsubscribeLoaded = onScoreLoaded(() => { syncTransportButtons(); });
+  const unsubscribeCleared = onScoreCleared(() => {
+    stopCursorRaf();
+    finishPracticeSessionCapture();
+    syncTransportButtons();
+  });
+
   function syncPauseButton(): void {
     const session = getSession();
     if (!session || session.engine.state === 'stopped') {
@@ -185,9 +189,6 @@ function mount(_slot: HTMLElement): void {
       btnPause.innerHTML = '&#9654; Resume';
     }
   }
-
-  onScoreLoaded(() => { syncTransportButtons(); });
-  onScoreCleared(() => { stopCursorRaf(); syncTransportButtons(); });
 
   btnPlay.addEventListener('click', async () => {
     const session = getSession();
@@ -346,25 +347,37 @@ function mount(_slot: HTMLElement): void {
   syncPauseButton();
   syncTransportButtons();
 
-  window.addEventListener('keydown', (e) => {
+  const onKeydown = (e: KeyboardEvent): void => {
     if (e.repeat) return;
-    const tag = (e.target as HTMLElement | null)?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    const target = e.target as HTMLElement | null;
+    const tag = target?.tagName;
+    if (target?.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+    const session = getSession();
+    if (!session) return;
+
     if (e.code === 'Space') {
       e.preventDefault();
-      const session = getSession();
-      if (!session) return;
       if (session.engine.state === 'playing') { btnPause.click(); } else { btnPlay.click(); }
       return;
     }
-    if (e.key.toLowerCase() === 'r') { e.preventDefault(); if (!btnRewind.disabled) btnRewind.click(); return; }
-    if (e.key === 'ArrowLeft')  { e.preventDefault(); void seekByBeats(-1); return; }
-    if (e.key === 'ArrowRight') { e.preventDefault(); void seekByBeats(1); }
-  });
+    if (e.code === 'KeyR') { e.preventDefault(); if (!btnRewind.disabled) btnRewind.click(); return; }
+    if (e.code === 'ArrowLeft')  { e.preventDefault(); if (session.engine.state !== 'playing') void seekByBeats(-1); return; }
+    if (e.code === 'ArrowRight') { e.preventDefault(); if (session.engine.state !== 'playing') void seekByBeats(1); }
+  };
+  window.addEventListener('keydown', onKeydown);
+
+  removeKeydownListener = () => {
+    window.removeEventListener('keydown', onKeydown);
+    unsubscribeLoaded();
+    unsubscribeCleared();
+  };
 }
 
 function unmount(): void {
   stopCursorRaf();
+  removeKeydownListener?.();
+  removeKeydownListener = null;
 }
 
 export const playbackFeature: Feature = {
