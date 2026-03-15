@@ -57,7 +57,8 @@ test('load -> play -> pause with mocked backend and no console errors', async ({
 
   await page.goto('/');
 
-  await expect(page.locator('#btn-play')).toBeDisabled();
+  // Before file upload: score-info should be empty and score not yet loaded.
+  await expect(page.locator('#score-info')).toHaveText('');
 
   // Use a committed minimal MXL fixture - path is relative to this spec file.
   const fixturePath = path.resolve(__dirname, 'fixtures', 'minimal.mxl');
