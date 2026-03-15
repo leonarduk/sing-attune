@@ -7,7 +7,7 @@ files:
   - dist/**/*
   - electron/**/*
 extraResources:
-  - from: ../dist/backend
+  - from: ../dist/sing-attune-backend
     to: backend
     filter:
       - '**/*'

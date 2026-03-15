@@ -12,13 +12,14 @@ let backendProcess = null;
  * Spawn the PyInstaller backend binary bundled in extraResources.
  * process.resourcesPath resolves to the app's resources directory both
  * in development (node_modules/.../resources) and in the packaged installer.
+ * The PyInstaller COLLECT block uses name="sing-attune-backend", so the
+ * executable is sing-attune-backend.exe (Windows) / sing-attune-backend (other).
  */
 function startBackend() {
   const backendDir = path.join(process.resourcesPath, 'backend');
-  // The PyInstaller one-folder bundle produces sing_attune.exe on Windows
   const backendExe = process.platform === 'win32'
-    ? path.join(backendDir, 'sing_attune.exe')
-    : path.join(backendDir, 'sing_attune');
+    ? path.join(backendDir, 'sing-attune-backend.exe')
+    : path.join(backendDir, 'sing-attune-backend');
 
   backendProcess = spawn(backendExe, [], {
     cwd: backendDir,
