@@ -135,10 +135,6 @@ function mount(_slot: HTMLElement): void {
   const summaryRetry     = document.getElementById('btn-summary-retry')  as HTMLButtonElement;
   const summaryReplay    = document.getElementById('btn-summary-replay') as HTMLButtonElement;
 
-  // Merge into a single onScoreCleared callback so both always fire together,
-  // regardless of whether the implementation replaces or appends listeners.
-  onScoreCleared(() => { stopCursorRaf(); finishPracticeSessionCapture(); });
-
   function syncTransportButtons(): void {
     const session = getSession();
 
@@ -170,7 +166,11 @@ function mount(_slot: HTMLElement): void {
   }
 
   const unsubscribeLoaded = onScoreLoaded(() => { syncTransportButtons(); });
-  const unsubscribeCleared = onScoreCleared(() => { stopCursorRaf(); syncTransportButtons(); });
+  const unsubscribeCleared = onScoreCleared(() => {
+    stopCursorRaf();
+    finishPracticeSessionCapture();
+    syncTransportButtons();
+  });
 
   function syncPauseButton(): void {
     const session = getSession();
