@@ -15,10 +15,8 @@
  * services/cursor-projection.ts so pitch-overlay can read it without
  * importing from this feature.
  */
-import { onScoreCleared, onScoreLoaded, getSession } from '../../services/score-session';
-import { setAppStatus } from '../../services/status';
 import { onPartChanged, onScoreCleared, onScoreLoaded, getSession } from '../../services/score-session';
-import { setStatus } from '../../services/backend';
+import { setAppStatus } from '../../services/status';
 import { recordBeatSample, resetProjection, getCursorX } from '../../services/cursor-projection';
 import { finishPracticeSessionCapture, startPracticeSessionCapture } from '../../services/progress-history';
 import { emitPlaybackSyncEvent } from '../../services/playback-sync';
@@ -95,7 +93,7 @@ async function seekToBeat(targetBeat: number): Promise<void> {
       syncOffsetMs: null,
     });
   } catch (err) {
-    setStatus(`seek failed: ${String(err)}`, 'error');
+    setAppStatus(`seek failed: ${String(err)}`, 'error');
     console.error('Seek failed:', err);
     return;
   }
@@ -146,23 +144,6 @@ async function seekByBeats(delta: number): Promise<void> {
   const stepBeats = model.time_signatures[0]?.numerator ?? 4;
   const targetBeat = Math.max(0,
     Math.min(model.total_beats, engine.currentBeat + delta * stepBeats));
-  try {
-    const audioTimeSec = engine.ctx.currentTime;
-    const response = await seekPlayback(beatToMs(targetBeat, model, engine.tempoMultiplier));
-    emitPlaybackSyncEvent({
-      type: 'seek',
-      tMs: response.t_ms,
-      audioTimeSec,
-      syncOffsetMs: null,
-    });
-  } catch (err) {
-    setAppStatus(`seek failed: ${String(err)}`, 'error');
-    console.error('Seek failed:', err);
-    return;
-  }
-  engine.seekToBeat(targetBeat);
-  cursor.seekToBeat(targetBeat);
-  if (engine.state !== 'playing') stopCursorRaf();
   await seekToBeat(targetBeat);
 }
 
