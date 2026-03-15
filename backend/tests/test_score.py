@@ -11,7 +11,7 @@ Test scores (in musescore/):
 from pathlib import Path
 
 import pytest
-from music21 import bar, meter, note, stream
+from music21 import bar, converter, meter, note, repeat, stream
 
 from backend.score.parser import _expand_repeats, _normalize_part_name, parse_musicxml
 from backend.score.model import ScoreModel
@@ -245,6 +245,81 @@ class TestRepeatExpansion:
 
         wrapper = WrongTypeScore(score)
         assert _expand_repeats(wrapper) is wrapper
+
+    @pytest.mark.parametrize(
+        ("directive", "expected_pitch_names"),
+        [
+            (
+                "dc_al_fine",
+                ["C4", "D4", "E4", "F4", "C4", "D4", "E4"],
+            ),
+            (
+                "ds_al_fine",
+                ["C4", "D4", "E4", "F4", "C4", "D4", "E4"],
+            ),
+            (
+                "ds_al_coda",
+                ["C4", "D4", "E4", "F4", "G4", "A4"],
+            ),
+        ],
+    )
+    def test_navigation_marks_are_expanded(self, tmp_path, directive, expected_pitch_names):
+        score = stream.Score()
+        part = stream.Part()
+        part.partName = "Test Part"
+        part.append(meter.TimeSignature("4/4"))
+
+        for idx, pitch_name in enumerate(["C4", "D4", "E4", "F4", "G4", "A4"], start=1):
+            measure = stream.Measure(number=idx)
+            measure.append(note.Note(pitch_name, quarterLength=4))
+            part.append(measure)
+
+        part.measure(1).insert(0, repeat.Segno())
+        part.measure(3).insert(0, repeat.Fine())
+
+        if directive == "dc_al_fine":
+            part.measure(4).insert(0, repeat.DaCapoAlFine())
+        elif directive == "ds_al_fine":
+            part.measure(4).insert(0, repeat.DalSegnoAlFine())
+        else:
+            part.measure(3).insert(0, repeat.Coda())
+            part.measure(5).insert(0, repeat.Coda())
+            part.measure(4).insert(0, repeat.DalSegnoAlCoda())
+
+        score.append(part)
+        path = tmp_path / f"{directive}.musicxml"
+        score.write("musicxml", fp=path)
+
+        parsed = parse_musicxml(path)
+        raw_score = converter.parse(str(path))
+
+        if directive != "ds_al_coda":
+            assert len(parsed.notes) > len(raw_score.parts[0].flatten().notes)
+        assert [n.midi for n in parsed.notes] == [note.Note(p).pitch.midi for p in expected_pitch_names]
+        assert parsed.total_beats == pytest.approx(len(expected_pitch_names) * 4.0)
+
+    def test_ds_al_coda_expands_when_navigation_marks_are_present(self):
+        score = stream.Score()
+        part = stream.Part()
+        part.partName = "Test Part"
+        part.append(meter.TimeSignature("4/4"))
+
+        for idx, pitch_name in enumerate(["C4", "D4", "E4", "F4", "G4", "A4"], start=1):
+            measure = stream.Measure(number=idx)
+            measure.append(note.Note(pitch_name, quarterLength=4))
+            part.append(measure)
+
+        part.measure(1).insert(0, repeat.Segno())
+        part.measure(3).insert(0, repeat.Coda())
+        part.measure(5).insert(0, repeat.Coda())
+        part.measure(4).insert(0, repeat.DalSegnoAlCoda())
+
+        score.append(part)
+        expanded = _expand_repeats(score)
+
+        expanded_pitches = [n.pitch.nameWithOctave for n in expanded.parts[0].flatten().notes]
+        assert expanded_pitches == ["C4", "D4", "E4", "F4", "C4", "D4", "E4", "G4", "A4"]
+        assert expanded.duration.quarterLength == pytest.approx(36.0)
 
 
 # ---------------------------------------------------------------------------

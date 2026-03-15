@@ -72,7 +72,7 @@ This keeps the backend real-time pipeline simple while score-aware interpretatio
 
 ## Status
 
-🚧 **Early development** — backend complete through Day 7, frontend score rendering (Day 8a) now working.
+🚧 **Early development** — backend complete through Day 7, frontend score rendering (Day 8a) now working, Electron bootstrap in progress (Day 16a).
 
 | Component | Status |
 |-----------|--------|
@@ -237,6 +237,9 @@ backend/
   main.py         FastAPI app, REST endpoints, WebSocket pitch stream
 frontend/
   src/            Vite + TypeScript — score renderer, pitch canvas, playback, controls
+electron/
+  main.js         Electron shell: backend process lifecycle + dynamic port + splash
+  preload.js      Secure IPC bridge for backend runtime config
 .github/
   workflows/      PR review: ruff + pytest + frontend-test + e2e + Codecov + Claude AI review
   scripts/        claude_review.py — AI review script

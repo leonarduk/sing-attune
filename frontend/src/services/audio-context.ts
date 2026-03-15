@@ -73,6 +73,15 @@ export function ensureSoundfontLoaded(
   return loadPromise;
 }
 
+/**
+ * Force a new soundfont fetch cycle after a previous failure.
+ */
+export function retrySoundfontLoad(onError?: (err: unknown) => void): Promise<void> {
+  soundfont = new SoundfontLoader();
+  loadPromise = null;
+  return ensureSoundfontLoaded(onError);
+}
+
 /** Expose the raw load promise for features that need to await it. */
 export function getSoundfontLoadPromise(): Promise<void> | null {
   return loadPromise;

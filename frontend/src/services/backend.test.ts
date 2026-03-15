@@ -6,6 +6,7 @@ describe('backend error banner', () => {
     document.body.innerHTML = [
       '<div id="error-banner" role="alert">',
       '  <span id="error-banner-message"></span>',
+      '  <button id="error-banner-action" class="hidden">Retry</button>',
       '  <button id="error-banner-dismiss" class="hidden">Dismiss</button>',
       '</div>',
     ].join('');
@@ -36,5 +37,23 @@ describe('backend error banner', () => {
 
     const dismiss = document.getElementById('error-banner-dismiss') as HTMLButtonElement;
     expect(dismiss.classList.contains('hidden')).toBe(true);
+  });
+
+  it('shows an action button and calls the action handler when clicked', async () => {
+    const backend = await import('./backend');
+    const onRetry = vi.fn();
+
+    backend.showErrorBanner('Soundfont failed to load', {
+      dismissible: true,
+      actionLabel: 'Retry',
+      onAction: onRetry,
+    });
+
+    const action = document.getElementById('error-banner-action') as HTMLButtonElement;
+    expect(action.classList.contains('hidden')).toBe(false);
+    expect(action.textContent).toBe('Retry');
+
+    action.click();
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });
