@@ -40,3 +40,7 @@ Thumbs.db
 # Secrets
 .env
 .env.*
+
+# Playwright
+frontend/playwright-report/
+frontend/test-results/
