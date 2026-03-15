@@ -82,10 +82,25 @@ async def list_audio_devices() -> JSONResponse:
 
 
 @app.get("/audio/engine")
-async def audio_engine(force_cpu: bool | None = None) -> JSONResponse:
-    if force_cpu is not None:
-        _pipeline.set_force_cpu(force_cpu)
+async def audio_engine() -> JSONResponse:
+    """Read-only: return current engine state."""
+    runtime = _pipeline.runtime_info
+    return JSONResponse(
+        {
+            "active_engine": runtime.engine.name.lower(),
+            "mode": runtime.mode,
+            "switchable": True,
+            "cuda": runtime.cuda,
+            "device": runtime.device,
+            "force_cpu": _pipeline.force_cpu,
+        }
+    )
 
+
+@app.post("/audio/engine/force-cpu")
+async def set_engine_force_cpu(force_cpu: bool) -> JSONResponse:
+    """Mutate engine mode: enable or disable forced-CPU override."""
+    _pipeline.set_force_cpu(force_cpu)
     runtime = _pipeline.runtime_info
     return JSONResponse(
         {

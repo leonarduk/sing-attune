@@ -334,11 +334,11 @@ class TestAudioEngineEndpoint:
         assert "force_cpu" in data
 
     def test_force_cpu_toggle(self, client):
-        enabled = client.get("/audio/engine", params={"force_cpu": True}).json()
+        enabled = client.post("/audio/engine/force-cpu", params={"force_cpu": True}).json()
         assert enabled["active_engine"] == "pyin"
         assert enabled["force_cpu"] is True
 
-        disabled = client.get("/audio/engine", params={"force_cpu": False}).json()
+        disabled = client.post("/audio/engine/force-cpu", params={"force_cpu": False}).json()
         assert disabled["force_cpu"] is False
 
 
