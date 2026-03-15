@@ -35,6 +35,7 @@
   Closes #8
   ```
 - `Closes #N` goes in the **body**, not the subject line
+- PR descriptions must also include `Closes #N` for the linked issue (e.g. `Closes #179`) so merge auto-closes it
 - Do not leave any commit without an issue reference — it makes history untraceable
 - Types: `feat`, `fix`, `test`, `chore`, `refactor`, `docs`
 
