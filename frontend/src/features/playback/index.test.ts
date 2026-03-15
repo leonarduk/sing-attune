@@ -116,4 +116,36 @@ describe('playbackFeature', () => {
 
     playbackFeature.unmount!();
   });
+
+  it('closes the practice summary modal when Escape is pressed while open', () => {
+    const slot = document.getElementById('slot-playback') as HTMLDivElement;
+    playbackFeature.mount(slot);
+
+    const modal = document.getElementById('session-summary-modal') as HTMLDivElement;
+    modal.classList.remove('hidden');
+
+    const event = new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', cancelable: true });
+    window.dispatchEvent(event);
+
+    expect(modal.classList.contains('hidden')).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+
+    playbackFeature.unmount!();
+  });
+
+  it('does nothing on Escape when the practice summary modal is already hidden', () => {
+    const slot = document.getElementById('slot-playback') as HTMLDivElement;
+    playbackFeature.mount(slot);
+
+    const modal = document.getElementById('session-summary-modal') as HTMLDivElement;
+    modal.classList.add('hidden');
+
+    const event = new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', cancelable: true });
+    window.dispatchEvent(event);
+
+    expect(modal.classList.contains('hidden')).toBe(true);
+    expect(event.defaultPrevented).toBe(false);
+
+    playbackFeature.unmount!();
+  });
 });

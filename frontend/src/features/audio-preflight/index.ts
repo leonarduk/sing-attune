@@ -316,6 +316,10 @@ function ensureStyles(): void {
 
 async function openModal(): Promise<boolean> {
   if (!modalEl) return false;
+  if (resolver) {
+    resolver(false);
+    resolver = null;
+  }
   modalEl.classList.remove('hidden');
   removeEscapeListener?.();
   const onEscape = (event: KeyboardEvent): void => {
@@ -328,7 +332,7 @@ async function openModal(): Promise<boolean> {
     window.removeEventListener('keydown', onEscape);
     removeEscapeListener = null;
   };
-  await requestPermissionAndDevices();
+  void requestPermissionAndDevices();
   return new Promise<boolean>((resolve) => {
     resolver = resolve;
   });
@@ -417,6 +421,10 @@ function mount(_slot: HTMLElement): void {
 function unmount(): void {
   cleanupMonitor();
   removeEscapeListener?.();
+  if (resolver) {
+    resolver(false);
+    resolver = null;
+  }
   // monitorCtx is already closed and nulled by cleanupMonitor()
   modalEl?.remove();
   modalEl = null;
@@ -426,6 +434,8 @@ function unmount(): void {
 export const __audioPreflightInternals = {
   resolveSelectedDeviceId,
   isPreflightModalHidden,
+  openModal,
+  closeModal,
 };
 
 function isPreflightModalHidden(): boolean {
