@@ -6,7 +6,7 @@
  * tempo-multiplier cases without requiring an AudioContext mock.
  */
 import { describe, it, expect } from 'vitest';
-import { beatToSeconds, PlaybackEngine } from './engine';
+import { beatToSeconds, PlaybackEngine, scheduleNotes } from './engine';
 import { elapsedToBeat } from '../score/timing';
 
 const BPM120: import('../score/renderer').TempoMark[] = [{ beat: 0, bpm: 120 }];
@@ -78,8 +78,31 @@ describe('beatToSeconds / elapsedToBeat round-trip', () => {
   }
 });
 
+
+
+describe('scheduleNotes', () => {
+  const notes: import('../score/renderer').NoteModel[] = [
+    { midi: 60, beat_start: 0, duration: 1, measure: 1, part: 'PART I', lyric: null },
+    { midi: 62, beat_start: 2, duration: 2, measure: 1, part: 'PART I', lyric: null },
+  ];
+
+  it('scales event start times at 75% tempo', () => {
+    const events = scheduleNotes(notes, BPM120, 0, 10, 0.75);
+    expect(events).toHaveLength(2);
+    expect(events[0].startAt).toBeCloseTo(10, 6);
+    expect(events[1].startAt).toBeCloseTo(11.333333, 5);
+  });
+
+  it('scales event start times at 50% tempo', () => {
+    const events = scheduleNotes(notes, BPM120, 0, 10, 0.5);
+    expect(events).toHaveLength(2);
+    expect(events[0].startAt).toBeCloseTo(10, 6);
+    expect(events[1].startAt).toBeCloseTo(12, 6);
+  });
+});
+
 describe('PlaybackEngine part selection', () => {
-  it('selectPart filters notes used by the scheduler', () => {
+  it('schedules all notes regardless of selected part', () => {
     const starts: number[] = [];
 
     class FakeBufferSource {
@@ -96,6 +119,9 @@ describe('PlaybackEngine part selection', () => {
       destination = {} as AudioDestinationNode;
       createBufferSource(): AudioBufferSourceNode {
         return new FakeBufferSource() as unknown as AudioBufferSourceNode;
+      }
+      createGain(): GainNode {
+        return { gain: { value: 1 }, connect(): void {} } as unknown as GainNode;
       }
       resume(): Promise<void> {
         return Promise.resolve();
@@ -124,13 +150,13 @@ describe('PlaybackEngine part selection', () => {
 
     engine.schedule(notes, BPM120, 'PART I', 1);
     engine.play(0);
-    expect(starts).toHaveLength(2);
+    expect(starts).toHaveLength(3);
 
     starts.length = 0;
     engine.stop();
     engine.selectPart('Piano');
     engine.play(0);
-    expect(starts).toHaveLength(1);
+    expect(starts).toHaveLength(3);
   });
 
 
@@ -151,6 +177,9 @@ describe('PlaybackEngine part selection', () => {
       destination = {} as AudioDestinationNode;
       createBufferSource(): AudioBufferSourceNode {
         return new FakeBufferSource() as unknown as AudioBufferSourceNode;
+      }
+      createGain(): GainNode {
+        return { gain: { value: 1 }, connect(): void {} } as unknown as GainNode;
       }
       resume(): Promise<void> {
         return Promise.resolve();
@@ -180,7 +209,7 @@ describe('PlaybackEngine part selection', () => {
     engine.selectPart('DOES NOT EXIST');
     engine.play(0);
 
-    expect(starts).toHaveLength(1);
+    expect(starts).toHaveLength(2);
   });
 
   it('maintains beat continuity across mid-session part switch offset', () => {
@@ -198,6 +227,9 @@ describe('PlaybackEngine part selection', () => {
       destination = {} as AudioDestinationNode;
       createBufferSource(): AudioBufferSourceNode {
         return new FakeBufferSource() as unknown as AudioBufferSourceNode;
+      }
+      createGain(): GainNode {
+        return { gain: { value: 1 }, connect(): void {} } as unknown as GainNode;
       }
       resume(): Promise<void> {
         return Promise.resolve();

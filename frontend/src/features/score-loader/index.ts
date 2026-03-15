@@ -25,8 +25,13 @@ import { setStatus, showErrorBanner, clearErrorBanner } from '../../services/bac
 import { showToast } from '../../services/toast';
 import { getVisiblePartOptions } from '../../part-options';
 import { beatToMs, seekPlayback } from '../../transport/controls';
+import { beatFromClick, extractMeasureHitZones, measureBoundaryFromPoint } from '../../score/click-seek';
+import { clearLoopRegion, getLoopRegion, onLoopRegionChanged, setLoopEnd, setLoopStart } from '../../services/loop-region';
+import { beatToMs, seekPlayback, postPlayback } from '../../transport/controls';
 import { beatFromClick, extractMeasureHitZones } from '../../score/click-seek';
 import { type Feature } from '../../feature-types';
+
+let removeLoopRegionListener: (() => void) | null = null;
 
 function mount(slot: HTMLElement): void {
   // DOM refs — resolved from document because most elements live in the
@@ -42,6 +47,52 @@ function mount(slot: HTMLElement): void {
   const transposeSelectEl = document.getElementById('transpose-select')   as HTMLSelectElement;
   const headphoneWarning  = document.getElementById('headphone-warning')  as HTMLDivElement;
   const btnLoadTestScore  = document.getElementById('btn-load-test-score') as HTMLButtonElement | null;
+
+  function renderLoopOverlay(): void {
+    const session = getSession();
+    if (!session) return;
+    const svg = scoreContainerEl.querySelector('svg');
+    if (!(svg instanceof SVGSVGElement)) return;
+
+    svg.querySelectorAll('g[data-loop-overlay="true"]').forEach((node) => node.remove());
+
+    const region = getLoopRegion();
+    if (!region.active) return;
+
+    const zones = extractMeasureHitZones(session.renderer.osmd);
+    if (zones.length === 0) return;
+
+    const layer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    layer.setAttribute('data-loop-overlay', 'true');
+
+    for (const zone of zones) {
+      const zoneStart = zone.beatStart;
+      const zoneEnd = zone.beatStart + zone.beatDuration;
+      const startBeat = Math.max(zoneStart, region.startBeat);
+      const endBeat = Math.min(zoneEnd, region.endBeat);
+      if (endBeat <= startBeat) continue;
+
+      const startRatio = (startBeat - zoneStart) / zone.beatDuration;
+      const endRatio = (endBeat - zoneStart) / zone.beatDuration;
+      const x = zone.x + (zone.width * startRatio);
+      const width = Math.max(1, zone.width * (endRatio - startRatio));
+
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', x.toFixed(3));
+      rect.setAttribute('y', zone.y.toFixed(3));
+      rect.setAttribute('width', width.toFixed(3));
+      rect.setAttribute('height', zone.height.toFixed(3));
+      rect.setAttribute('fill', 'rgba(233, 69, 96, 0.22)');
+      rect.setAttribute('stroke', '#e94560');
+      rect.setAttribute('stroke-width', '1');
+      rect.setAttribute('pointer-events', 'none');
+      layer.appendChild(rect);
+    }
+
+    if (layer.childNodes.length > 0) {
+      svg.appendChild(layer);
+    }
+  }
 
   // ── Loading overlay ─────────────────────────────────────────────────────────
   const dropZoneIdleMarkup = dropZoneEl.innerHTML;
@@ -84,6 +135,31 @@ function mount(slot: HTMLElement): void {
 
   // ── Score loading ─────────────────────────────────────────────────────────
 
+  async function teardownPreviousSession(): Promise<void> {
+    const previousSession = getSession();
+    if (!previousSession) return;
+
+    // Capture state before stopping — engine.stop() transitions to 'idle'.
+    const wasActive = previousSession.engine.state !== 'idle';
+
+    // Stop frontend audio unconditionally — this is the critical operation.
+    // engine.stop() calls _stopSources() which wraps each src.stop() in
+    // try/catch, so it cannot throw.
+    previousSession.engine.stop();
+    previousSession.cursor.stop();
+    previousSession.cursor.osmd.cursor.show();
+
+    // Best-effort backend notification so the pipeline resets its state.
+    // Failure is non-fatal — audio is already silent.
+    if (wasActive) {
+      try {
+        await postPlayback('/playback/stop');
+      } catch (err) {
+        console.warn('Score swap: backend stop notification failed (non-fatal):', err);
+      }
+    }
+  }
+
   async function loadDevTestScore(filename: string): Promise<void> {
     try {
       setStatus(`Loading test score ${filename}…`, 'loading');
@@ -107,9 +183,13 @@ function mount(slot: HTMLElement): void {
     dropZoneEl.classList.add('hidden');
     scoreInfoEl.textContent = '';
     headphoneWarning.classList.add('hidden');
+    setTransportEnabled(false);
+
+    await teardownPreviousSession();
 
     // Let other features tear down state from the previous session.
     clearSession();
+    clearLoopRegion();
     scoreContainerEl.innerHTML = '';
 
     // Kick off soundfont loading early (idempotent) so it overlaps with parse.
@@ -172,6 +252,7 @@ function mount(slot: HTMLElement): void {
       renderer.setHighlightedPart(selectedPart);
 
       setSession({ model, renderer, cursor, engine, selectedPart });
+      renderLoopOverlay();
       setTransportEnabled(true);
       if (getPlaybackTimbreMode() === 'synth-fallback') {
         setStatus('score loaded — synth fallback active', 'error');
@@ -188,7 +269,7 @@ function mount(slot: HTMLElement): void {
     }
   }
 
-  // ── Click-to-seek on the score canvas ──────────────────────────────────────
+  // ── Click-to-seek and loop selection on score canvas ──────────────────────
   async function seekToClickedPosition(event: MouseEvent): Promise<void> {
     const session = getSession();
     if (!session) return;
@@ -205,6 +286,22 @@ function mount(slot: HTMLElement): void {
     const local = svgPoint.matrixTransform(ctm.inverse());
 
     const zones = extractMeasureHitZones(r.osmd);
+    if (event.shiftKey) {
+      const boundary = measureBoundaryFromPoint(zones, local.x, local.y);
+      if (!boundary) return;
+      setLoopEnd(boundary.endBeat);
+      renderLoopOverlay();
+      setStatus(`Loop end set to beat ${boundary.endBeat.toFixed(2)}`, 'ok');
+      return;
+    }
+
+    const boundary = measureBoundaryFromPoint(zones, local.x, local.y);
+    if (boundary) {
+      setLoopStart(boundary.startBeat);
+      renderLoopOverlay();
+      setStatus(`Loop start set to beat ${boundary.startBeat.toFixed(2)}`, 'ok');
+    }
+
     const targetBeat = beatFromClick(zones, local.x, local.y);
     if (targetBeat === null) return;
 
@@ -222,6 +319,10 @@ function mount(slot: HTMLElement): void {
   // ── Event wiring ──────────────────────────────────────────────────────────
 
   setTransportEnabled(false);
+  removeLoopRegionListener?.();
+  removeLoopRegionListener = onLoopRegionChanged(() => {
+    renderLoopOverlay();
+  });
 
   dropZoneEl.addEventListener('dragover', (e) => {
     e.preventDefault();
@@ -270,6 +371,8 @@ function mount(slot: HTMLElement): void {
 
 function unmount(): void {
   clearSession();
+  removeLoopRegionListener?.();
+  removeLoopRegionListener = null;
 }
 
 export const scoreLoaderFeature: Feature = {

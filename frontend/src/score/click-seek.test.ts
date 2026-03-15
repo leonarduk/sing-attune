@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { beatFromClick, extractMeasureHitZones, type MeasureHitZone } from './click-seek';
+import {
+  beatFromClick,
+  extractMeasureHitZones,
+  measureBoundaryFromPoint,
+  type MeasureHitZone,
+} from './click-seek';
 
 describe('beatFromClick', () => {
   const zones: MeasureHitZone[] = [
@@ -20,6 +25,23 @@ describe('beatFromClick', () => {
 
   it('returns null for empty zone list', () => {
     expect(beatFromClick([], 10, 10)).toBeNull();
+  });
+});
+
+describe('measureBoundaryFromPoint', () => {
+  const zones: MeasureHitZone[] = [
+    { x: 0, y: 0, width: 100, height: 40, beatStart: 8, beatDuration: 4 },
+  ];
+
+  it('returns start and end beats for the selected measure', () => {
+    expect(measureBoundaryFromPoint(zones, 40, 20)).toEqual({
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 40,
+      startBeat: 8,
+      endBeat: 12,
+    });
   });
 });
 

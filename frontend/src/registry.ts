@@ -11,6 +11,7 @@ import { type Feature } from './feature-types';
 import { scoreLoaderFeature  } from './features/score-loader/index';
 import { playbackFeature     } from './features/playback/index';
 import { partSelectorFeature } from './features/part-selector/index';
+import { partMixerFeature } from './features/part-mixer/index';
 import { pitchOverlayFeature } from './features/pitch-overlay/index';
 import { audioPreflightFeature } from './features/audio-preflight/index';
 import { progressHistoryFeature } from './features/progress-history/index';
@@ -21,6 +22,7 @@ export const features: Feature[] = [
   scoreLoaderFeature,
   playbackFeature,
   partSelectorFeature,
+  partMixerFeature,
   pitchOverlayFeature,
   audioPreflightFeature,
   progressHistoryFeature,

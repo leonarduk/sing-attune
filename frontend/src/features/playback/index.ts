@@ -20,17 +20,47 @@ import { setStatus } from '../../services/backend';
 import { recordBeatSample, resetProjection, getCursorX } from '../../services/cursor-projection';
 import { finishPracticeSessionCapture, startPracticeSessionCapture } from '../../services/progress-history';
 import { emitPlaybackSyncEvent } from '../../services/playback-sync';
-import { beatToMs, postPlayback, startPlayback, seekPlayback } from '../../transport/controls';
+import { beatToMs, postPlayback, setPlaybackTempo, startPlayback, seekPlayback } from '../../transport/controls';
 import { sessionSummaryTracker, type SessionSummary } from '../../practice/session-summary';
 import { type Feature } from '../../feature-types';
 import { ensureAudioPreflightReady } from '../../services/audio-preflight';
+import { clearLoopRegion, getLoopRegion, setLoopEnd, setLoopStart } from '../../services/loop-region';
 
 // ── Cursor RAF ──────────────────────────────────────────────────────────────────
+
+
+async function restartLoopPlayback(): Promise<void> {
+  const session = getSession();
+  if (!session) return;
+  const region = getLoopRegion();
+  if (!region.active) return;
+
+  const { engine, cursor, model } = session;
+  const targetBeat = Math.max(0, Math.min(model.total_beats, region.startBeat));
+  try {
+    const audioTimeSec = engine.ctx.currentTime;
+    const response = await seekPlayback(beatToMs(targetBeat, model, engine.tempoMultiplier));
+    emitPlaybackSyncEvent({
+      type: 'seek',
+      tMs: response.t_ms,
+      audioTimeSec,
+      syncOffsetMs: null,
+    });
+  } catch (err) {
+    setStatus(`loop seek failed: ${String(err)}`, 'error');
+    console.error('Loop seek failed:', err);
+    return;
+  }
+
+  engine.seekToBeat(targetBeat);
+  cursor.seekToBeat(targetBeat);
+}
 
 let cursorRafId: number | null = null;
 let unsubscribeScoreLoaded: (() => void) | null = null;
 let unsubscribeScoreCleared: (() => void) | null = null;
 let removeKeydownListener: (() => void) | null = null;
+let loopSeekInFlight = false;
 
 function startCursorRaf(): void {
   stopCursorRaf();
@@ -38,6 +68,15 @@ function startCursorRaf(): void {
     const session = getSession();
     if (session?.engine.playing && session.cursor) {
       const beat = session.engine.currentBeat;
+      const region = getLoopRegion();
+
+      if (region.active && beat >= region.endBeat && !loopSeekInFlight) {
+        loopSeekInFlight = true;
+        void restartLoopPlayback().finally(() => {
+          loopSeekInFlight = false;
+        });
+      }
+
       session.cursor.seekToBeat(beat);
       recordBeatSample(beat, getCursorX());
       cursorRafId = requestAnimationFrame(tick);
@@ -52,6 +91,7 @@ function stopCursorRaf(): void {
     cursorRafId = null;
   }
   resetProjection();
+  loopSeekInFlight = false;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -80,6 +120,41 @@ async function seekByBeats(delta: number): Promise<void> {
   engine.seekToBeat(targetBeat);
   cursor.seekToBeat(targetBeat);
   if (engine.state !== 'playing') stopCursorRaf();
+}
+
+
+
+async function adjustTempoByStep(stepPercent: number): Promise<void> {
+  const session = getSession();
+  if (!session) return;
+
+  const tempoSliderEl = document.getElementById('tempo-slider') as HTMLInputElement | null;
+  const tempoLabelEl = document.getElementById('tempo-label') as HTMLSpanElement | null;
+  if (!tempoSliderEl || !tempoLabelEl) return;
+
+  const currentPercent = parseInt(tempoSliderEl.value, 10);
+  if (Number.isNaN(currentPercent)) return;
+
+  const nextPercent = Math.max(50, Math.min(125, currentPercent + stepPercent));
+  if (nextPercent === currentPercent) return;
+
+  const previousMultiplier = session.engine.tempoMultiplier;
+  const nextMultiplier = nextPercent / 100;
+
+  tempoSliderEl.value = String(nextPercent);
+  tempoLabelEl.textContent = `${nextPercent}%`;
+
+  session.engine.setTempoMultiplier(nextMultiplier);
+  try {
+    await setPlaybackTempo(nextMultiplier);
+  } catch (err) {
+    session.engine.setTempoMultiplier(previousMultiplier);
+    const previousPercent = Math.round(previousMultiplier * 100);
+    tempoSliderEl.value = String(previousPercent);
+    tempoLabelEl.textContent = `${previousPercent}%`;
+    setStatus(`tempo update failed: ${String(err)}`, 'error');
+    console.error('Tempo update failed:', err);
+  }
 }
 
 function getSelectedDeviceId(): number | null {
@@ -172,12 +247,13 @@ function mount(_slot: HTMLElement): void {
   const unsubscribeCleared = onScoreCleared(() => {
     stopCursorRaf();
     finishPracticeSessionCapture();
+    clearLoopRegion();
     syncTransportButtons();
   });
 
   function syncPauseButton(): void {
     const session = getSession();
-    if (!session || session.engine.state === 'stopped') {
+    if (!session || session.engine.state === 'idle') {
       btnPause.disabled = true;
       btnPause.innerHTML = '&#9646;&#9646; Pause';
       return;
@@ -199,6 +275,7 @@ function mount(_slot: HTMLElement): void {
   unsubscribeScoreCleared = onScoreCleared(() => {
     stopCursorRaf();
     finishPracticeSessionCapture();
+    clearLoopRegion();
     syncTransportButtons();
   });
 
@@ -368,6 +445,21 @@ function mount(_slot: HTMLElement): void {
     const session = getSession();
     if (!session) return;
 
+    if (e.code === 'Escape') {
+      e.preventDefault();
+      clearLoopRegion();
+      return;
+    }
+    if (e.code === 'KeyL') {
+      e.preventDefault();
+      const beat = session.engine.currentBeat;
+      if (e.shiftKey) {
+        setLoopEnd(beat);
+      } else {
+        setLoopStart(beat);
+      }
+      return;
+    }
     if (e.code === 'Space') {
       e.preventDefault();
       if (session.engine.state === 'playing') { btnPause.click(); } else { btnPlay.click(); }
@@ -375,7 +467,9 @@ function mount(_slot: HTMLElement): void {
     }
     if (e.code === 'KeyR') { e.preventDefault(); if (!btnRewind.disabled) btnRewind.click(); return; }
     if (e.code === 'ArrowLeft')  { e.preventDefault(); if (session.engine.state !== 'playing') void seekByBeats(-1); return; }
-    if (e.code === 'ArrowRight') { e.preventDefault(); if (session.engine.state !== 'playing') void seekByBeats(1); }
+    if (e.code === 'ArrowRight') { e.preventDefault(); if (session.engine.state !== 'playing') void seekByBeats(1); return; }
+    if (e.key === '[') { e.preventDefault(); void adjustTempoByStep(-5); return; }
+    if (e.key === ']') { e.preventDefault(); void adjustTempoByStep(5); }
   };
   window.addEventListener('keydown', onKeydown);
 

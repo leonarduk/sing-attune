@@ -28,6 +28,7 @@ import { PitchTimelineSync } from '../../pitch/timeline-sync';
 import { parsePitchSocketMessage, reconnectDelayMs } from '../../pitch/socket';
 import { midiToNoteName } from '../../pitch/note-name';
 import { SessionRangeTracker } from '../../pitch/session-range';
+import { classifyVoiceType, getVoiceTypeById } from '../../pitch/voice-type';
 import { elapsedToBeat } from '../../score/timing';
 import { type NoteModel } from '../../score/renderer';
 import { PhraseSummaryTracker, type PhraseSummary } from '../../pitch/phrase-summary';
@@ -35,6 +36,7 @@ import { resolveSelectedDeviceId, type AudioInputDevice } from '../../audio/devi
 import { PracticeRecorder } from '../../audio/recorder';
 import { type Feature } from '../../feature-types';
 import { analysePartPitchRange } from '../../score-analyser';
+import { loadUserVoiceTypeId } from '../../services/audio-preflight';
 
 // ── Module-level singletons (survive score reloads) ───────────────────────────
 
@@ -59,6 +61,7 @@ let recordingError: string | null = null;
 let phraseSummaryTracker: PhraseSummaryTracker | null = null;
 let sessionRangeSummaryText = 'Last session range: —';
 let wasPlayingLastTick = false;
+let hasSuggestedVoiceType = false;
 const sessionRangeTracker = new SessionRangeTracker();
 const timelineSync = new PitchTimelineSync();
 let playbackSyncUnsubscribe: (() => void) | null = null;
@@ -161,6 +164,21 @@ function finalizeSessionRangeSummary(): void {
     const high = midiToNoteName(summary.highMidi);
     sessionRangeSummaryText =
       `Last session range: ${low} → ${high} (${summary.semitoneSpan} semitones, ${summary.octaveSpan.toFixed(2)} octaves)`;
+
+    const suggested = classifyVoiceType({
+      lowestMidi: summary.lowMidi,
+      highestMidi: summary.highMidi,
+      stableNoteCount: summary.stableNoteCount,
+    });
+    if (suggested && !hasSuggestedVoiceType && !getVoiceTypeById(loadUserVoiceTypeId())) {
+      window.dispatchEvent(new CustomEvent('voice-type-suggested', {
+        detail: {
+          suggestedVoiceTypeId: suggested.id,
+          message: `Your range suggests you may be a ${suggested.label} (${low}–${high}). Does this look right?`,
+        },
+      }));
+      hasSuggestedVoiceType = true;
+    }
   }
   updateSessionRangeSummary();
 }
@@ -527,6 +545,7 @@ function mount(_slot: HTMLElement): void {
     clearPhraseSummaryPanel();
     updatePitchReadout();
     wasPlayingLastTick = false;
+    hasSuggestedVoiceType = false;
     sessionRangeTracker.reset();
     updateSessionRangeReadout();
     updatePitchGraphHeader();
@@ -544,6 +563,7 @@ function mount(_slot: HTMLElement): void {
     lastPitchFrame = null;
     pitchGraphNowSec = 0;
     wasPlayingLastTick = false;
+    hasSuggestedVoiceType = false;
     sessionRangeTracker.reset();
     clearPhraseSummaryPanel();
     updatePitchReadout();
