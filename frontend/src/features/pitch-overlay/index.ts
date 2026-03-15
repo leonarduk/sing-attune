@@ -134,9 +134,17 @@ function updatePitchReadout(): void {
 function syncWarmupUi(message?: string): void {
   const warmupStatusEl = document.getElementById('warmup-status') as HTMLSpanElement | null;
   const btnStartWarmup = document.getElementById('btn-start-warmup') as HTMLButtonElement | null;
+  const btnStopWarmup = document.getElementById('btn-stop-warmup') as HTMLButtonElement | null;
   const btnStartRehearsal = document.getElementById('btn-start-rehearsal') as HTMLButtonElement | null;
   if (warmupStatusEl && message !== undefined) warmupStatusEl.textContent = message;
-  if (btnStartWarmup) btnStartWarmup.disabled = warmupActive;
+  if (btnStartWarmup) {
+    btnStartWarmup.disabled = warmupActive;
+    btnStartWarmup.classList.toggle('hidden', warmupActive);
+  }
+  if (btnStopWarmup) {
+    btnStopWarmup.disabled = !warmupActive;
+    btnStopWarmup.classList.toggle('hidden', !warmupActive);
+  }
   if (btnStartRehearsal) btnStartRehearsal.classList.toggle('hidden', warmupActive || warmupSequence.length === 0);
 }
 
@@ -482,6 +490,7 @@ function mount(_slot: HTMLElement): void {
   const scoreContainerEl    = document.getElementById('score-container')           as HTMLDivElement;
   const warmupDurationEl    = document.getElementById('warmup-duration')           as HTMLSelectElement;
   const btnStartWarmup      = document.getElementById('btn-start-warmup')          as HTMLButtonElement;
+  const btnStopWarmup       = document.getElementById('btn-stop-warmup')           as HTMLButtonElement;
   const btnStartRehearsal   = document.getElementById('btn-start-rehearsal')       as HTMLButtonElement;
   const pitchGraphCanvasEl  = document.getElementById('pitch-graph-canvas')        as HTMLDivElement;
   const settingsPanelEl     = document.getElementById('settings-panel')            as HTMLDivElement;
@@ -525,6 +534,13 @@ function mount(_slot: HTMLElement): void {
     warmupActive = true;
     updateWarmupUi('Warm-up in progress: sirens');
     connectPitchSocket();
+  }
+
+  function stopWarmup(): void {
+    if (!warmupActive) return;
+    warmupActive = false;
+    warmupTargetMidi = null;
+    updateWarmupUi('Warm-up stopped. You can start rehearsal.');
   }
 
   pitchGraph = new PitchGraphCanvas(pitchGraphCanvasEl);
@@ -668,6 +684,9 @@ function mount(_slot: HTMLElement): void {
   });
   btnStartWarmup.addEventListener('click', () => {
     startWarmup();
+  });
+  btnStopWarmup.addEventListener('click', () => {
+    stopWarmup();
   });
   btnStartRehearsal.addEventListener('click', () => {
     const playBtn = document.getElementById('btn-play') as HTMLButtonElement | null;
