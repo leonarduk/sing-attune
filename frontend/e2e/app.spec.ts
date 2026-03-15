@@ -104,7 +104,10 @@ test('load -> play -> pause with mocked backend and no console errors', async ({
   // Then click "Start rehearsal" to mark preflight complete and start playback.
   const preflightModal = page.locator('#audio-preflight-modal');
   if (await preflightModal.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await page.locator('#audio-preflight-request').click();
+    const requestMicButton = page.locator('#audio-preflight-request');
+    if (await requestMicButton.isVisible().catch(() => false)) {
+      await requestMicButton.click();
+    }
     const startRehearsal = page.locator('#audio-preflight-continue');
     await expect(startRehearsal).toBeEnabled({ timeout: 5000 });
     await startRehearsal.click();
