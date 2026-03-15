@@ -1,6 +1,63 @@
-import { describe, expect, it } from 'vitest';
-import { __audioPreflightInternals } from './index';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { audioPreflightFeature, __audioPreflightInternals } from './index';
+
+class MockAudioContext {
+  state: AudioContextState = 'running';
+  destination = {} as AudioDestinationNode;
+
+  resume = vi.fn(async () => undefined);
+  close = vi.fn(async () => undefined);
+
+  createMediaStreamSource = vi.fn(() => ({
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+  }) as unknown as MediaStreamAudioSourceNode);
+
+  createAnalyser = vi.fn(() => ({
+    fftSize: 1024,
+    getByteTimeDomainData: vi.fn(),
+  }) as unknown as AnalyserNode);
+
+  createGain = vi.fn(() => ({
+    gain: { value: 0 },
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+  }) as unknown as GainNode);
+}
+
+function installMediaMocks(): void {
+  const getUserMedia = vi.fn(async () => ({
+    getAudioTracks: () => [
+      {
+        getSettings: () => ({ deviceId: 'dev-1' }),
+        stop: vi.fn(),
+      },
+    ],
+    getTracks: () => [{ stop: vi.fn() }],
+  }));
+
+  const enumerateDevices = vi.fn(async () => [
+    { kind: 'audioinput', deviceId: 'dev-1', label: 'Mic 1' },
+    { kind: 'audioinput', deviceId: 'dev-2', label: 'Mic 2' },
+  ]);
+
+  Object.defineProperty(navigator, 'mediaDevices', {
+    configurable: true,
+    value: {
+      getUserMedia,
+      enumerateDevices,
+    },
+  });
+
+  vi.stubGlobal('AudioContext', MockAudioContext as unknown as typeof AudioContext);
+}
+
+
+
+function openModalAndWaitUntilReady(): Promise<boolean> {
+  return __audioPreflightInternals.openModal();
+}
 describe('audio preflight device selection', () => {
   it('returns null when no devices are available', () => {
     expect(__audioPreflightInternals.resolveSelectedDeviceId([], 'dev-1')).toBeNull();
@@ -23,5 +80,72 @@ describe('audio preflight device selection', () => {
 
     expect(__audioPreflightInternals.resolveSelectedDeviceId(devices, 'missing')).toBe('dev-3');
     expect(__audioPreflightInternals.resolveSelectedDeviceId(devices, null)).toBe('dev-3');
+  });
+});
+
+describe('audio preflight Escape handling', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="slot-audio-preflight"></div>';
+    installMediaMocks();
+    const slot = document.getElementById('slot-audio-preflight') as HTMLDivElement;
+    audioPreflightFeature.mount(slot);
+  });
+
+  it('pressing Escape while modal is open closes it', async () => {
+    const openPromise = openModalAndWaitUntilReady();
+
+    const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    window.dispatchEvent(event);
+
+    await expect(openPromise).resolves.toBe(false);
+    expect(__audioPreflightInternals.isPreflightModalHidden()).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+
+    audioPreflightFeature.unmount?.();
+  });
+
+  it('openModal called twice does not register duplicate Escape listeners', async () => {
+    const openPromiseOne = openModalAndWaitUntilReady();
+    const openPromiseTwo = openModalAndWaitUntilReady();
+
+    const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    window.dispatchEvent(escapeEvent);
+
+    await expect(openPromiseTwo).resolves.toBe(false);
+    expect(__audioPreflightInternals.isPreflightModalHidden()).toBe(true);
+
+    const secondEscape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    window.dispatchEvent(secondEscape);
+    expect(secondEscape.defaultPrevented).toBe(false);
+
+    // Ensure we don't leave the first open promise pending forever in tests.
+    __audioPreflightInternals.closeModal(false);
+    await expect(openPromiseOne).resolves.toBe(false);
+
+    audioPreflightFeature.unmount?.();
+  });
+
+  it('Escape listener is removed after closeModal', async () => {
+    const openPromise = openModalAndWaitUntilReady();
+
+    __audioPreflightInternals.closeModal(false);
+    await expect(openPromise).resolves.toBe(false);
+
+    const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+
+    audioPreflightFeature.unmount?.();
+  });
+
+  it('Escape listener is removed after unmount', async () => {
+    const openPromise = openModalAndWaitUntilReady();
+
+    audioPreflightFeature.unmount?.();
+    await expect(openPromise).resolves.toBe(false);
+
+    const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
   });
 });
