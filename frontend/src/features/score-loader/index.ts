@@ -20,6 +20,7 @@ import {
   ensureSoundfontLoaded,
   getSoundfontLoadPromise,
   getPlaybackTimbreMode,
+  retrySoundfontLoad,
 } from '../../services/audio-context';
 import { setSession, clearSession, getSession } from '../../services/score-session';
 import { showErrorBanner, clearErrorBanner } from '../../services/backend';
@@ -32,6 +33,40 @@ import { clearLoopRegion, getLoopRegion, onLoopRegionChanged, setLoopEnd, setLoo
 import { type Feature } from '../../feature-types';
 
 let removeLoopRegionListener: (() => void) | null = null;
+let soundfontRetryInFlight = false;
+
+function showSoundfontRetryBanner(): void {
+  showErrorBanner('Soundfont failed to load; using synth fallback audio.', {
+    dismissible: true,
+    actionLabel: 'Retry soundfont',
+    onAction: () => {
+      if (soundfontRetryInFlight) return;
+      soundfontRetryInFlight = true;
+      setAppStatus('retrying soundfont load…', 'warning');
+
+      void retrySoundfontLoad((err) => {
+        showSoundfontRetryBanner();
+        setAppStatus('soundfont unavailable — using synthesised tones', 'error');
+        showToast('Soundfont unavailable — using synthesised tones', {
+          variant: 'warning',
+          dedupeKey: 'soundfont-fallback',
+        });
+        console.error('[Soundfont] retry load error:', err);
+      })
+        .then(() => {
+          clearErrorBanner();
+          setAppStatus('soundfont ready', 'success');
+          showToast('Soundfont loaded successfully.', {
+            variant: 'info',
+            dedupeKey: 'soundfont-recovered',
+          });
+        })
+        .finally(() => {
+          soundfontRetryInFlight = false;
+        });
+    },
+  });
+}
 
 function mount(slot: HTMLElement): void {
   // DOM refs — resolved from document because most elements live in the
@@ -194,7 +229,7 @@ function mount(slot: HTMLElement): void {
 
     // Kick off soundfont loading early (idempotent) so it overlaps with parse.
     ensureSoundfontLoaded((err) => {
-      showErrorBanner('Soundfont failed to load; using synth fallback audio.', { dismissible: true });
+      showSoundfontRetryBanner();
       setAppStatus('soundfont unavailable — using synthesised tones', 'error');
       showToast('Soundfont unavailable — using synthesised tones', {
         variant: 'warning',
