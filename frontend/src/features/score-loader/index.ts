@@ -21,14 +21,13 @@ import {
   getPlaybackTimbreMode,
 } from '../../services/audio-context';
 import { setSession, clearSession, getSession } from '../../services/score-session';
-import { setStatus, showErrorBanner, clearErrorBanner } from '../../services/backend';
+import { showErrorBanner, clearErrorBanner } from '../../services/backend';
+import { setAppStatus } from '../../services/status';
 import { showToast } from '../../services/toast';
 import { getVisiblePartOptions } from '../../part-options';
-import { beatToMs, seekPlayback } from '../../transport/controls';
+import { beatToMs, seekPlayback, postPlayback } from '../../transport/controls';
 import { beatFromClick, extractMeasureHitZones, measureBoundaryFromPoint } from '../../score/click-seek';
 import { clearLoopRegion, getLoopRegion, onLoopRegionChanged, setLoopEnd, setLoopStart } from '../../services/loop-region';
-import { beatToMs, seekPlayback, postPlayback } from '../../transport/controls';
-import { beatFromClick, extractMeasureHitZones } from '../../score/click-seek';
 import { type Feature } from '../../feature-types';
 
 let removeLoopRegionListener: (() => void) | null = null;
@@ -162,7 +161,7 @@ function mount(slot: HTMLElement): void {
 
   async function loadDevTestScore(filename: string): Promise<void> {
     try {
-      setStatus(`Loading test score ${filename}…`, 'loading');
+      setAppStatus(`Loading test score ${filename}…`, 'warning');
       const response = await fetch(`/musescore/${filename}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -171,7 +170,7 @@ function mount(slot: HTMLElement): void {
       await loadScore(file);
     } catch (err) {
       showErrorBanner(`Could not load test score ${filename}.`);
-      setStatus(`test score load failed: ${String(err)}`, 'error');
+      setAppStatus(`test score load failed: ${String(err)}`, 'error');
       console.error('Dev test score load failed:', err);
     }
   }
@@ -179,7 +178,7 @@ function mount(slot: HTMLElement): void {
   async function loadScore(file: File): Promise<void> {
     clearErrorBanner();
     showLoading(`Loading ${file.name}…`);
-    setStatus(`Loading ${file.name}…`, 'loading');
+    setAppStatus(`Loading ${file.name}…`, 'warning');
     dropZoneEl.classList.add('hidden');
     scoreInfoEl.textContent = '';
     headphoneWarning.classList.add('hidden');
@@ -195,7 +194,7 @@ function mount(slot: HTMLElement): void {
     // Kick off soundfont loading early (idempotent) so it overlaps with parse.
     ensureSoundfontLoaded((err) => {
       showErrorBanner('Soundfont failed to load; using synth fallback audio.');
-      setStatus('soundfont unavailable — using synthesised tones', 'error');
+      setAppStatus('soundfont unavailable — using synthesised tones', 'error');
       showToast('Soundfont unavailable — using synthesised tones', {
         variant: 'warning',
         dedupeKey: 'soundfont-fallback',
@@ -210,7 +209,7 @@ function mount(slot: HTMLElement): void {
       model = await renderer.load(file);
     } catch (err) {
       showErrorBanner('Could not load this MusicXML file. Try exporting again from notation software.');
-      setStatus(String(err), 'error');
+      setAppStatus(String(err), 'error');
       console.error('Score parse/render failed:', err);
       resetDropZoneToIdle();
       hideLoading();
@@ -255,13 +254,13 @@ function mount(slot: HTMLElement): void {
       renderLoopOverlay();
       setTransportEnabled(true);
       if (getPlaybackTimbreMode() === 'synth-fallback') {
-        setStatus('score loaded — synth fallback active', 'error');
+        setAppStatus('score loaded — synth fallback active', 'error');
       } else {
-        setStatus('score loaded', 'ok');
+        setAppStatus('score loaded', 'success');
       }
     } catch (err) {
       showErrorBanner('Score loaded, but playback setup failed. Check audio/soundfont settings and try again.');
-      setStatus(String(err), 'error');
+      setAppStatus(String(err), 'error');
       console.error('Post-parse score setup failed:', err);
       resetDropZoneToIdle();
     } finally {
@@ -291,7 +290,7 @@ function mount(slot: HTMLElement): void {
       if (!boundary) return;
       setLoopEnd(boundary.endBeat);
       renderLoopOverlay();
-      setStatus(`Loop end set to beat ${boundary.endBeat.toFixed(2)}`, 'ok');
+      setAppStatus(`Loop end set to beat ${boundary.endBeat.toFixed(2)}`, 'success');
       return;
     }
 
@@ -299,7 +298,7 @@ function mount(slot: HTMLElement): void {
     if (boundary) {
       setLoopStart(boundary.startBeat);
       renderLoopOverlay();
-      setStatus(`Loop start set to beat ${boundary.startBeat.toFixed(2)}`, 'ok');
+      setAppStatus(`Loop start set to beat ${boundary.startBeat.toFixed(2)}`, 'success');
     }
 
     const targetBeat = beatFromClick(zones, local.x, local.y);
@@ -308,7 +307,7 @@ function mount(slot: HTMLElement): void {
     try {
       await seekPlayback(beatToMs(targetBeat, model, engine.tempoMultiplier));
     } catch (err) {
-      setStatus(`seek failed: ${String(err)}`, 'error');
+      setAppStatus(`seek failed: ${String(err)}`, 'error');
       console.error('Seek failed:', err);
       return;
     }
