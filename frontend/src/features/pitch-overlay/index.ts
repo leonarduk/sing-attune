@@ -26,6 +26,7 @@ import { syntheticPitchFrameAt } from '../../pitch/synthetic';
 import { PitchTimelineSync } from '../../pitch/timeline-sync';
 import { parsePitchSocketMessage, reconnectDelayMs, type PitchFrame } from '../../pitch/socket';
 import { midiToFrequency, midiToNoteName } from '../../pitch/note-name';
+import { SessionRangeTracker } from '../../pitch/session-range';
 import {
   DEFAULT_STABLE_NOTE_SETTINGS,
   StableNoteDetector,
@@ -62,9 +63,12 @@ let syntheticModeEnabled = false;
 let selectedDeviceId: number | null = null;
 let recordingError: string | null = null;
 let lastStableMidi: number | null = null;
+let sessionRangeSummaryText = 'Last session range: —';
+let wasPlayingLastTick = false;
 let phraseSummaryTracker: PhraseSummaryTracker | null = null;
 let diagnosticsModeEnabled = false;
 const stablePitchTracker = new StablePitchTracker();
+const sessionRangeTracker = new SessionRangeTracker();
 const timelineSync = new PitchTimelineSync();
 let playbackSyncUnsubscribe: (() => void) | null = null;
 let syncOffsetWarningShown = false;
@@ -94,6 +98,36 @@ function updatePitchReadout(): void {
   const rawNoteLabel = midiToNoteName(lastPitchFrame.midi);
   const stableNoteLabel = lastStableMidi === null ? '—' : midiToNoteName(lastStableMidi);
   el.textContent = `Raw: ${rawLabel} (${rawNoteLabel}) · Stable: ${stableLabel} (${stableNoteLabel})`;
+}
+
+function updateSessionRangeReadout(): void {
+  const el = document.getElementById('session-range-readout') as HTMLSpanElement;
+  const summary = sessionRangeTracker.summary();
+  if (!summary) {
+    el.textContent = 'Session range: —';
+    return;
+  }
+  const low = midiToNoteName(summary.lowMidi);
+  const high = midiToNoteName(summary.highMidi);
+  el.textContent = `Session range: ${low} → ${high} (${summary.semitoneSpan} st / ${summary.octaveSpan.toFixed(2)} oct)`;
+}
+
+function updateSessionRangeSummary(): void {
+  const el = document.getElementById('session-range-summary') as HTMLSpanElement;
+  el.textContent = sessionRangeSummaryText;
+}
+
+function finalizeSessionRangeSummary(): void {
+  const summary = sessionRangeTracker.summary();
+  if (!summary) {
+    sessionRangeSummaryText = 'Last session range: no stable notes captured.';
+  } else {
+    const low = midiToNoteName(summary.lowMidi);
+    const high = midiToNoteName(summary.highMidi);
+    sessionRangeSummaryText =
+      `Last session range: ${low} → ${high} (${summary.semitoneSpan} semitones, ${summary.octaveSpan.toFixed(2)} octaves)`;
+  }
+  updateSessionRangeSummary();
 }
 
 // ── Pitch frame handling ───────────────────────────────────────────────────
@@ -132,6 +166,9 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
   const displayFrame = { ...frame, midi: overlayMidi };
   pitchOverlay?.pushFrame(displayFrame, getFrameXPosition(frame.t));
   pitchGraph?.pushFrame(frame, expectedMidiForFrame(frame.t));
+  if (sessionRangeTracker.ingest(frame, overlaySettings.confidenceThreshold)) {
+    updateSessionRangeReadout();
+  }
   sessionSummaryTracker.recordFrame(frame);
   window.dispatchEvent(new CustomEvent('stable-pitch-frame', {
     detail: {
@@ -319,6 +356,11 @@ function startPitchGraphLoop(): void {
       const playbackSec = Math.max(0, session.engine.ctx.currentTime - session.engine.startAudioTime);
       pitchGraphNowSec = Math.max(pitchGraphNowSec, playbackSec);
     }
+    const isPlaying = !!session?.engine.playing;
+    if (wasPlayingLastTick && !isPlaying) {
+      finalizeSessionRangeSummary();
+    }
+    wasPlayingLastTick = isPlaying;
     pitchGraph?.tick(pitchGraphNowSec);
     pitchGraphRafId = requestAnimationFrame(tick);
   };
@@ -456,6 +498,7 @@ function mount(_slot: HTMLElement): void {
   clearPhraseSummaryPanel();
 
   onScoreCleared(() => {
+    finalizeSessionRangeSummary();
     if (!diagnosticsModeEnabled) closePitchSocket();
     pitchOverlay?.destroy();
     pitchOverlay = null;
@@ -465,10 +508,13 @@ function mount(_slot: HTMLElement): void {
     lastStableMidi = null;
     stableNoteDetector.reset();
     pitchGraphNowSec = 0;
+    wasPlayingLastTick = false;
+    sessionRangeTracker.reset();
     sessionSummaryTracker.reset();
     phraseSummaryTracker = null;
     clearPhraseSummaryPanel();
     updatePitchReadout();
+    updateSessionRangeReadout();
     clearDiagnostics();
     if (diagnosticsModeEnabled) connectPitchSocket();
   });
@@ -486,8 +532,11 @@ function mount(_slot: HTMLElement): void {
     lastStableMidi = null;
     stableNoteDetector.reset();
     pitchGraphNowSec = 0;
+    wasPlayingLastTick = false;
+    sessionRangeTracker.reset();
     clearPhraseSummaryPanel();
     updatePitchReadout();
+    updateSessionRangeReadout();
     clearDiagnostics();
     connectPitchSocket();
   });
@@ -539,6 +588,8 @@ function mount(_slot: HTMLElement): void {
   settingsSynthEl.checked = syntheticModeEnabled;
   updateSettingsLabels();
   updatePitchReadout();
+  updateSessionRangeReadout();
+  updateSessionRangeSummary();
   refreshRecordingControls(ctrl);
 
   btnSettings.addEventListener('click', async (event) => {
