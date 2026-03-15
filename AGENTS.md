@@ -1,7 +1,7 @@
-# sing-attune — Claude Development Guide
+# sing-attune — Agent Development Guide
 
-> See also: `AGENTS.md`.
-> Keep this file and `AGENTS.md` in sync whenever either one changes.
+> See also: `CLAUDE.md`.
+> Keep this file and `CLAUDE.md` in sync whenever either one changes.
 
 ## Branching
 
@@ -108,7 +108,7 @@ Every PR runs `.github/workflows/pr-review.yml`:
 |-----|-------------|
 | `lint` | `ruff check backend/` — fails on any violation |
 | `test` | `pytest` with CPU torch + libportaudio2 — hardware tests auto-skipped |
-| `ai-review` | Calls Claude API, posts review comment against linked issue ACs |
+| `ai-review` | Calls AI API, posts review comment against linked issue ACs |
 
 The AI review is advisory. `lint` and `test` are blocking.
 
