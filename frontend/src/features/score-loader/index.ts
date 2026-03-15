@@ -132,7 +132,7 @@ function mount(slot: HTMLElement): void {
       showErrorBanner('Could not load this MusicXML file. Try exporting again from notation software.');
       setStatus(String(err), 'error');
       console.error('Score parse/render failed:', err);
-      dropZoneEl.classList.remove('hidden');
+      resetDropZoneToIdle();
       hideLoading();
       return;
     }
@@ -181,10 +181,8 @@ function mount(slot: HTMLElement): void {
     } catch (err) {
       showErrorBanner('Score loaded, but playback setup failed. Check audio/soundfont settings and try again.');
       setStatus(String(err), 'error');
-      console.error('Score load failed:', err);
-      resetDropZoneToIdle();
       console.error('Post-parse score setup failed:', err);
-      dropZoneEl.classList.remove('hidden');
+      resetDropZoneToIdle();
     } finally {
       hideLoading();
     }

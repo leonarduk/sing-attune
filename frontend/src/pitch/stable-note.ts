@@ -15,6 +15,7 @@ interface WindowFrame {
 interface Cluster {
   count: number;
   sumMidi: number;
+  firstT: number;
   lastT: number;
 }
 
@@ -68,7 +69,7 @@ export class StableNoteDetector {
     }
 
     this.pruneWindow(frame.t);
-    const dominant = this.dominantClusterCentroid();
+    const dominant = this.dominantCluster();
 
     if (dominant === null) {
       this.candidateMidi = null;
@@ -77,14 +78,16 @@ export class StableNoteDetector {
       return { rawMidi: frame.midi, stableMidi: null };
     }
 
-    if (this.candidateMidi === null || !this.withinTolerance(dominant, this.candidateMidi)) {
-      this.candidateMidi = dominant;
-      this.candidateStartMs = frame.t;
+    const centroid = dominant.sumMidi / dominant.count;
+
+    if (this.candidateMidi === null || !this.withinTolerance(centroid, this.candidateMidi)) {
+      // New dominant cluster — use the earliest frame in that cluster as the
+      // candidate start time so that hold duration is measured from when the
+      // cluster first appeared in the window, not from the current frame.
+      this.candidateMidi = centroid;
+      this.candidateStartMs = dominant.firstT;
     }
 
-    // Explicit null guard: holdMs is only meaningful once a candidate start
-    // time has been recorded. The `?? frame.t` fallback would make holdMs=0,
-    // which could satisfy a very small holdDurationMs prematurely.
     if (this.candidateStartMs !== null && this.candidateMidi !== null) {
       const holdMs = frame.t - this.candidateStartMs;
       if (holdMs >= this.settings.holdDurationMs) {
@@ -101,29 +104,22 @@ export class StableNoteDetector {
   }
 
   /**
-   * Returns the centroid of the highest-count cluster in the current window,
-   * breaking ties in favour of the most recently updated cluster.
+   * Returns the highest-count cluster in the current window (ties broken by
+   * most recently updated), including its first and last frame timestamps.
    *
-   * Clustering is single-pass greedy: each frame is assigned to the first
-   * existing cluster whose *fixed* centroid (snapshotted before the frame is
-   * added) is within tolerance, or a new cluster is created. This means the
-   * result is order-dependent for frames right on the boundary, which is
-   * acceptable for this use-case — we only need a stable dominant pitch
-   * estimate, not a globally optimal partition.
-   *
-   * Complexity: O(n * m) where n = window frames, m = clusters. For default
-   * settings (320 ms window, ~30 fps) that is at most ~10 frames; even at the
-   * maximum 1500 ms window it remains ~45 frames, so no concern in practice.
+   * `firstT` is used as `candidateStartMs` so that hold duration is measured
+   * from when the dominant cluster first appeared in the window — not from
+   * the moment it became dominant. This prevents a subtle bug where a cluster
+   * that accumulated frames over time would reset its hold timer to the
+   * current frame when it finally became dominant.
    */
-  private dominantClusterCentroid(): number | null {
+  private dominantCluster(): Cluster | null {
     if (this.windowFrames.length === 0) return null;
 
     const clusters: Cluster[] = [];
     for (const frame of this.windowFrames) {
       let matched = false;
       for (const cluster of clusters) {
-        // Snapshot centroid before testing so that adding this frame does not
-        // shift the centroid used to evaluate subsequent frames in this pass.
         const centroid = cluster.sumMidi / cluster.count;
         if (this.withinTolerance(frame.midi, centroid)) {
           cluster.count += 1;
@@ -133,7 +129,9 @@ export class StableNoteDetector {
           break;
         }
       }
-      if (!matched) clusters.push({ count: 1, sumMidi: frame.midi, lastT: frame.t });
+      if (!matched) {
+        clusters.push({ count: 1, sumMidi: frame.midi, firstT: frame.t, lastT: frame.t });
+      }
     }
 
     let best: Cluster | null = null;
@@ -142,7 +140,7 @@ export class StableNoteDetector {
         best = cluster;
       }
     }
-    return best ? best.sumMidi / best.count : null;
+    return best ?? null;
   }
 
   private withinTolerance(aMidi: number, bMidi: number): boolean {

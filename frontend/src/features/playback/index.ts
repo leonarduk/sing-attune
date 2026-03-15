@@ -28,6 +28,8 @@ import { ensureAudioPreflightReady } from '../../services/audio-preflight';
 // ── Cursor RAF ──────────────────────────────────────────────────────────────────
 
 let cursorRafId: number | null = null;
+let unsubscribeScoreLoaded: (() => void) | null = null;
+let unsubscribeScoreCleared: (() => void) | null = null;
 let removeKeydownListener: (() => void) | null = null;
 
 function startCursorRaf(): void {
@@ -135,6 +137,7 @@ function mount(_slot: HTMLElement): void {
   const summaryRetry     = document.getElementById('btn-summary-retry')  as HTMLButtonElement;
   const summaryReplay    = document.getElementById('btn-summary-replay') as HTMLButtonElement;
 
+
   function syncTransportButtons(): void {
     const session = getSession();
 
@@ -189,6 +192,15 @@ function mount(_slot: HTMLElement): void {
       btnPause.innerHTML = '&#9654; Resume';
     }
   }
+
+  unsubscribeScoreLoaded?.();
+  unsubscribeScoreCleared?.();
+  unsubscribeScoreLoaded = onScoreLoaded(() => { syncTransportButtons(); });
+  unsubscribeScoreCleared = onScoreCleared(() => {
+    stopCursorRaf();
+    finishPracticeSessionCapture();
+    syncTransportButtons();
+  });
 
   btnPlay.addEventListener('click', async () => {
     const session = getSession();
@@ -376,6 +388,10 @@ function mount(_slot: HTMLElement): void {
 
 function unmount(): void {
   stopCursorRaf();
+  unsubscribeScoreLoaded?.();
+  unsubscribeScoreLoaded = null;
+  unsubscribeScoreCleared?.();
+  unsubscribeScoreCleared = null;
   removeKeydownListener?.();
   removeKeydownListener = null;
 }
