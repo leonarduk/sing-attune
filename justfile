@@ -6,6 +6,7 @@
 #   just dev-frontend   start Vite dev server
 #   just install        install all dependencies
 #   just test           run backend tests
+#   just build-backend  build standalone backend binary
 
 backend-dir := "backend"
 frontend-dir := "frontend"
@@ -29,6 +30,10 @@ dev-frontend:
 # Run backend tests
 test:
     uv run pytest backend/tests -v
+
+# Build backend standalone binary (PyInstaller)
+build-backend:
+    uv run pyinstaller --noconfirm backend.spec
 
 # Build frontend for production
 build-frontend:

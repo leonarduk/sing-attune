@@ -37,8 +37,9 @@ import { PracticeRecorder } from '../../audio/recorder';
 import { type Feature } from '../../feature-types';
 import { analysePartPitchRange } from '../../score-analyser';
 import { loadUserVoiceTypeId } from '../../services/audio-preflight';
+import { recordSessionFrame } from '../../services/session-recording';
 
-// ── Module-level singletons (survive score reloads) ───────────────────────────
+// ── Module-level singletons (survive score reloads) ──────────────────────────
 
 const practiceRecorder = new PracticeRecorder();
 
@@ -69,6 +70,8 @@ let unsubscribeScoreLoaded: (() => void) | null = null;
 let unsubscribeScoreCleared: (() => void) | null = null;
 let unsubscribePartChanged: (() => void) | null = null;
 let syncOffsetWarningShown = false;
+let reviewFrameListener: ((event: Event) => void) | null = null;
+let reviewClearListener: (() => void) | null = null;
 
 let warmupActive = false;
 let warmupStartPerfMs = 0;
@@ -82,7 +85,7 @@ const overlaySettings: OverlaySettings = {
   trailMs: 2000,
 };
 
-// ── Pitch readout ────────────────────────────────────────────────────────────
+// ── Pitch readout ────────────────────────────────────────────
 
 function updatePitchReadout(): void {
   const el = document.getElementById('pitch-readout') as HTMLSpanElement;
@@ -193,7 +196,7 @@ function finalizeSessionRangeSummary(): void {
   updateSessionRangeSummary();
 }
 
-// ── Pitch frame handling ───────────────────────────────────────────────────
+// ── Pitch frame handling ─────────────────────────────────────
 
 function expectedMidiForFrame(frameTMs: number): number | null {
   if (warmupActive) return warmupTargetMidi;
@@ -249,6 +252,7 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
     pitchGraphNowSec = Math.max(pitchGraphNowSec, frameSec);
   }
   pitchOverlay?.pushFrame(frame, getFrameXPosition(frame.t));
+  recordSessionFrame(frame);
   pitchGraph?.pushFrame(frame, expectedMidiForFrame(frame.t));
   if (sessionRangeTracker.ingest(frame, overlaySettings.confidenceThreshold)) {
     updateSessionRangeReadout();
@@ -301,7 +305,7 @@ function badgeEmoji(badge: 'green' | 'amber' | 'red'): string {
   return '🔴';
 }
 
-// ── WebSocket ────────────────────────────────────────────────────────────────
+// ── WebSocket ────────────────────────────────────────────
 
 function closePitchSocket(): void {
   shouldReconnectPitchSocket = false;
@@ -365,7 +369,7 @@ function connectPitchSocket(): void {
   };
 }
 
-// ── Pitch graph RAF loop ─────────────────────────────────────────────────────
+// ── Pitch graph RAF loop ──────────────────────────────────────────
 
 function startPitchGraphLoop(): void {
   if (pitchGraphRafId !== null) return;
@@ -417,7 +421,7 @@ function stopPitchGraphLoop(): void {
   pitchGraphRafId = null;
 }
 
-// ── Recording ───────────────────────────────────────────────────────────────
+// ── Recording ───────────────────────────────────────────
 
 function setRecordingStatus(msg: string): void {
   (document.getElementById('recording-status') as HTMLDivElement).textContent = msg;
@@ -447,11 +451,13 @@ function refreshRecordingControls(ctrl: RecordingCtrl): void {
   if (state === 'recorded')  setRecordingStatus('Take captured.');
 }
 
-// ── Settings: audio devices ────────────────────────────────────────────────────
+// ── Settings: audio devices ──────────────────────────────────────────
 
 async function refreshAudioSettings(
   settingsDeviceEl: HTMLSelectElement,
   settingsEngineEl: HTMLDivElement,
+  settingsCpuWarningEl: HTMLDivElement,
+  settingsForceCpuEl: HTMLInputElement,
 ): Promise<void> {
   try {
     const [devicesRes, engineRes] = await Promise.all([fetch('/audio/devices'), fetch('/audio/engine')]);
@@ -469,24 +475,44 @@ async function refreshAudioSettings(
     settingsDeviceEl.value = selectedDeviceId === null ? '' : String(selectedDeviceId);
     settingsDeviceEl.disabled = devicesPayload.devices.length === 0;
     if (engineRes.ok) {
-      const ep = (await engineRes.json()) as { active_engine: string; mode: string };
-      settingsEngineEl.textContent = `Pitch engine: ${ep.active_engine} (${ep.mode})`;
+      const ep = (await engineRes.json()) as {
+        active_engine: string;
+        mode: string;
+        cuda: boolean;
+        device: string;
+        force_cpu: boolean;
+      };
+      const engineLabel = ep.active_engine === 'torchcrepe' ? 'CREPE' : ep.active_engine;
+      const deviceLabel = ep.active_engine === 'torchcrepe' && ep.cuda ? ep.device : 'CPU';
+      settingsEngineEl.textContent = `Pitch engine: ${engineLabel} (${deviceLabel})`;
+      settingsForceCpuEl.checked = ep.force_cpu;
+      settingsCpuWarningEl.classList.toggle('visible', ep.active_engine !== 'torchcrepe');
     } else {
       settingsEngineEl.textContent = 'Pitch engine: unavailable';
+      settingsCpuWarningEl.classList.remove('visible');
     }
   } catch (err) {
     settingsDeviceEl.innerHTML = '';
     settingsDeviceEl.disabled = true;
     selectedDeviceId = null;
     settingsEngineEl.textContent = 'Pitch engine: unavailable';
+    settingsCpuWarningEl.classList.remove('visible');
     showErrorBanner('Unable to load audio devices. Check backend audio permissions and retry.');
     console.error('Failed to load settings data:', err);
   }
 }
 
-// ── mount ─────────────────────────────────────────────────────────────────
+// ── mount ─────────────────────────────────────────────────────
 
 function mount(_slot: HTMLElement): void {
+  reviewFrameListener = (event: Event): void => {
+    const custom = event as CustomEvent<{ t: number; midi: number; conf: number }>;
+    if (custom.detail) handleIncomingPitchFrame(custom.detail);
+  };
+  reviewClearListener = (): void => {
+    pitchOverlay?.clear();
+    pitchGraph?.clear();
+  };
   const scoreContainerEl    = document.getElementById('score-container')           as HTMLDivElement;
   const warmupDurationEl    = document.getElementById('warmup-duration')           as HTMLSelectElement;
   const btnStartWarmup      = document.getElementById('btn-start-warmup')          as HTMLButtonElement;
@@ -503,7 +529,9 @@ function mount(_slot: HTMLElement): void {
   const settingsTrailLabelEl = document.getElementById('settings-trail-label')    as HTMLSpanElement;
   const settingsNoteNamesEl = document.getElementById('settings-show-note-names') as HTMLInputElement;
   const settingsSynthEl     = document.getElementById('settings-synthetic-mode')  as HTMLInputElement;
+  const settingsForceCpuEl  = document.getElementById('settings-force-cpu')       as HTMLInputElement;
   const settingsEngineEl    = document.getElementById('settings-engine')           as HTMLDivElement;
+  const settingsCpuWarningEl = document.getElementById('settings-cpu-warning')     as HTMLDivElement;
   const recordingEnabledEl  = document.getElementById('recording-enabled')        as HTMLInputElement;
   const btnStop             = document.getElementById('btn-stop')                 as HTMLButtonElement;
   const btnRewind           = document.getElementById('btn-rewind')               as HTMLButtonElement;
@@ -544,6 +572,8 @@ function mount(_slot: HTMLElement): void {
   }
 
   pitchGraph = new PitchGraphCanvas(pitchGraphCanvasEl);
+  if (reviewFrameListener) window.addEventListener('session-review-frame', reviewFrameListener as EventListener);
+  if (reviewClearListener) window.addEventListener('session-review-clear', reviewClearListener);
   bindPlaybackSync();
   startPitchGraphLoop();
   clearPhraseSummaryPanel();
@@ -628,7 +658,7 @@ function mount(_slot: HTMLElement): void {
   async function openSettingsPanel(): Promise<void> {
     settingsPanelEl.classList.add('visible');
     btnSettings.setAttribute('aria-expanded', 'true');
-    await refreshAudioSettings(settingsDeviceEl, settingsEngineEl);
+    await refreshAudioSettings(settingsDeviceEl, settingsEngineEl, settingsCpuWarningEl, settingsForceCpuEl);
   }
 
   function closeSettingsPanel(): void {
@@ -693,6 +723,18 @@ function mount(_slot: HTMLElement): void {
     playBtn?.click();
   });
 
+  settingsForceCpuEl.addEventListener('change', async () => {
+    try {
+      const params = new URLSearchParams({ force_cpu: String(settingsForceCpuEl.checked) });
+      const res = await fetch(`/audio/engine/force-cpu?${params.toString()}`, { method: 'POST' });
+      if (!res.ok) throw new Error(`/audio/engine/force-cpu HTTP ${res.status}`);
+      await refreshAudioSettings(settingsDeviceEl, settingsEngineEl, settingsCpuWarningEl, settingsForceCpuEl);
+    } catch (err) {
+      showErrorBanner('Unable to switch pitch engine mode.');
+      console.error('Failed to update pitch engine mode:', err);
+    }
+  });
+
   settingsSynthEl.addEventListener('change', () => {
     syntheticModeEnabled = settingsSynthEl.checked;
     closePitchSocket();
@@ -736,12 +778,16 @@ function mount(_slot: HTMLElement): void {
   });
 
   window.addEventListener('beforeunload', () => {
+    if (reviewFrameListener) window.removeEventListener('session-review-frame', reviewFrameListener as EventListener);
+    if (reviewClearListener) window.removeEventListener('session-review-clear', reviewClearListener);
     closePitchSocket(); stopPitchGraphLoop();
     pitchOverlay?.destroy(); pitchGraph?.destroy(); practiceRecorder.destroy();
   });
 }
 
 function unmount(): void {
+  if (reviewFrameListener) window.removeEventListener('session-review-frame', reviewFrameListener as EventListener);
+  if (reviewClearListener) window.removeEventListener('session-review-clear', reviewClearListener);
   playbackSyncUnsubscribe?.();
   playbackSyncUnsubscribe = null;
   unsubscribeScoreLoaded?.();
@@ -755,6 +801,8 @@ function unmount(): void {
   pitchOverlay?.destroy(); pitchOverlay = null;
   pitchGraph?.destroy();   pitchGraph = null;
   practiceRecorder.destroy();
+  reviewFrameListener = null;
+  reviewClearListener = null;
 }
 
 export const pitchOverlayFeature: Feature = {

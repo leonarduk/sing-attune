@@ -27,6 +27,14 @@ import { ensureAudioPreflightReady } from '../../services/audio-preflight';
 import { clearLoopRegion, getLoopRegion, setLoopEnd, setLoopStart } from '../../services/loop-region';
 import { installMediaSession, updateMediaSessionMetadata, updateMediaSessionState } from '../../media-session';
 import { applyTempoChange } from '../../services/tempo';
+import {
+  buildSessionCsv,
+  isSessionRecordingEnabled,
+  sessionStats,
+  setSessionRecordingEnabled,
+  startSessionRecording,
+  stopSessionRecording,
+} from '../../services/session-recording';
 
 // ── Cursor RAF ──────────────────────────────────────────────────────────────────
 
@@ -236,6 +244,17 @@ function mount(_slot: HTMLElement): void {
   const summaryClose     = document.getElementById('btn-summary-close')  as HTMLButtonElement;
   const summaryRetry     = document.getElementById('btn-summary-retry')  as HTMLButtonElement;
   const summaryReplay    = document.getElementById('btn-summary-replay') as HTMLButtonElement;
+  const btnSessionRecord = document.getElementById('btn-session-record') as HTMLButtonElement | null;
+  const btnSessionReview = document.getElementById('btn-session-review') as HTMLButtonElement | null;
+  const btnSessionCsv    = document.getElementById('btn-session-csv')    as HTMLButtonElement | null;
+
+
+  function syncSessionRecordingButton(): void {
+    if (!btnSessionRecord) return;
+    const active = isSessionRecordingEnabled();
+    btnSessionRecord.textContent = active ? '⏺ Recording ON' : '⏺ Record session';
+    btnSessionRecord.classList.toggle('active', active);
+  }
 
   installMediaSession({
     play: () => {
@@ -357,6 +376,12 @@ function mount(_slot: HTMLElement): void {
       } else {
         sessionSummaryTracker.startSession();
         startPracticeSessionCapture(session.model.title, session.selectedPart);
+        startSessionRecording({
+          title: session.model.title,
+          part: session.selectedPart,
+          tempoMarks: session.model.tempo_marks,
+          notes: session.model.notes.filter((note) => note.part === session.selectedPart),
+        });
         const audioTimeSec = engine.ctx.currentTime;
         const response = await startPlayback(getSelectedDeviceId());
         emitPlaybackSyncEvent({
@@ -435,6 +460,18 @@ function mount(_slot: HTMLElement): void {
       headphoneWarning.classList.add('hidden');
       const summary = sessionSummaryTracker.finishSession();
       if (summary) showSessionSummary(summary);
+      const recorded = stopSessionRecording();
+      if (recorded) {
+        const saveRes = await fetch('/session/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(recorded),
+        }).catch(() => null);
+        if (saveRes?.ok) {
+          const stats = sessionStats(recorded);
+          setAppStatus(`session saved · ≤50c ${stats.within50Pct.toFixed(0)}% · ≤100c ${stats.within100Pct.toFixed(0)}%`, 'success');
+        }
+      }
       syncPauseButton();
       syncTransportButtons();
     } catch (err) {
@@ -467,6 +504,7 @@ function mount(_slot: HTMLElement): void {
     session.cursor.osmd.cursor.show();
     headphoneWarning.classList.add('hidden');
     sessionSummaryTracker.reset();
+    stopSessionRecording();
     hideSessionSummary();
     syncPauseButton();
     syncTransportButtons();
@@ -474,6 +512,63 @@ function mount(_slot: HTMLElement): void {
 
   warningDismiss.addEventListener('click', () => { headphoneWarning.classList.add('hidden'); });
   summaryClose.addEventListener('click', () => { hideSessionSummary(); });
+
+  btnSessionRecord?.addEventListener('click', () => {
+    setSessionRecordingEnabled(!isSessionRecordingEnabled());
+    syncSessionRecordingButton();
+  });
+
+  btnSessionReview?.addEventListener('click', async () => {
+    const res = await fetch('/session/list').catch(() => null);
+    if (!res?.ok) return;
+    const listPayload = (await res.json()) as { sessions: Array<{ id: string }> };
+    const latest = listPayload.sessions[0];
+    if (!latest) return;
+    const sessionRes = await fetch(`/session/${latest.id}`).catch(() => null);
+    if (!sessionRes?.ok) return;
+    const sessionPayload = (await sessionRes.json()) as {
+      frames: Array<{ t: number; midi: number; conf: number }>;
+    };
+    const frames = sessionPayload.frames;
+    if (frames.length === 0) return;
+
+    window.dispatchEvent(new CustomEvent('session-review-clear'));
+
+    // Schedule each frame at the correct wall-clock offset based on frame.t
+    // (milliseconds since playback started), so replay matches original speed.
+    const replayStart = performance.now();
+    function scheduleFrame(idx: number): void {
+      if (idx >= frames.length) return;
+      const frame = frames[idx];
+      const delay = Math.max(0, frame.t - (performance.now() - replayStart));
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('session-review-frame', { detail: frame }));
+        scheduleFrame(idx + 1);
+      }, delay);
+    }
+    scheduleFrame(0);
+  });
+
+  btnSessionCsv?.addEventListener('click', async () => {
+    const res = await fetch('/session/list').catch(() => null);
+    if (!res?.ok) return;
+    const listPayload = (await res.json()) as { sessions: Array<{ id: string }> };
+    const latest = listPayload.sessions[0];
+    if (!latest) return;
+    const sessionRes = await fetch(`/session/${latest.id}`).catch(() => null);
+    if (!sessionRes?.ok) return;
+    const sessionPayload = (await sessionRes.json()) as {
+      frames: Array<{ t: number; beat: number; midi: number | null; conf: number; expected_midi: number | null; measure: number | null }>;
+    };
+    const csv = buildSessionCsv(sessionPayload);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'session_export.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  });
 
   // Replay: rewind and play again, preserving session stats for review.
   summaryReplay.addEventListener('click', () => {
@@ -492,6 +587,7 @@ function mount(_slot: HTMLElement): void {
 
   syncPauseButton();
   syncTransportButtons();
+  syncSessionRecordingButton();
 
   const onKeydown = (e: KeyboardEvent): void => {
     if (e.repeat) return;

@@ -42,14 +42,24 @@
 ## Workflow per issue
 
 1. Review the GitHub issue — check for stale assumptions before writing code
-2. Create feature branch
-3. Write code + tests
-4. Run linter — fix all violations before committing
-5. Run tests — all must pass before committing
-6. Update README.md status table if any component status has changed
-7. Commit with `Closes #N` in body
-8. Push branch and open PR
-9. Merge PR → issue auto-closes
+2. Create feature branch on GitHub (`github:create_branch`) — never work without a branch
+3. For every file to be changed: **fetch from the branch first** (`github:get_file_contents` with `branch=<head>`) — never reconstruct from memory, diff, or a prior commit
+4. Write changes and push to the branch (`github:push_files`) — verify the returned SHA confirms success
+5. Run linter — fix all violations before committing
+6. Read the source of every function being mocked in tests — verify the mock has the correct constructor signature before pushing
+7. Update README.md status table if any component status has changed
+8. Open PR — **stop here and wait for user confirmation before merging**
+9. User merges PR → issue auto-closes
+
+## Rules Claude must never break
+
+- **Never merge a PR** — Claude pushes fixes and reports status. Merging is always the user's decision, even when all gates are green.
+- **Never edit local files (C:\Users\steph\...) as a substitute for pushing to GitHub** — local edits that are not pushed accomplish nothing. All work goes through `github:push_files`.
+- **Always fetch the current file from the branch before editing** — use `github:get_file_contents` with `branch=<head-branch>`. Never reconstruct a file from memory, diff context, or a prior commit SHA. Violation of this rule caused `index.ts` to be silently overwritten with wrong content.
+- **Always verify a push succeeded** — check the returned SHA. Do not report work as done until the push is confirmed.
+- **Never start a coding task without a branch** — creating a branch and then leaving it at main's content is the same as not creating it.
+- **Before writing test mocks: read the real class being mocked** — check its `__init__` signature and any methods called on it during the code path under test. A mock with the wrong signature will cause CI to fail with `TypeError`.
+- **Never report "done" while CI is still running or failing** — wait for CI to complete and triage any failures before closing the loop with the user.
 
 ## Before every commit
 
@@ -88,6 +98,18 @@ They run locally (where devices exist) and are **automatically skipped in CI**
 (`GITHUB_ACTIONS` env var is set by GitHub Actions).
 
 Do NOT remove hardware marks to make CI pass — fix the underlying issue instead.
+
+### CI environment constraints
+
+CI has no audio hardware. Any test that directly or indirectly constructs `MicCapture`
+(or calls `sounddevice` in any form) will fail in CI unless:
+- The test is marked `@pytest.mark.hardware`, OR
+- The test monkeypatches `MicCapture` (and `PitchPipeline`) in `backend.audio.pipeline`
+  before the code under test runs.
+
+When writing tests for code paths that rebuild hardware objects (e.g. `set_force_cpu`),
+always patch both `MicCapture` and `PitchPipeline` at the module level where they are
+imported, not at the class definition level.
 
 ## What ruff catches
 

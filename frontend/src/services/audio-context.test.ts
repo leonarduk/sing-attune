@@ -22,4 +22,23 @@ describe('audio-context soundfont fallback mode', () => {
     expect(listener).toHaveBeenCalledWith('loading');
     expect(listener).toHaveBeenCalledWith('synth-fallback');
   });
+
+  it('allows retrying soundfont load after an initial failure', async () => {
+    const audioContextStub = {} as AudioContext;
+    vi.stubGlobal('AudioContext', vi.fn(() => audioContextStub));
+
+    const { SoundfontLoader } = await import('../playback/soundfont');
+    const loadSpy = vi.spyOn(SoundfontLoader.prototype, 'load')
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(undefined);
+
+    const audioContext = await import('./audio-context');
+
+    await audioContext.ensureSoundfontLoaded();
+    expect(audioContext.getPlaybackTimbreMode()).toBe('synth-fallback');
+
+    await audioContext.retrySoundfontLoad();
+    expect(audioContext.getPlaybackTimbreMode()).toBe('soundfont');
+    expect(loadSpy).toHaveBeenCalledTimes(2);
+  });
 });
