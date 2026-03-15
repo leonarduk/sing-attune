@@ -171,6 +171,7 @@ function mount(_slot: HTMLElement): void {
 
   const unsubscribeLoaded = onScoreLoaded(() => { syncTransportButtons(); });
   const unsubscribeCleared = onScoreCleared(() => { stopCursorRaf(); syncTransportButtons(); });
+
   function syncPauseButton(): void {
     const session = getSession();
     if (!session || session.engine.state === 'stopped') {
@@ -188,9 +189,6 @@ function mount(_slot: HTMLElement): void {
       btnPause.innerHTML = '&#9654; Resume';
     }
   }
-
-  onScoreLoaded(() => { syncTransportButtons(); });
-  onScoreCleared(() => { stopCursorRaf(); syncTransportButtons(); });
 
   btnPlay.addEventListener('click', async () => {
     const session = getSession();
@@ -364,8 +362,8 @@ function mount(_slot: HTMLElement): void {
       return;
     }
     if (e.code === 'KeyR') { e.preventDefault(); if (!btnRewind.disabled) btnRewind.click(); return; }
-    if (e.key === 'ArrowLeft')  { e.preventDefault(); if (session.engine.state !== 'playing') void seekByBeats(-1); return; }
-    if (e.key === 'ArrowRight') { e.preventDefault(); if (session.engine.state !== 'playing') void seekByBeats(1); }
+    if (e.code === 'ArrowLeft')  { e.preventDefault(); if (session.engine.state !== 'playing') void seekByBeats(-1); return; }
+    if (e.code === 'ArrowRight') { e.preventDefault(); if (session.engine.state !== 'playing') void seekByBeats(1); }
   };
   window.addEventListener('keydown', onKeydown);
 
