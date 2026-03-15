@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import path from 'path';
 
 const scoreModel = {
   title: 'E2E Mock Score',
@@ -58,17 +59,18 @@ test('load -> play -> pause with mocked backend and no console errors', async ({
 
   await expect(page.locator('#btn-play')).toBeDisabled();
 
-  await page.locator('#file-input').setInputFiles('../musescore/One Day More satb_compressed.mxl');
+  // Use a committed minimal MXL fixture - path is relative to this spec file.
+  const fixturePath = path.resolve(__dirname, 'fixtures', 'minimal.mxl');
+  await page.locator('#file-input').setInputFiles(fixturePath);
 
   await expect(page.locator('#score-info')).toContainText('E2E Mock Score');
   await expect(page.locator('#btn-play')).toBeEnabled();
 
   await page.locator('#btn-play').click();
 
-  const startRehearsal = page.getByRole('button', { name: 'Start rehearsal' });
-  if (await startRehearsal.isVisible()) {
-    await startRehearsal.click();
-  }
+  // #btn-start-rehearsal is hidden by default and only appears after warmup.
+  // Assert it is NOT visible in a plain load->play flow.
+  await expect(page.locator('#btn-start-rehearsal')).toBeHidden();
 
   await expect(page.locator('#btn-pause')).toBeEnabled();
   await expect(page.locator('#btn-pause')).toContainText('Pause');
