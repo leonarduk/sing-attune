@@ -5,6 +5,7 @@ Day 6: Playback state machine + real WebSocket pitch stream.
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +16,7 @@ from .score.parser import parse_musicxml
 from .score.upload import persist_upload_to_temp
 from .audio.capture import list_input_devices, default_input_device_id
 from .audio.pipeline import PlaybackPipeline, _CLIENT_QUEUE_MAXSIZE
+from .session.store import list_sessions, read_session, save_session
 
 app = FastAPI(
     title="sing-attune",
@@ -210,6 +212,51 @@ async def pitch_stream(websocket: WebSocket) -> None:
         pass
     finally:
         _pipeline.remove_client(q)
+
+
+# ── Session recording persistence ─────────────────────────────────────────────
+
+
+@app.post("/session/save")
+async def session_save(payload: dict[str, Any]) -> JSONResponse:
+    frames = payload.get("frames")
+    if not isinstance(frames, list):
+        raise HTTPException(status_code=400, detail="frames must be a list")
+
+    normalized_payload = {
+        "title": str(payload.get("title") or "Untitled"),
+        "part": str(payload.get("part") or "Unknown"),
+        "created_at": str(payload.get("created_at") or ""),
+        "frames": [
+            {
+                "t": float(frame.get("t", 0.0)),
+                "beat": float(frame.get("beat", 0.0)),
+                "midi": None if frame.get("midi") is None else float(frame.get("midi")),
+                "conf": float(frame.get("conf", 0.0)),
+                "expected_midi": None if frame.get("expected_midi") is None else float(frame.get("expected_midi")),
+                "measure": None if frame.get("measure") is None else int(frame.get("measure")),
+            }
+            for frame in frames
+            if isinstance(frame, dict)
+        ],
+    }
+
+    session_id, _ = save_session(normalized_payload)
+    return JSONResponse({"id": session_id, "frame_count": len(normalized_payload["frames"])})
+
+
+@app.get("/session/list")
+async def session_list() -> JSONResponse:
+    return JSONResponse({"sessions": list_sessions()})
+
+
+@app.get("/session/{session_id}")
+async def session_get(session_id: str) -> JSONResponse:
+    try:
+        payload = read_session(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return JSONResponse(payload)
 
 
 # ── Score upload ───────────────────────────────────────────────────────────────
