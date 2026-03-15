@@ -41,9 +41,10 @@ describe('progress history', () => {
     capturePitchFrame({ t: 0,    midi: 55, conf: 0.8 }); // +100 (default)
     capturePitchFrame({ t: 5000, midi: 57, conf: 0.8 }); // gap > 2000ms, skipped
     capturePitchFrame({ t: 5200, midi: 58, conf: 0.8 }); // +200
+    capturePitchFrame({ t: 5400, midi: 58, conf: 0.8 }); // +200 — pushes total to 500ms (MIN_SESSION_DURATION_MS)
 
     const summary = finishPracticeSessionCapture();
-    expect(summary?.singingDurationMs).toBe(300);
+    expect(summary?.singingDurationMs).toBe(500);
   });
 
   it('skips out-of-order frames for duration (monotonic clock)', () => {
@@ -67,16 +68,17 @@ describe('progress history', () => {
     capturePitchFrame({ t: 100, midi: 60, conf: 0.8 }); // voiced
     capturePitchFrame({ t: 200, midi: 64, conf: 0.9 }); // voiced
     capturePitchFrame({ t: 300, midi: 30, conf: 0.3 }); // below threshold — should not affect range
+    capturePitchFrame({ t: 400, midi: 62, conf: 0.9 }); // voiced — pushes total to 500ms (MIN_SESSION_DURATION_MS)
 
     const summary = finishPracticeSessionCapture();
-    // Range must only reflect the two voiced frames
+    // Range must only reflect the voiced frames
     expect(summary?.minMidi).toBe(60);
     expect(summary?.maxMidi).toBe(64);
-    // Average must only include voiced frames: (0.8 + 0.9) / 2 = 0.85
-    expect(summary?.averageConfidence).toBeCloseTo(0.85, 8);
+    // Average must only include voiced frames: (0.8 + 0.9 + 0.9) / 3 ≈ 0.8667
+    expect(summary?.averageConfidence).toBeCloseTo(0.8667, 4);
     // Duration accumulates for all in-order frames regardless of confidence
-    // 100(default) + 100 + 100 + 100 = 400
-    expect(summary?.singingDurationMs).toBe(400);
+    // 100(default) + 100 + 100 + 100 + 100 = 500
+    expect(summary?.singingDurationMs).toBe(500);
   });
 
   it('ignores overlapping captures until the active one is finished', () => {

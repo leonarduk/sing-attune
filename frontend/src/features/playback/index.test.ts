@@ -99,7 +99,9 @@ describe('playbackFeature', () => {
     const btnPlay = document.getElementById('btn-play') as HTMLButtonElement;
     expect(btnPlay.disabled).toBe(true);
 
-    playbackFeature.unmount();
+    // unmount is always provided by playbackFeature even though the Feature
+    // interface marks it optional; use non-null assertion to satisfy tsc.
+    playbackFeature.unmount!();
   });
 
   it('shows a status message when play is triggered without a score session', () => {
@@ -112,6 +114,6 @@ describe('playbackFeature', () => {
 
     expect(setAppStatusMock).toHaveBeenCalledWith('Load a score first', 'warning');
 
-    playbackFeature.unmount();
+    playbackFeature.unmount!();
   });
 });
