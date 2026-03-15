@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getVisiblePartOptions, isAccompanimentPart } from './part-options';
+import { getMixerGroup, getVisiblePartOptions, isAccompanimentPart } from './part-options';
 
 describe('isAccompanimentPart', () => {
   it('matches common accompaniment aliases case-insensitively', () => {
@@ -53,5 +53,22 @@ describe('getVisiblePartOptions', () => {
       { name: 'Piano', hiddenByDefault: true },
       { name: 'Keyboard', hiddenByDefault: true },
     ]);
+  });
+});
+
+
+describe('getMixerGroup', () => {
+  it('classifies selected part as my-part', () => {
+    expect(getMixerGroup('Tenor', 'Tenor')).toBe('my-part');
+  });
+
+  it('classifies accompaniment aliases into accompaniment group', () => {
+    expect(getMixerGroup('Orchestra', 'Soprano')).toBe('accompaniment');
+    expect(getMixerGroup('Organ', 'Soprano')).toBe('accompaniment');
+    expect(getMixerGroup('Continuo', 'Soprano')).toBe('accompaniment');
+  });
+
+  it('classifies non-selected vocal parts as other-vocals', () => {
+    expect(getMixerGroup('Alto', 'Soprano')).toBe('other-vocals');
   });
 });

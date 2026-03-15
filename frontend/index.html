@@ -258,6 +258,35 @@
     #warmup-panel label { font-size: 0.75rem; }
     #warmup-status { font-size: 0.75rem; color: #b9cceb; min-height: 1em; }
     #btn-start-rehearsal.hidden { display: none; }
+
+    .mixer-panel {
+      border: 1px solid #1a5276;
+      border-radius: 6px;
+      padding: 8px;
+      display: grid;
+      gap: 6px;
+      background: #122542;
+    }
+    .mixer-panel.hidden { display: none; }
+    .mixer-panel label {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 0.75rem;
+      color: #b9cceb;
+    }
+    .mixer-panel input[type="range"] {
+      width: 100%;
+      accent-color: var(--color-accent);
+    }
+    .mixer-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.76rem;
+      color: #dce7ff;
+    }
+    .mixer-hint { color: #93a8ca; font-size: 0.72rem; }
     #btn-diagnostics.active {
       background: #1f6f8b;
       border-color: #53b7d8;
@@ -588,6 +617,8 @@
         <input id="tempo-slider" type="range" min="50" max="125" value="100" step="5" />
         <span id="tempo-label">100%</span>
       </div>
+
+      <div id="slot-part-mixer" class="feature-slot"></div>
 
       <button id="btn-browse"   class="transport-btn">Browse…</button>
       <button id="btn-load-test-score" class="transport-btn" style="display:none;">Load test score</button>
