@@ -35,6 +35,7 @@ let latencyValueEl: HTMLSpanElement | null = null;
 let errorEl: HTMLDivElement | null = null;
 let testButtonEl: HTMLButtonElement | null = null;
 let continueButtonEl: HTMLButtonElement | null = null;
+let requestButtonEl: HTMLButtonElement | null = null;
 let voiceTypeSelectEl: HTMLSelectElement | null = null;
 let voiceTypeSuggestionEl: HTMLDivElement | null = null;
 let octaveCompCheckboxEl: HTMLInputElement | null = null;
@@ -69,6 +70,11 @@ function setError(message: string): void {
 
 function setPermissionStatus(message: string): void {
   if (permissionStatusEl) permissionStatusEl.textContent = message;
+}
+
+function setRequestButtonVisibility(shouldShow: boolean): void {
+  if (!requestButtonEl) return;
+  requestButtonEl.style.display = shouldShow ? '' : 'none';
 }
 
 function cleanupMonitor(): void {
@@ -199,10 +205,12 @@ async function requestPermissionAndDevices(): Promise<void> {
     }
 
     setPermissionStatus('Microphone permission granted.');
+    setRequestButtonVisibility(false);
     if (continueButtonEl) continueButtonEl.disabled = false;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     setPermissionStatus('Microphone permission denied or unavailable.');
+    setRequestButtonVisibility(true);
     setError(`Could not access microphone: ${msg}`);
     cleanupMonitor();
     if (continueButtonEl) continueButtonEl.disabled = true;
@@ -367,7 +375,7 @@ function mount(_slot: HTMLElement): void {
   voiceTypeSuggestionEl = document.getElementById('audio-preflight-voice-suggestion') as HTMLDivElement;
   octaveCompCheckboxEl = document.getElementById('audio-preflight-octave-comp') as HTMLInputElement;
 
-  const requestButton = document.getElementById('audio-preflight-request') as HTMLButtonElement;
+  requestButtonEl = document.getElementById('audio-preflight-request') as HTMLButtonElement;
   const latencyEl = document.getElementById('audio-preflight-latency') as HTMLInputElement;
 
   const latencyMs = loadPreflightLatencyMs();
@@ -381,7 +389,7 @@ function mount(_slot: HTMLElement): void {
   if (selectedVoiceTypeId) voiceTypeSelectEl.value = selectedVoiceTypeId;
   octaveCompCheckboxEl.checked = loadOctaveCompensationEnabled();
 
-  requestButton.addEventListener('click', () => {
+  requestButtonEl.addEventListener('click', () => {
     void requestPermissionAndDevices();
   });
 

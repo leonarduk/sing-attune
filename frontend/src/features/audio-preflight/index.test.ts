@@ -149,3 +149,49 @@ describe('audio preflight Escape handling', () => {
     expect(event.defaultPrevented).toBe(false);
   });
 });
+
+
+describe('audio preflight permission request button visibility', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="slot-audio-preflight"></div>';
+    installMediaMocks();
+    const slot = document.getElementById('slot-audio-preflight') as HTMLDivElement;
+    audioPreflightFeature.mount(slot);
+  });
+
+  it('hides the "Allow microphone" button once permission is granted', async () => {
+    const openPromise = openModalAndWaitUntilReady();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const requestButton = document.getElementById('audio-preflight-request') as HTMLButtonElement;
+    expect(requestButton.style.display).toBe('none');
+
+    __audioPreflightInternals.closeModal(false);
+    await expect(openPromise).resolves.toBe(false);
+
+    audioPreflightFeature.unmount?.();
+  });
+
+  it('keeps the "Allow microphone" button visible when permission request fails', async () => {
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(async () => {
+          throw new Error('permission denied');
+        }),
+        enumerateDevices: vi.fn(async () => []),
+      },
+    });
+
+    const openPromise = openModalAndWaitUntilReady();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const requestButton = document.getElementById('audio-preflight-request') as HTMLButtonElement;
+    expect(requestButton.style.display).toBe('');
+
+    __audioPreflightInternals.closeModal(false);
+    await expect(openPromise).resolves.toBe(false);
+
+    audioPreflightFeature.unmount?.();
+  });
+});
