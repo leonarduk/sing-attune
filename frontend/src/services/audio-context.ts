@@ -15,6 +15,18 @@ let ctx: AudioContext | null = null;
 let soundfont: SoundfontLoader | null = null;
 let loadPromise: Promise<void> | null = null;
 
+export type PlaybackTimbreMode = 'loading' | 'soundfont' | 'synth-fallback';
+
+let playbackTimbreMode: PlaybackTimbreMode = 'loading';
+const playbackTimbreModeListeners = new Set<(mode: PlaybackTimbreMode) => void>();
+
+function setPlaybackTimbreMode(mode: PlaybackTimbreMode): void {
+  playbackTimbreMode = mode;
+  for (const listener of playbackTimbreModeListeners) {
+    listener(mode);
+  }
+}
+
 /**
  * Return (creating if necessary) the shared AudioContext.
  * Also kicks off soundfont loading in the background on first call.
@@ -45,12 +57,18 @@ export function ensureSoundfontLoaded(
   onError?: (err: unknown) => void,
 ): Promise<void> {
   if (!loadPromise) {
+    setPlaybackTimbreMode('loading');
     const ac = getAudioContext();
     const sf = getSoundfont();
-    loadPromise = sf.load(ac).catch((err: unknown) => {
-      console.error('[Soundfont] load failed:', err);
-      onError?.(err);
-    });
+    loadPromise = sf.load(ac)
+      .then(() => {
+        setPlaybackTimbreMode('soundfont');
+      })
+      .catch((err: unknown) => {
+        setPlaybackTimbreMode('synth-fallback');
+        console.error('[Soundfont] load failed:', err);
+        onError?.(err);
+      });
   }
   return loadPromise;
 }
@@ -58,4 +76,17 @@ export function ensureSoundfontLoaded(
 /** Expose the raw load promise for features that need to await it. */
 export function getSoundfontLoadPromise(): Promise<void> | null {
   return loadPromise;
+}
+
+export function getPlaybackTimbreMode(): PlaybackTimbreMode {
+  return playbackTimbreMode;
+}
+
+export function onPlaybackTimbreModeChange(
+  listener: (mode: PlaybackTimbreMode) => void,
+): () => void {
+  playbackTimbreModeListeners.add(listener);
+  return () => {
+    playbackTimbreModeListeners.delete(listener);
+  };
 }

@@ -18,9 +18,11 @@ import {
   getSoundfont,
   ensureSoundfontLoaded,
   getSoundfontLoadPromise,
+  getPlaybackTimbreMode,
 } from '../../services/audio-context';
 import { setSession, clearSession, getSession } from '../../services/score-session';
 import { setStatus, showErrorBanner, clearErrorBanner } from '../../services/backend';
+import { showToast } from '../../services/toast';
 import { getVisiblePartOptions } from '../../part-options';
 import { beatToMs, seekPlayback } from '../../transport/controls';
 import { beatFromClick, extractMeasureHitZones } from '../../score/click-seek';
@@ -113,7 +115,11 @@ function mount(slot: HTMLElement): void {
     // Kick off soundfont loading early (idempotent) so it overlaps with parse.
     ensureSoundfontLoaded((err) => {
       showErrorBanner('Soundfont failed to load; using synth fallback audio.');
-      setStatus('soundfont load failed — synth fallback active', 'error');
+      setStatus('soundfont unavailable — using synthesised tones', 'error');
+      showToast('Soundfont unavailable — using synthesised tones', {
+        variant: 'warning',
+        dedupeKey: 'soundfont-fallback',
+      });
       console.error('[Soundfont] load error:', err);
     });
 
@@ -167,7 +173,11 @@ function mount(slot: HTMLElement): void {
 
       setSession({ model, renderer, cursor, engine, selectedPart });
       setTransportEnabled(true);
-      setStatus('score loaded', 'ok');
+      if (getPlaybackTimbreMode() === 'synth-fallback') {
+        setStatus('score loaded — synth fallback active', 'error');
+      } else {
+        setStatus('score loaded', 'ok');
+      }
     } catch (err) {
       showErrorBanner('Score loaded, but playback setup failed. Check audio/soundfont settings and try again.');
       setStatus(String(err), 'error');

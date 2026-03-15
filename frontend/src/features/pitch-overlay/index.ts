@@ -21,7 +21,7 @@ import { showErrorBanner } from '../../services/backend';
 import { getFrameXPosition } from '../../services/cursor-projection';
 import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from '../../pitch/overlay';
 import { PitchGraphCanvas } from '../../pitch/graph';
-import { expectedNoteAtBeat } from '../../pitch/accuracy';
+import { expectedNoteAtBeat, GREEN_CENTS_THRESHOLD, AMBER_CENTS_THRESHOLD } from '../../pitch/accuracy';
 import { syntheticPitchFrameAt } from '../../pitch/synthetic';
 import { buildWarmupSequence, warmupMidiAt, WarmupTonePlayer, type WarmupSegment } from '../../warmup/session';
 import { PitchTimelineSync } from '../../pitch/timeline-sync';
@@ -195,7 +195,7 @@ function renderPhraseSummary(summary: PhraseSummary): void {
     <div class="phrase-summary-card">
       <div class="phrase-summary-title">Phrase ${summary.phraseId} · ${summary.withinTolerancePct.toFixed(0)}% in tolerance</div>
       <div class="phrase-summary-notes">${notesHtml}</div>
-      <div class="phrase-summary-legend">🟢 ≤50c · 🟡 51–100c · 🔴 &gt;100c</div>
+      <div class="phrase-summary-legend">🟢 ≤${GREEN_CENTS_THRESHOLD}c · 🟡 ${GREEN_CENTS_THRESHOLD + 1}–${AMBER_CENTS_THRESHOLD}c · 🔴 &gt;${AMBER_CENTS_THRESHOLD}c</div>
     </div>
   `;
 }
@@ -393,6 +393,7 @@ function mount(_slot: HTMLElement): void {
   const pitchGraphCanvasEl  = document.getElementById('pitch-graph-canvas')        as HTMLDivElement;
   const settingsPanelEl     = document.getElementById('settings-panel')            as HTMLDivElement;
   const btnSettings         = document.getElementById('btn-settings')              as HTMLButtonElement;
+  const btnSettingsClose    = document.getElementById('btn-settings-close')        as HTMLButtonElement;
   const settingsDeviceEl    = document.getElementById('settings-device')          as HTMLSelectElement;
   const settingsConfEl      = document.getElementById('settings-confidence')      as HTMLInputElement;
   const settingsConfLabelEl = document.getElementById('settings-confidence-label') as HTMLSpanElement;
@@ -502,6 +503,7 @@ function mount(_slot: HTMLElement): void {
     const visible = settingsPanelEl.classList.toggle('visible');
     if (visible) await refreshAudioSettings(settingsDeviceEl, settingsEngineEl);
   });
+  btnSettingsClose.addEventListener('click', () => { settingsPanelEl.classList.remove('visible'); });
   settingsPanelEl.addEventListener('click', (e) => { e.stopPropagation(); });
   window.addEventListener('click', (e) => {
     if (!settingsPanelEl.classList.contains('visible')) return;

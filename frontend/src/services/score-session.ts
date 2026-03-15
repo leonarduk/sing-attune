@@ -28,10 +28,11 @@ export interface ScoreSession {
 
 type SessionCallback = (session: ScoreSession) => void;
 type ClearCallback = () => void;
+type Unsubscribe = () => void;
 
-const loadedCallbacks: SessionCallback[] = [];
-const partChangedCallbacks: SessionCallback[] = [];
-const clearCallbacks: ClearCallback[] = [];
+const loadedCallbacks = new Set<SessionCallback>();
+const partChangedCallbacks = new Set<SessionCallback>();
+const clearCallbacks = new Set<ClearCallback>();
 
 let current: ScoreSession | null = null;
 
@@ -70,6 +71,10 @@ export function onScoreLoaded(cb: SessionCallback): () => void {
     const idx = loadedCallbacks.indexOf(cb);
     if (idx !== -1) loadedCallbacks.splice(idx, 1);
   };
+export function onScoreLoaded(cb: SessionCallback): Unsubscribe {
+  loadedCallbacks.add(cb);
+  if (current) cb(current);
+  return () => { loadedCallbacks.delete(cb); };
 }
 
 /**
@@ -77,9 +82,10 @@ export function onScoreLoaded(cb: SessionCallback): () => void {
  * session. If a session already exists at registration time the callback
  * fires immediately with the current selectedPart.
  */
-export function onPartChanged(cb: SessionCallback): void {
-  partChangedCallbacks.push(cb);
+export function onPartChanged(cb: SessionCallback): Unsubscribe {
+  partChangedCallbacks.add(cb);
   if (current) cb(current);
+  return () => { partChangedCallbacks.delete(cb); };
 }
 
 /** Register a callback fired just before each session tear-down. */
@@ -89,6 +95,9 @@ export function onScoreCleared(cb: ClearCallback): () => void {
     const idx = clearCallbacks.indexOf(cb);
     if (idx !== -1) clearCallbacks.splice(idx, 1);
   };
+export function onScoreCleared(cb: ClearCallback): Unsubscribe {
+  clearCallbacks.add(cb);
+  return () => { clearCallbacks.delete(cb); };
 }
 
 /**

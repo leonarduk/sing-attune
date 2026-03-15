@@ -57,6 +57,8 @@ describe('score-session store', () => {
     expect(onPartChanged).not.toHaveBeenCalled();
   });
   it('supports unsubscribing score-loaded and score-cleared listeners', async () => {
+
+  it('deduplicates and unsubscribes score session callbacks', async () => {
     const store = await import('./score-session');
     const onLoaded = vi.fn();
     const onCleared = vi.fn();
@@ -65,6 +67,13 @@ describe('score-session store', () => {
     const unsubscribeCleared = store.onScoreCleared(onCleared);
 
     store.setSession(buildSession('Soprano'));
+    const unsubscribeLoadedA = store.onScoreLoaded(onLoaded);
+    const unsubscribeLoadedB = store.onScoreLoaded(onLoaded);
+    const unsubscribeClearedA = store.onScoreCleared(onCleared);
+    const unsubscribeClearedB = store.onScoreCleared(onCleared);
+
+    const session = buildSession('Soprano');
+    store.setSession(session);
     store.clearSession();
 
     expect(onLoaded).toHaveBeenCalledTimes(1);
@@ -74,6 +83,12 @@ describe('score-session store', () => {
     unsubscribeCleared();
 
     store.setSession(buildSession('Alto'));
+    unsubscribeLoadedA();
+    unsubscribeLoadedB();
+    unsubscribeClearedA();
+    unsubscribeClearedB();
+
+    store.setSession(session);
     store.clearSession();
 
     expect(onLoaded).toHaveBeenCalledTimes(1);
