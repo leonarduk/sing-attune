@@ -38,6 +38,8 @@ import {
 
 // ── Cursor RAF ──────────────────────────────────────────────────────────────────
 
+/** Minimum ms between dispatched review frames to avoid flooding the event loop. */
+const REVIEW_PLAYBACK_MIN_INTERVAL_MS = 16;
 
 async function restartLoopPlayback(): Promise<void> {
   const session = getSession();
@@ -518,43 +520,82 @@ function mount(_slot: HTMLElement): void {
   });
 
   btnSessionReview.addEventListener('click', async () => {
-    const res = await fetch('/session/list');
-    if (!res.ok) return;
-    const listPayload = (await res.json()) as { sessions: Array<{ id: string }> };
-    const latest = listPayload.sessions[0];
-    if (!latest) return;
-    const sessionRes = await fetch(`/session/${latest.id}`);
-    if (!sessionRes.ok) return;
-    const sessionPayload = (await sessionRes.json()) as { frames: Array<{ t: number; midi: number; conf: number }> };
-    window.dispatchEvent(new CustomEvent('session-review-clear'));
-    let idx = 0;
-    const timer = window.setInterval(() => {
-      const frame = sessionPayload.frames[idx++];
-      if (!frame) {
-        window.clearInterval(timer);
+    try {
+      const res = await fetch('/session/list');
+      if (!res.ok) {
+        setAppStatus('Failed to load session list', 'error');
         return;
       }
-      window.dispatchEvent(new CustomEvent('session-review-frame', { detail: frame }));
-    }, 50);
+      const listPayload = (await res.json()) as { sessions: Array<{ id: string }> };
+      const latest = listPayload.sessions[0];
+      if (!latest) {
+        setAppStatus('No sessions recorded yet', 'warning');
+        return;
+      }
+      const sessionRes = await fetch(`/session/${latest.id}`);
+      if (!sessionRes.ok) {
+        setAppStatus('Failed to load session data', 'error');
+        return;
+      }
+      const sessionPayload = (await sessionRes.json()) as { frames: Array<{ t: number; midi: number; conf: number }> };
+      window.dispatchEvent(new CustomEvent('session-review-clear'));
+
+      // Schedule frames using actual timestamp deltas so replay speed matches recording.
+      // frame.t is in milliseconds from playback start.
+      const frames = sessionPayload.frames;
+      if (frames.length === 0) return;
+
+      let idx = 0;
+      const scheduleNext = (): void => {
+        if (idx >= frames.length) return;
+        const frame = frames[idx++];
+        window.dispatchEvent(new CustomEvent('session-review-frame', { detail: frame }));
+        if (idx < frames.length) {
+          const delay = Math.max(
+            REVIEW_PLAYBACK_MIN_INTERVAL_MS,
+            frames[idx].t - frame.t,
+          );
+          window.setTimeout(scheduleNext, delay);
+        }
+      };
+      scheduleNext();
+    } catch (err) {
+      setAppStatus(`Review playback failed: ${String(err)}`, 'error');
+      console.error('Session review failed:', err);
+    }
   });
 
   btnSessionCsv.addEventListener('click', async () => {
-    const res = await fetch('/session/list');
-    if (!res.ok) return;
-    const listPayload = (await res.json()) as { sessions: Array<{ id: string }> };
-    const latest = listPayload.sessions[0];
-    if (!latest) return;
-    const sessionRes = await fetch(`/session/${latest.id}`);
-    if (!sessionRes.ok) return;
-    const sessionPayload = (await sessionRes.json()) as { frames: Array<{ t: number; beat: number; midi: number | null; conf: number; expected_midi: number | null; measure: number | null }> };
-    const csv = buildSessionCsv(sessionPayload);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'session_export.csv';
-    link.click();
-    URL.revokeObjectURL(url);
+    try {
+      const res = await fetch('/session/list');
+      if (!res.ok) {
+        setAppStatus('Failed to load session list', 'error');
+        return;
+      }
+      const listPayload = (await res.json()) as { sessions: Array<{ id: string }> };
+      const latest = listPayload.sessions[0];
+      if (!latest) {
+        setAppStatus('No sessions recorded yet', 'warning');
+        return;
+      }
+      const sessionRes = await fetch(`/session/${latest.id}`);
+      if (!sessionRes.ok) {
+        setAppStatus('Failed to load session data', 'error');
+        return;
+      }
+      const sessionPayload = (await sessionRes.json()) as { frames: Array<{ t: number; beat: number; midi: number | null; conf: number; expected_midi: number | null; measure: number | null }> };
+      const csv = buildSessionCsv(sessionPayload);
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'session_export.csv';
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setAppStatus(`CSV export failed: ${String(err)}`, 'error');
+      console.error('CSV export failed:', err);
+    }
   });
 
   // Replay: rewind and play again, preserving session stats for review.
