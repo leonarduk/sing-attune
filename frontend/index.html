@@ -99,6 +99,48 @@
     }
     #warning-dismiss:hover { background: rgba(230,81,0,0.3); }
 
+    /* ── Session summary modal ── */
+    #session-summary-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(7, 10, 22, 0.75);
+      z-index: 60;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    #session-summary-modal.hidden { display: none; }
+    #session-summary-card {
+      width: min(560px, 100%);
+      background: var(--color-surface);
+      border: 1px solid #1a5276;
+      border-radius: 10px;
+      padding: 16px;
+      box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4);
+    }
+    #session-summary-card h2 {
+      color: var(--color-accent);
+      font-size: 1rem;
+      margin-bottom: 10px;
+    }
+    #session-summary-content {
+      white-space: pre-wrap;
+      color: #d6dff7;
+      font-size: 0.86rem;
+      line-height: 1.4;
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      background: #0d162a;
+      padding: 10px;
+      margin-bottom: 12px;
+    }
+    #session-summary-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
     /* ── Toolbar (left sidebar) ── */
     #toolbar {
       width: 250px;
@@ -166,6 +208,13 @@
       white-space: nowrap;
     }
     #pitch-readout { font-size: 0.8rem; color: #c5d9ff; min-width: 120px; }
+    #score-info   { font-size: 0.8rem; color: var(--color-text-muted); }
+    #pitch-readout, #session-range-readout, #session-range-summary {
+      font-size: 0.8rem;
+      color: #c5d9ff;
+      min-width: 120px;
+    }
+    #session-range-summary { color: #a8b7cf; font-size: 0.75rem; }
 
     #btn-diagnostics.active {
       background: #1f6f8b;
@@ -430,6 +479,18 @@
     <button id="warning-dismiss">Dismiss</button>
   </div>
 
+  <div id="session-summary-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="session-summary-title">
+    <div id="session-summary-card">
+      <h2 id="session-summary-title">Practice summary</h2>
+      <pre id="session-summary-content">No summary available.</pre>
+      <div id="session-summary-actions">
+        <button id="btn-summary-close" class="transport-btn">Close</button>
+        <button id="btn-summary-replay" class="transport-btn">Replay</button>
+        <button id="btn-summary-retry" class="transport-btn">Retry</button>
+      </div>
+    </div>
+  </div>
+
   <div id="app-layout">
 
     <!-- Left toolbar: transport + part/tempo/transpose controls -->
@@ -486,10 +547,13 @@
       </div>
 
       <button id="btn-browse"   class="transport-btn">Browse…</button>
+      <button id="btn-load-test-score" class="transport-btn" style="display:none;">Load test score</button>
       <button id="btn-diagnostics" class="transport-btn">Pitch diagnostics</button>
       <button id="btn-settings" class="transport-btn">⚙ Settings</button>
 
       <span id="pitch-readout" aria-live="polite">Detected: —</span>
+      <span id="session-range-readout" aria-live="polite">Session range: —</span>
+      <span id="session-range-summary" aria-live="polite">Last session range: —</span>
       <span id="score-info"></span>
     </div>
 
@@ -510,6 +574,22 @@
       <div class="settings-row">
         <label for="settings-trail">Pitch trail length: <span id="settings-trail-label">2.0s</span></label>
         <input id="settings-trail" type="range" min="0.5" max="5" step="0.5" value="2" />
+      </div>
+      <div class="settings-row">
+        <label for="settings-stable-confidence">Stable note min confidence: <span id="settings-stable-confidence-label">0.60</span></label>
+        <input id="settings-stable-confidence" type="range" min="0.4" max="0.95" step="0.05" value="0.6" />
+      </div>
+      <div class="settings-row">
+        <label for="settings-stable-cluster">Stable note cluster tolerance: <span id="settings-stable-cluster-label">35 cents</span></label>
+        <input id="settings-stable-cluster" type="range" min="10" max="120" step="5" value="35" />
+      </div>
+      <div class="settings-row">
+        <label for="settings-stable-hold">Stable note hold duration: <span id="settings-stable-hold-label">160 ms</span></label>
+        <input id="settings-stable-hold" type="range" min="40" max="800" step="20" value="160" />
+      </div>
+      <div class="settings-row">
+        <label for="settings-stable-window">Stable note window: <span id="settings-stable-window-label">320 ms</span></label>
+        <input id="settings-stable-window" type="range" min="80" max="1500" step="20" value="320" />
       </div>
       <div class="settings-row">
         <label><input id="settings-show-note-names" type="checkbox" /> Show note names in pitch readout</label>
@@ -590,7 +670,7 @@
       <div id="slot-playback"      class="feature-slot"></div>
       <div id="slot-part-selector" class="feature-slot"></div>
       <div id="slot-pitch-overlay" class="feature-slot"></div>
-      <div id="slot-progress-history" class="feature-slot"></div>
+      <div id="slot-audio-preflight" class="feature-slot"></div>
     </div>
 
   </div>

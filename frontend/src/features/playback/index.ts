@@ -21,7 +21,9 @@ import { recordBeatSample, resetProjection, getCursorX } from '../../services/cu
 import { finishPracticeSessionCapture, startPracticeSessionCapture } from '../../services/progress-history';
 import { emitPlaybackSyncEvent } from '../../services/playback-sync';
 import { beatToMs, postPlayback, startPlayback, seekPlayback } from '../../transport/controls';
+import { sessionSummaryTracker, type SessionSummary } from '../../practice/session-summary';
 import { type Feature } from '../../feature-types';
+import { ensureAudioPreflightReady } from '../../services/audio-preflight';
 
 // ── Cursor RAF ──────────────────────────────────────────────────────────────────
 
@@ -85,6 +87,41 @@ function getSelectedDeviceId(): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+function formatSummary(summary: SessionSummary): string {
+  const avgDeviation = summary.averagePitchDeviationCents === null
+    ? '—'
+    : `${summary.averagePitchDeviationCents.toFixed(1)} cents`;
+  const difficultBars = summary.mostDifficultBars.length === 0
+    ? 'No aligned bars yet.'
+    : summary.mostDifficultBars
+      .map((bar) => `Bar ${bar.measure}: ${bar.avgDeviationCents.toFixed(1)} cents`)
+      .join(' · ');
+  const sustained = summary.longestSustainedNote
+    ? `${summary.longestSustainedNote.noteName} (${(summary.longestSustainedNote.durationMs / 1000).toFixed(2)}s)`
+    : '—';
+
+  return [
+    `Lowest note: ${summary.lowestNote ?? '—'}`,
+    `Highest note: ${summary.highestNote ?? '—'}`,
+    `Average pitch deviation: ${avgDeviation}`,
+    `Most difficult bars: ${difficultBars}`,
+    `Longest sustained note: ${sustained}`,
+  ].join('\n');
+}
+
+function showSessionSummary(summary: SessionSummary): void {
+  const modal = document.getElementById('session-summary-modal') as HTMLDivElement;
+  const content = document.getElementById('session-summary-content') as HTMLPreElement;
+  if (!modal || !content) return;
+  content.textContent = formatSummary(summary);
+  modal.classList.remove('hidden');
+}
+
+function hideSessionSummary(): void {
+  const modal = document.getElementById('session-summary-modal') as HTMLDivElement;
+  modal?.classList.add('hidden');
+}
+
 // ── mount ─────────────────────────────────────────────────────────────────
 
 function mount(_slot: HTMLElement): void {
@@ -94,6 +131,9 @@ function mount(_slot: HTMLElement): void {
   const btnRewind = document.getElementById('btn-rewind') as HTMLButtonElement;
   const headphoneWarning = document.getElementById('headphone-warning') as HTMLDivElement;
   const warningDismiss   = document.getElementById('warning-dismiss')   as HTMLButtonElement;
+  const summaryClose     = document.getElementById('btn-summary-close')  as HTMLButtonElement;
+  const summaryRetry     = document.getElementById('btn-summary-retry')  as HTMLButtonElement;
+  const summaryReplay    = document.getElementById('btn-summary-replay') as HTMLButtonElement;
 
   // Merge into a single onScoreCleared callback so both always fire together,
   // regardless of whether the implementation replaces or appends listeners.
@@ -131,15 +171,41 @@ function mount(_slot: HTMLElement): void {
 
   const unsubscribeLoaded = onScoreLoaded(() => { syncTransportButtons(); });
   const unsubscribeCleared = onScoreCleared(() => { stopCursorRaf(); syncTransportButtons(); });
+  function syncPauseButton(): void {
+    const session = getSession();
+    if (!session || session.engine.state === 'stopped') {
+      btnPause.disabled = true;
+      btnPause.innerHTML = '&#9646;&#9646; Pause';
+      return;
+    }
+    if (session.engine.state === 'playing') {
+      btnPause.disabled = false;
+      btnPause.innerHTML = '&#9646;&#9646; Pause';
+      return;
+    }
+    if (session.engine.state === 'paused') {
+      btnPause.disabled = false;
+      btnPause.innerHTML = '&#9654; Resume';
+    }
+  }
+
+  onScoreLoaded(() => { syncTransportButtons(); });
+  onScoreCleared(() => { stopCursorRaf(); syncTransportButtons(); });
 
   btnPlay.addEventListener('click', async () => {
     const session = getSession();
     if (!session) return;
     const { engine, cursor } = session;
     if (engine.state === 'playing') return;
+    const preflightReady = await ensureAudioPreflightReady();
+    if (!preflightReady) {
+      setStatus('Audio setup is required before starting playback.', 'error');
+      return;
+    }
     headphoneWarning.classList.remove('hidden');
     const fromBeat = engine.state === 'paused' ? engine.startBeat : 0;
     try {
+      hideSessionSummary();
       if (fromBeat > 0) {
         const audioTimeSec = engine.ctx.currentTime;
         const response = await postPlayback('/playback/resume');
@@ -150,6 +216,7 @@ function mount(_slot: HTMLElement): void {
           syncOffsetMs: null,
         });
       } else {
+        sessionSummaryTracker.startSession();
         startPracticeSessionCapture(session.model.title, session.selectedPart);
         const audioTimeSec = engine.ctx.currentTime;
         const response = await startPlayback(getSelectedDeviceId());
@@ -223,6 +290,9 @@ function mount(_slot: HTMLElement): void {
       stopCursorRaf();
       session.cursor.stop();
       headphoneWarning.classList.add('hidden');
+      const summary = sessionSummaryTracker.finishSession();
+      if (summary) showSessionSummary(summary);
+      syncPauseButton();
       syncTransportButtons();
     } catch (err) {
       setStatus(`stop failed: ${String(err)}`, 'error');
@@ -252,10 +322,31 @@ function mount(_slot: HTMLElement): void {
     session.cursor.stop();
     session.cursor.osmd.cursor.show();
     headphoneWarning.classList.add('hidden');
+    sessionSummaryTracker.reset();
+    hideSessionSummary();
+    syncPauseButton();
     syncTransportButtons();
   });
 
   warningDismiss.addEventListener('click', () => { headphoneWarning.classList.add('hidden'); });
+  summaryClose.addEventListener('click', () => { hideSessionSummary(); });
+
+  // Replay: rewind and play again, preserving session stats for review.
+  summaryReplay.addEventListener('click', () => {
+    hideSessionSummary();
+    btnRewind.click();
+    btnPlay.click();
+  });
+
+  // Retry: reset session stats for a clean attempt, then rewind and play.
+  summaryRetry.addEventListener('click', () => {
+    hideSessionSummary();
+    sessionSummaryTracker.reset();
+    btnRewind.click();
+    btnPlay.click();
+  });
+
+  syncPauseButton();
   syncTransportButtons();
 
   const onKeydown = (e: KeyboardEvent): void => {
