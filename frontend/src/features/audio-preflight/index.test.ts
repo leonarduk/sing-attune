@@ -161,6 +161,36 @@ describe('audio preflight Escape handling', () => {
     window.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
   });
+
+  it('cancel button closes the modal', async () => {
+    const openPromise = openModalAndWaitUntilReady();
+    const cancelButton = document.getElementById('audio-preflight-cancel') as HTMLButtonElement;
+
+    cancelButton.click();
+
+    await expect(openPromise).resolves.toBe(false);
+    expect(__audioPreflightInternals.isPreflightModalHidden()).toBe(true);
+  });
+
+  it('close button closes the modal', async () => {
+    const openPromise = openModalAndWaitUntilReady();
+    const closeButton = document.getElementById('audio-preflight-close') as HTMLButtonElement;
+
+    closeButton.click();
+
+    await expect(openPromise).resolves.toBe(false);
+    expect(__audioPreflightInternals.isPreflightModalHidden()).toBe(true);
+  });
+
+  it('backdrop click closes the modal', async () => {
+    const openPromise = openModalAndWaitUntilReady();
+    const backdrop = document.querySelector('.audio-preflight-backdrop') as HTMLDivElement;
+
+    backdrop.click();
+
+    await expect(openPromise).resolves.toBe(false);
+    expect(__audioPreflightInternals.isPreflightModalHidden()).toBe(true);
+  });
 });
 
 

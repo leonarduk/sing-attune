@@ -20,12 +20,13 @@ import { setAppStatus } from '../../services/status';
 import { recordBeatSample, resetProjection, getCursorX } from '../../services/cursor-projection';
 import { finishPracticeSessionCapture, startPracticeSessionCapture } from '../../services/progress-history';
 import { emitPlaybackSyncEvent } from '../../services/playback-sync';
-import { beatToMs, postPlayback, setPlaybackTempo, startPlayback, seekPlayback } from '../../transport/controls';
+import { beatToMs, postPlayback, startPlayback, seekPlayback } from '../../transport/controls';
 import { sessionSummaryTracker, type SessionSummary } from '../../practice/session-summary';
 import { type Feature } from '../../feature-types';
 import { ensureAudioPreflightReady } from '../../services/audio-preflight';
 import { clearLoopRegion, getLoopRegion, setLoopEnd, setLoopStart } from '../../services/loop-region';
 import { installMediaSession, updateMediaSessionMetadata, updateMediaSessionState } from '../../media-session';
+import { applyTempoChange } from '../../services/tempo';
 
 // ── Cursor RAF ──────────────────────────────────────────────────────────────────
 
@@ -150,36 +151,13 @@ async function seekByBeats(delta: number): Promise<void> {
 
 
 async function adjustTempoByStep(stepPercent: number): Promise<void> {
-  const session = getSession();
-  if (!session) return;
-
   const tempoSliderEl = document.getElementById('tempo-slider') as HTMLInputElement | null;
-  const tempoLabelEl = document.getElementById('tempo-label') as HTMLSpanElement | null;
-  if (!tempoSliderEl || !tempoLabelEl) return;
+  if (!tempoSliderEl) return;
 
   const currentPercent = parseInt(tempoSliderEl.value, 10);
   if (Number.isNaN(currentPercent)) return;
 
-  const nextPercent = Math.max(50, Math.min(125, currentPercent + stepPercent));
-  if (nextPercent === currentPercent) return;
-
-  const previousMultiplier = session.engine.tempoMultiplier;
-  const nextMultiplier = nextPercent / 100;
-
-  tempoSliderEl.value = String(nextPercent);
-  tempoLabelEl.textContent = `${nextPercent}%`;
-
-  session.engine.setTempoMultiplier(nextMultiplier);
-  try {
-    await setPlaybackTempo(nextMultiplier);
-  } catch (err) {
-    session.engine.setTempoMultiplier(previousMultiplier);
-    const previousPercent = Math.round(previousMultiplier * 100);
-    tempoSliderEl.value = String(previousPercent);
-    tempoLabelEl.textContent = `${previousPercent}%`;
-    setAppStatus(`tempo update failed: ${String(err)}`, 'error');
-    console.error('Tempo update failed:', err);
-  }
+  await applyTempoChange(currentPercent + stepPercent);
 }
 
 function getSelectedDeviceId(): number | null {
@@ -222,6 +200,23 @@ function showSessionSummary(summary: SessionSummary): void {
 function hideSessionSummary(): void {
   const modal = document.getElementById('session-summary-modal') as HTMLDivElement;
   modal?.classList.add('hidden');
+}
+
+function setPauseButtonState(button: HTMLButtonElement, state: 'idle' | 'playing' | 'paused'): void {
+  if (state === 'playing') {
+    button.disabled = false;
+    button.innerHTML = '&#9646;&#9646; Pause (Space)';
+    return;
+  }
+
+  if (state === 'paused') {
+    button.disabled = false;
+    button.innerHTML = '&#9654; Resume (Space)';
+    return;
+  }
+
+  button.disabled = true;
+  button.innerHTML = '&#9646;&#9646; Pause';
 }
 
 function isSessionSummaryOpen(): boolean {
@@ -282,22 +277,10 @@ function mount(_slot: HTMLElement): void {
 
     // Pause/Resume: enabled when playing or paused.
     if (!session) {
-      btnPause.disabled = true;
-      btnPause.innerHTML = '&#9646;&#9646; Pause (Space)';
+      setPauseButtonState(btnPause, 'idle');
       return;
     }
-    if (playbackState === 'playing') {
-      btnPause.disabled = false;
-      btnPause.innerHTML = '&#9646;&#9646; Pause (Space)';
-      return;
-    }
-    if (playbackState === 'paused') {
-      btnPause.disabled = false;
-      btnPause.innerHTML = '&#9654; Resume (Space)';
-      return;
-    }
-    btnPause.disabled = true;
-    btnPause.innerHTML = '&#9646;&#9646; Pause (Space)';
+    setPauseButtonState(btnPause, playbackState);
   }
 
   const unsubscribeLoaded = onScoreLoaded((session) => {
@@ -315,18 +298,15 @@ function mount(_slot: HTMLElement): void {
   function syncPauseButton(): void {
     const session = getSession();
     if (!session || session.engine.state === 'idle') {
-      btnPause.disabled = true;
-      btnPause.innerHTML = '&#9646;&#9646; Pause (Space)';
+      setPauseButtonState(btnPause, 'idle');
       return;
     }
     if (session.engine.state === 'playing') {
-      btnPause.disabled = false;
-      btnPause.innerHTML = '&#9646;&#9646; Pause (Space)';
+      setPauseButtonState(btnPause, 'playing');
       return;
     }
     if (session.engine.state === 'paused') {
-      btnPause.disabled = false;
-      btnPause.innerHTML = '&#9654; Resume (Space)';
+      setPauseButtonState(btnPause, 'paused');
     }
   }
 

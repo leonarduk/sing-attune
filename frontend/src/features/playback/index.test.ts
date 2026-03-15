@@ -104,6 +104,18 @@ describe('playbackFeature', () => {
     playbackFeature.unmount!();
   });
 
+  it('does not show the Space shortcut on Pause when transport is idle', () => {
+    const slot = document.getElementById('slot-playback') as HTMLDivElement;
+    playbackFeature.mount(slot);
+
+    const btnPause = document.getElementById('btn-pause') as HTMLButtonElement;
+    expect(btnPause.disabled).toBe(true);
+    expect(btnPause.innerHTML).toContain('Pause');
+    expect(btnPause.innerHTML).not.toContain('(Space)');
+
+    playbackFeature.unmount!();
+  });
+
   it('shows a status message when play is triggered without a score session', () => {
     const slot = document.getElementById('slot-playback') as HTMLDivElement;
     playbackFeature.mount(slot);
