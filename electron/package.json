@@ -4,9 +4,33 @@
   "private": true,
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder"
   },
   "devDependencies": {
-    "electron": "^31.0.2"
+    "electron": "^31.0.2",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.singattune.app",
+    "files": [
+      "main.js",
+      "preload.js",
+      "splash.html",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../frontend/public/soundfonts",
+        "to": "soundfonts",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../NOTICE",
+        "to": "NOTICE"
+      }
+    ]
   }
 }
