@@ -63,9 +63,13 @@ export function getSession(): ScoreSession | null {
  * If a session already exists at registration time the callback fires
  * immediately — useful for features that mount after a score has loaded.
  */
-export function onScoreLoaded(cb: SessionCallback): void {
+export function onScoreLoaded(cb: SessionCallback): () => void {
   loadedCallbacks.push(cb);
   if (current) cb(current);
+  return () => {
+    const idx = loadedCallbacks.indexOf(cb);
+    if (idx !== -1) loadedCallbacks.splice(idx, 1);
+  };
 }
 
 /**
@@ -79,8 +83,12 @@ export function onPartChanged(cb: SessionCallback): void {
 }
 
 /** Register a callback fired just before each session tear-down. */
-export function onScoreCleared(cb: ClearCallback): void {
+export function onScoreCleared(cb: ClearCallback): () => void {
   clearCallbacks.push(cb);
+  return () => {
+    const idx = clearCallbacks.indexOf(cb);
+    if (idx !== -1) clearCallbacks.splice(idx, 1);
+  };
 }
 
 /**
