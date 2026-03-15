@@ -1,0 +1,12 @@
+sing-attune third-party notices
+
+This product bundles a pre-rendered piano soundfont JavaScript asset:
+
+- File: frontend/public/soundfonts/FluidR3_GM/acoustic_grand_piano-mp3.js
+- Upstream project: https://github.com/gleitz/midi-js-soundfonts
+- Upstream soundfont family: FluidR3_GM
+- Licence: Creative Commons Attribution 3.0 (CC BY 3.0)
+  https://creativecommons.org/licenses/by/3.0/us/
+
+Attribution source statement is documented by the upstream project README:
+https://raw.githubusercontent.com/gleitz/midi-js-soundfonts/master/README.md
