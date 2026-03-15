@@ -58,6 +58,13 @@ For backend-free testing, enable **Synthetic pitch input (no WebSocket)** in Set
 
 ---
 
+## Soundfont licensing and offline playback
+
+- The app now bundles `FluidR3_GM/acoustic_grand_piano-mp3.js` at `frontend/public/soundfonts/FluidR3_GM/` and loads it locally first.
+- This removes runtime CDN dependency for packaged/offline usage.
+- Licence audit and attribution details are documented in [`docs/soundfont-licensing.md`](docs/soundfont-licensing.md) and [`NOTICE`](NOTICE).
+
+---
 
 ## Pitch interpretation boundary
 

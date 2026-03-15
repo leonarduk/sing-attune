@@ -59,6 +59,14 @@ test('load -> play -> pause with mocked backend and no console errors', async ({
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ t_ms: 0 }) });
   });
 
+  await page.route('**/soundfonts/**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/javascript',
+      body: 'MIDI.Soundfont.acoustic_grand_piano = {};',
+    });
+  });
+
   await page.route('https://gleitz.github.io/**', async (route) => {
     await route.fulfill({
       status: 200,

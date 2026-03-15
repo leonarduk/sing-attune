@@ -1,5 +1,6 @@
 /**
- * SoundfontLoader — loads piano samples from the gleitz/midi-js-soundfonts CDN.
+ * SoundfontLoader — loads piano samples from a bundled FluidR3 asset first,
+ * then falls back to the gleitz/midi-js-soundfonts mirrors.
  *
  * Format: MIDI.js-style JS file containing base64-encoded MP3 samples for
  * each piano note. We fetch the file, extract the JSON object, decode each
@@ -10,14 +11,14 @@
  * note. Callers should apply AudioBufferSourceNode.detune to pitch-correct;
  * use getNearestSampledMidi() to find the offset in cents.
  *
- * Offline note: Electron has internet access by default. For fully-offline
- * use, bundle the JS file as a Vite static asset and point SOUNDFONT_URL
- * at the local path (e.g. '/assets/acoustic_grand_piano-mp3.js').
+ * Offline note: packaged builds should resolve the first URL below from local
+ * app assets, so playback still works when there is no internet connection.
  */
 
-// Mirror order is intentional: prefer CDN-backed endpoints first, then fall
-// back to a raw GitHub URL as a last resort.
+// Priority order is intentional: use the bundled local asset first so
+// packaged/offline environments never depend on runtime CDN access.
 export const SOUNDFONT_URLS = [
+  '/soundfonts/FluidR3_GM/acoustic_grand_piano-mp3.js',
   'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_grand_piano-mp3.js',
   'https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@gh-pages/FluidR3_GM/acoustic_grand_piano-mp3.js',
   'https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@master/FluidR3_GM/acoustic_grand_piano-mp3.js',
