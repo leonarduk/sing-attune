@@ -452,6 +452,8 @@ function refreshRecordingControls(ctrl: RecordingCtrl): void {
 async function refreshAudioSettings(
   settingsDeviceEl: HTMLSelectElement,
   settingsEngineEl: HTMLDivElement,
+  settingsCpuWarningEl: HTMLDivElement,
+  settingsForceCpuEl: HTMLInputElement,
 ): Promise<void> {
   try {
     const [devicesRes, engineRes] = await Promise.all([fetch('/audio/devices'), fetch('/audio/engine')]);
@@ -469,16 +471,28 @@ async function refreshAudioSettings(
     settingsDeviceEl.value = selectedDeviceId === null ? '' : String(selectedDeviceId);
     settingsDeviceEl.disabled = devicesPayload.devices.length === 0;
     if (engineRes.ok) {
-      const ep = (await engineRes.json()) as { active_engine: string; mode: string };
-      settingsEngineEl.textContent = `Pitch engine: ${ep.active_engine} (${ep.mode})`;
+      const ep = (await engineRes.json()) as {
+        active_engine: string;
+        mode: string;
+        cuda: boolean;
+        device: string;
+        force_cpu: boolean;
+      };
+      const engineLabel = ep.active_engine === 'torchcrepe' ? 'CREPE' : ep.active_engine;
+      const deviceLabel = ep.active_engine === 'torchcrepe' && ep.cuda ? ep.device : 'CPU';
+      settingsEngineEl.textContent = `Pitch engine: ${engineLabel} (${deviceLabel})`;
+      settingsForceCpuEl.checked = ep.force_cpu;
+      settingsCpuWarningEl.classList.toggle('visible', ep.active_engine !== 'torchcrepe');
     } else {
       settingsEngineEl.textContent = 'Pitch engine: unavailable';
+      settingsCpuWarningEl.classList.remove('visible');
     }
   } catch (err) {
     settingsDeviceEl.innerHTML = '';
     settingsDeviceEl.disabled = true;
     selectedDeviceId = null;
     settingsEngineEl.textContent = 'Pitch engine: unavailable';
+    settingsCpuWarningEl.classList.remove('visible');
     showErrorBanner('Unable to load audio devices. Check backend audio permissions and retry.');
     console.error('Failed to load settings data:', err);
   }
@@ -503,7 +517,9 @@ function mount(_slot: HTMLElement): void {
   const settingsTrailLabelEl = document.getElementById('settings-trail-label')    as HTMLSpanElement;
   const settingsNoteNamesEl = document.getElementById('settings-show-note-names') as HTMLInputElement;
   const settingsSynthEl     = document.getElementById('settings-synthetic-mode')  as HTMLInputElement;
+  const settingsForceCpuEl  = document.getElementById('settings-force-cpu')       as HTMLInputElement;
   const settingsEngineEl    = document.getElementById('settings-engine')           as HTMLDivElement;
+  const settingsCpuWarningEl = document.getElementById('settings-cpu-warning')     as HTMLDivElement;
   const recordingEnabledEl  = document.getElementById('recording-enabled')        as HTMLInputElement;
   const btnStop             = document.getElementById('btn-stop')                 as HTMLButtonElement;
   const btnRewind           = document.getElementById('btn-rewind')               as HTMLButtonElement;
@@ -628,7 +644,7 @@ function mount(_slot: HTMLElement): void {
   async function openSettingsPanel(): Promise<void> {
     settingsPanelEl.classList.add('visible');
     btnSettings.setAttribute('aria-expanded', 'true');
-    await refreshAudioSettings(settingsDeviceEl, settingsEngineEl);
+    await refreshAudioSettings(settingsDeviceEl, settingsEngineEl, settingsCpuWarningEl, settingsForceCpuEl);
   }
 
   function closeSettingsPanel(): void {
@@ -691,6 +707,18 @@ function mount(_slot: HTMLElement): void {
   btnStartRehearsal.addEventListener('click', () => {
     const playBtn = document.getElementById('btn-play') as HTMLButtonElement | null;
     playBtn?.click();
+  });
+
+  settingsForceCpuEl.addEventListener('change', async () => {
+    try {
+      const params = new URLSearchParams({ force_cpu: String(settingsForceCpuEl.checked) });
+      const res = await fetch(`/audio/engine?${params.toString()}`);
+      if (!res.ok) throw new Error(`/audio/engine HTTP ${res.status}`);
+      await refreshAudioSettings(settingsDeviceEl, settingsEngineEl, settingsCpuWarningEl, settingsForceCpuEl);
+    } catch (err) {
+      showErrorBanner('Unable to switch pitch engine mode.');
+      console.error('Failed to update pitch engine mode:', err);
+    }
   });
 
   settingsSynthEl.addEventListener('change', () => {

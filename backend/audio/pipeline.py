@@ -23,7 +23,7 @@ import threading
 from enum import Enum, auto
 
 from .capture import MicCapture
-from .pitch import PitchFrame, PitchPipeline, Engine, select_engine
+from .pitch import PitchFrame, PitchPipeline, Engine, resolve_engine_runtime
 
 log = logging.getLogger(__name__)
 
@@ -71,7 +71,9 @@ class PlaybackPipeline:
     """
 
     def __init__(self, engine: Engine | None = None) -> None:
-        self._engine = engine or select_engine()
+        self._force_cpu = False
+        self._runtime_info = resolve_engine_runtime()
+        self._engine = engine or self._runtime_info.engine
         self._lock = threading.Lock()
         self._state = PlaybackState.STOPPED
 
@@ -183,6 +185,44 @@ class PlaybackPipeline:
     @property
     def engine(self) -> Engine:
         return self._engine
+
+
+    @property
+    def runtime_info(self):
+        return self._runtime_info
+
+    @property
+    def force_cpu(self) -> bool:
+        return self._force_cpu
+
+    def set_force_cpu(self, enabled: bool) -> None:
+        with self._lock:
+            self._force_cpu = bool(enabled)
+            self._runtime_info = resolve_engine_runtime(force_cpu=self._force_cpu)
+            self._engine = self._runtime_info.engine
+            was_running = self._state != PlaybackState.STOPPED
+            current_state = self._state
+            if was_running:
+                device_id = self._capture.device_id if self._capture else None
+                self._teardown_locked()
+                self._pitch = PitchPipeline(
+                    engine=self._engine,
+                    on_frame=self._on_pitch_frame,
+                )
+                self._capture = MicCapture(
+                    device_id=device_id,
+                    on_window=self._pitch.push,
+                )
+                self._pitch.start()
+                if current_state == PlaybackState.PLAYING:
+                    self._capture.start()
+                self._state = current_state
+            log.info(
+                "PlaybackPipeline engine updated — engine=%s mode=%s device=%s",
+                self._runtime_info.engine.name,
+                self._runtime_info.mode,
+                self._runtime_info.device,
+            )
 
     def set_tempo_multiplier(self, multiplier: float) -> None:
         with self._lock:

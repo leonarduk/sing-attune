@@ -327,5 +327,29 @@ class TestAudioEngineEndpoint:
     def test_endpoint_shape(self, client):
         data = client.get("/audio/engine").json()
         assert data["active_engine"] in {"pyin", "torchcrepe"}
-        assert data["mode"] == "auto"
-        assert data["switchable"] is False
+        assert data["mode"] in {"auto", "forced_cpu"}
+        assert isinstance(data["switchable"], bool)
+        assert "cuda" in data
+        assert "device" in data
+        assert "force_cpu" in data
+
+    def test_force_cpu_toggle(self, client):
+        enabled = client.get("/audio/engine", params={"force_cpu": True}).json()
+        assert enabled["active_engine"] == "pyin"
+        assert enabled["force_cpu"] is True
+
+        disabled = client.get("/audio/engine", params={"force_cpu": False}).json()
+        assert disabled["force_cpu"] is False
+
+
+class TestHealthEndpoint:
+    @pytest.fixture
+    def client(self):
+        return TestClient(app)
+
+    def test_health_includes_engine_info(self, client):
+        data = client.get("/health").json()
+        assert data["status"] == "ok"
+        assert data["engine"] in {"pyin", "torchcrepe"}
+        assert isinstance(data["cuda"], bool)
+        assert isinstance(data["device"], str)
