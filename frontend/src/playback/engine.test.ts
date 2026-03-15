@@ -192,7 +192,6 @@ describe('PlaybackEngine part gain lifecycle', () => {
     const created: string[] = [];
 
     class FakeGain {
-      constructor(private readonly id: string) {}
       gain = { value: 1 };
       connect(): void {}
       disconnect(): void {}
@@ -210,7 +209,7 @@ describe('PlaybackEngine part gain lifecycle', () => {
         this.gainCount += 1;
         const id = `gain-${this.gainCount}`;
         created.push(id);
-        return new FakeGain(id) as unknown as GainNode;
+        return new FakeGain() as unknown as GainNode;
       }
       resume(): Promise<void> {
         return Promise.resolve();
