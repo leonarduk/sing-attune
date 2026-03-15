@@ -238,6 +238,11 @@
       white-space: nowrap;
     }
     #pitch-readout { font-size: 0.8rem; color: #c5d9ff; min-width: 120px; }
+    #last-note-readout { font-size: 0.8rem; margin-top: 6px; color: #94a3b8; }
+    #last-note-readout.hidden { display: none; }
+    #last-note-readout.in-tune { color: #4caf50; }
+    #last-note-readout.out-of-tune { color: #ef5350; }
+    #last-note-readout.no-target { color: #94a3b8; }
     #score-info   { font-size: 0.8rem; color: var(--color-text-muted); }
     #pitch-readout, #session-range-readout, #session-range-summary {
       font-size: 0.8rem;
@@ -670,10 +675,11 @@
       <!-- Pitch graph (always visible) -->
       <section id="pitch-graph-panel" aria-label="Pitch graph panel">
         <div id="pitch-graph-header">
-          <span>Pitch graph (C2–C6, 10s window)</span>
+          <span id="pitch-graph-title">Pitch graph (C2–C6, 10s window)</span>
           <span>Blue band: expected pitch &plusmn;50 cents &middot; Green trace/dot: within &plusmn;50 cents &middot; Red: out of tune &middot; Grey: no target</span>
         </div>
         <div id="pitch-graph-canvas"></div>
+        <div id="last-note-readout" class="hidden" aria-live="polite">Sung: — | Expected: —</div>
       </section>
 
       <section id="pitch-diagnostics-panel" aria-label="Pitch diagnostics panel">
