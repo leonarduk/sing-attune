@@ -22,7 +22,7 @@ from backend.audio.pitch import PitchFrame
 from backend.main import app
 
 
-# ── PlaybackState machine ──────────────────────────────────────────────────────
+# ── PlaybackState machine ─────────────────────────────────────────────────────────────
 
 
 class TestPlaybackStateMachine:
@@ -54,11 +54,8 @@ class TestPlaybackStateMachine:
     def test_elapsed_ms_increases_while_playing(self):
         """AC2: t should advance monotonically during playback."""
         p = self._pipeline()
-        # Patch _capture and _pitch so no real hardware is touched
         p._capture = _MockCapture()
         p._pitch = _MockPitch()
-
-        # Manually set state to PLAYING
         p._state = PlaybackState.PLAYING
         p._play_monotonic = time.monotonic()
         p._elapsed_ms = 0.0
@@ -99,7 +96,6 @@ class TestPlaybackStateMachine:
         time.sleep(0.05)  # time passes while paused
         p.resume()
 
-        # t right after resume should be very close to t_at_pause (within a few ms)
         t_after_resume = p.elapsed_ms
         assert abs(t_after_resume - t_at_pause) < 20.0, (
             f"Discontinuity: paused at {t_at_pause:.1f}ms, "
@@ -122,9 +118,7 @@ class TestPlaybackStateMachine:
         p = self._pipeline()
         p._state = PlaybackState.PAUSED
         p._elapsed_ms = 400.0
-
         p.seek(1250.0)
-
         assert p.elapsed_ms == 1250.0
 
     def test_seek_resets_play_anchor_while_playing(self):
@@ -151,21 +145,17 @@ class TestPlaybackStateMachine:
         p._state = PlaybackState.PLAYING
         p._play_monotonic = time.monotonic()
         p._elapsed_ms = 0.0
-
         p.set_tempo_multiplier(1.5)
         time.sleep(0.03)
-
         assert p.elapsed_ms >= 40.0
 
     def test_set_tempo_multiplier_while_stopped_only_stores_value(self):
-        """set_tempo_multiplier on a STOPPED pipeline must not accumulate elapsed."""
         p = self._pipeline()
         p.set_tempo_multiplier(2.0)
         assert p.tempo_multiplier == pytest.approx(2.0)
         assert p.elapsed_ms == 0.0
 
     def test_set_tempo_multiplier_while_paused_only_stores_value(self):
-        """set_tempo_multiplier on a PAUSED pipeline must not accumulate elapsed."""
         p = self._pipeline()
         p._state = PlaybackState.PAUSED
         p._elapsed_ms = 300.0
@@ -174,11 +164,6 @@ class TestPlaybackStateMachine:
         assert p.elapsed_ms == pytest.approx(300.0)
 
     def test_set_tempo_multiplier_rejects_zero_directly(self):
-        """set_tempo_multiplier(0) must raise ValueError on the pipeline itself.
-
-        The HTTP endpoint validates first (HTTPException), but direct callers
-        must also be protected. This covers the raise-ValueError line.
-        """
         p = self._pipeline()
         with pytest.raises(ValueError, match="multiplier must be > 0"):
             p.set_tempo_multiplier(0)
@@ -213,24 +198,112 @@ class TestPlaybackStateMachine:
         assert p.state == PlaybackState.PLAYING
 
 
+# ── set_force_cpu ─────────────────────────────────────────────────────────────
+
+
+class TestSetForceCpu:
+    """Tests for the live engine-switching hot-swap path (the 8 uncovered lines)."""
+
+    def _pipeline(self) -> PlaybackPipeline:
+        from backend.audio.pitch import Engine
+        return PlaybackPipeline(engine=Engine.PYIN)
+
+    def test_set_force_cpu_true_when_stopped(self, monkeypatch):
+        """STOPPED: no hardware to rebuild, just updates flags."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        p = self._pipeline()
+        p.set_force_cpu(True)
+        assert p.force_cpu is True
+        assert p.runtime_info.mode == "forced_cpu"
+        assert p.state == PlaybackState.STOPPED
+
+    def test_set_force_cpu_false_when_stopped(self, monkeypatch):
+        """Disabling force_cpu on STOPPED pipeline leaves state unchanged."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        p = self._pipeline()
+        p.set_force_cpu(True)
+        p.set_force_cpu(False)
+        assert p.force_cpu is False
+        assert p.state == PlaybackState.STOPPED
+
+    def test_set_force_cpu_when_playing_rebuilds_and_restores_playing(self, monkeypatch):
+        """PLAYING: teardown + rebuild, state restored to PLAYING, capture started."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+        p = self._pipeline()
+        original_capture = _MockCapture()
+        original_pitch = _MockPitch()
+        p._capture = original_capture
+        p._pitch = original_pitch
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+
+        p.set_force_cpu(True)
+
+        assert p.state == PlaybackState.PLAYING
+        assert p.force_cpu is True
+        # New objects must have been constructed
+        assert p._capture is not original_capture
+        assert p._pitch is not original_pitch
+
+    def test_set_force_cpu_when_paused_rebuilds_and_restores_paused(self, monkeypatch):
+        """PAUSED: teardown + rebuild, state restored to PAUSED, capture NOT started."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+        p = self._pipeline()
+        original_capture = _MockCapture()
+        original_pitch = _MockPitch()
+        p._capture = original_capture
+        p._pitch = original_pitch
+        p._state = PlaybackState.PAUSED
+        p._elapsed_ms = 750.0
+
+        p.set_force_cpu(True)
+
+        assert p.state == PlaybackState.PAUSED
+        assert p.force_cpu is True
+        assert p._capture is not original_capture
+        assert p._pitch is not original_pitch
+
+    def test_set_force_cpu_preserves_device_id(self, monkeypatch):
+        """device_id from the old capture must be forwarded to the new MicCapture."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+        p = self._pipeline()
+        p._capture = _MockCaptureWithDeviceId(device_id=7)
+        p._pitch = _MockPitch()
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+
+        created_with_device_id = []
+
+        import backend.audio.pipeline as pipeline_mod
+
+        class RecordingMicCapture:
+            def __init__(self, device_id=None, on_window=None):
+                created_with_device_id.append(device_id)
+                self.device_id = device_id
+            def start(self): pass
+            def stop(self): pass
+
+        monkeypatch.setattr(pipeline_mod, "MicCapture", RecordingMicCapture)
+        p.set_force_cpu(True)
+
+        assert created_with_device_id == [7]
+
+
 # ── Frame fan-out ──────────────────────────────────────────────────────────────
-#
-# Design note: _on_pitch_frame is called from the pitch worker thread.
-# It uses loop.call_soon_threadsafe to schedule put_nowait on the asyncio
-# event loop. For that to work, the loop must already be *running* when
-# call_soon_threadsafe fires — otherwise the guard `not loop.is_running()`
-# short-circuits and frames are silently dropped.
-#
-# The fix: run the loop with asyncio.run(), inject the frame from a thread
-# pool executor (so call_soon_threadsafe finds a running loop), then yield
-# once with `await asyncio.sleep(0)` to let put_nowait execute.
 
 
 class TestFrameFanout:
     """AC1: pitch frames are delivered to all connected WS clients."""
 
     def test_frame_delivered_to_client(self):
-        """Injecting a frame via _on_pitch_frame must reach a registered queue."""
         async def _run():
             loop = asyncio.get_event_loop()
             p = PlaybackPipeline()
@@ -243,9 +316,8 @@ class TestFrameFanout:
             p.add_client(q)
 
             frame = PitchFrame(time_ms=0.0, midi=69.0, confidence=0.9)
-            # Run from executor so the loop is running when call_soon_threadsafe fires
             await loop.run_in_executor(None, p._on_pitch_frame, frame)
-            await asyncio.sleep(0)  # drain: let put_nowait callback execute
+            await asyncio.sleep(0)
 
             assert not q.empty()
             payload = q.get_nowait()
@@ -256,11 +328,6 @@ class TestFrameFanout:
         asyncio.run(_run())
 
     def test_frame_not_delivered_when_paused(self):
-        """Frames received during PAUSED state must be discarded.
-
-        No need for a running loop here: the guard in _on_pitch_frame returns
-        early before reaching call_soon_threadsafe, so a stopped loop is fine.
-        """
         loop = asyncio.new_event_loop()
         p = PlaybackPipeline()
         p._loop = loop
@@ -271,14 +338,13 @@ class TestFrameFanout:
         p.add_client(q)
 
         frame = PitchFrame(time_ms=0.0, midi=69.0, confidence=0.9)
-        p._on_pitch_frame(frame)  # must discard before touching loop
+        p._on_pitch_frame(frame)
         loop.run_until_complete(asyncio.sleep(0))
 
         assert q.empty(), "Frame should not be delivered while paused"
         loop.close()
 
     def test_frame_delivered_to_multiple_clients(self):
-        """All registered clients must receive each frame."""
         async def _run():
             loop = asyncio.get_event_loop()
             p = PlaybackPipeline()
@@ -301,11 +367,6 @@ class TestFrameFanout:
         asyncio.run(_run())
 
     def test_removed_client_gets_no_frames(self):
-        """A deregistered client must not receive frames.
-
-        Same reasoning as the paused test: the client set is empty so
-        call_soon_threadsafe is never called, and a stopped loop suffices.
-        """
         loop = asyncio.new_event_loop()
         p = PlaybackPipeline()
         p._loop = loop
@@ -325,7 +386,6 @@ class TestFrameFanout:
         loop.close()
 
     def test_midi_rounded_to_3dp(self):
-        """midi value in payload must be rounded to 3 decimal places."""
         async def _run():
             loop = asyncio.get_event_loop()
             p = PlaybackPipeline()
@@ -347,7 +407,6 @@ class TestFrameFanout:
         asyncio.run(_run())
 
     def test_frame_timestamp_uses_capture_time_not_emit_time(self):
-        """Frame `t` should be anchored to PitchFrame.time_ms to avoid lag."""
         async def _run():
             loop = asyncio.get_event_loop()
             p = PlaybackPipeline()
@@ -370,7 +429,7 @@ class TestFrameFanout:
         asyncio.run(_run())
 
 
-# ── HTTP endpoints ─────────────────────────────────────────────────────────────
+# ── HTTP endpoints ──────────────────────────────────────────────────────────────
 
 
 class TestPlaybackEndpoints:
@@ -460,7 +519,7 @@ class TestPlaybackEndpoints:
         assert isinstance(data["t_ms"], float)
 
 
-# ── WebSocket endpoint ─────────────────────────────────────────────────────────
+# ── WebSocket endpoint ─────────────────────────────────────────────────────────────
 
 
 class TestWebSocketEndpoint:
@@ -477,7 +536,6 @@ class TestWebSocketEndpoint:
         client = TestClient(app)
         with client.websocket_connect("/ws/pitch") as ws:
             ws.receive_json()  # consume "connected"
-        # Second connection after first closes
         with client.websocket_connect("/ws/pitch") as ws:
             msg = ws.receive_json()
             assert msg == {"status": "connected"}
@@ -485,12 +543,21 @@ class TestWebSocketEndpoint:
 
 # ── Mock helpers ───────────────────────────────────────────────────────────────
 
+import torch
+
 
 class _MockCapture:
     """Stands in for MicCapture — no hardware interaction."""
+    device_id = None
     def start(self): pass
     def stop(self): pass
-    active = False
+
+
+class _MockCaptureWithDeviceId:
+    def __init__(self, device_id):
+        self.device_id = device_id
+    def start(self): pass
+    def stop(self): pass
 
 
 class _MockPitch:

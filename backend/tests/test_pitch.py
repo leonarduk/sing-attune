@@ -17,18 +17,20 @@ import torch
 
 from backend.audio.pitch import (
     Engine,
+    EngineRuntimeInfo,
     PitchFrame,
     PitchPipeline,
     CONFIDENCE_THRESHOLD,
     SAMPLE_RATE,
     hz_to_midi,
     midi_to_hz,
+    resolve_engine_runtime,
     select_engine,
     _infer_pyin,
 )
 
 
-# ── Conversion helpers ─────────────────────────────────────────────────────────
+# ── Conversion helpers ───────────────────────────────────────────────────────────────
 
 
 class TestHzMidiConversion:
@@ -56,7 +58,7 @@ class TestHzMidiConversion:
         assert hz_to_midi(-1.0) == 0.0
 
 
-# ── PitchFrame ─────────────────────────────────────────────────────────────────
+# ── PitchFrame ───────────────────────────────────────────────────────────────────────
 
 
 class TestPitchFrame:
@@ -75,7 +77,7 @@ class TestPitchFrame:
         assert frame.to_dict()["midi"] == 60.3
 
 
-# ── Engine selection ───────────────────────────────────────────────────────────
+# ── Engine selection ─────────────────────────────────────────────────────────────────
 
 
 class TestEngineSelection:
@@ -91,7 +93,84 @@ class TestEngineSelection:
         assert select_engine() == Engine.PYIN
 
 
-# ── librosa pYIN CPU fallback ──────────────────────────────────────────────────
+# ── resolve_engine_runtime ───────────────────────────────────────────────────────────
+
+
+class TestResolveEngineRuntime:
+    """Unit tests for resolve_engine_runtime() covering all branches."""
+
+    def test_returns_engine_runtime_info(self):
+        result = resolve_engine_runtime()
+        assert isinstance(result, EngineRuntimeInfo)
+
+    def test_force_cpu_true_no_cuda(self, monkeypatch):
+        """force_cpu=True must always return PYIN regardless of CUDA."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        result = resolve_engine_runtime(force_cpu=True)
+        assert result.engine == Engine.PYIN
+        assert result.mode == "forced_cpu"
+        assert result.device == "CPU"
+        assert result.cuda is False
+
+    def test_force_cpu_true_overrides_cuda(self, monkeypatch):
+        """force_cpu overrides CUDA availability."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "get_device_name", lambda i: "RTX 5070")
+        result = resolve_engine_runtime(force_cpu=True)
+        assert result.engine == Engine.PYIN
+        assert result.mode == "forced_cpu"
+        assert result.cuda is True
+
+    def test_env_pyin_forces_cpu(self, monkeypatch):
+        """PITCH_ENGINE=pyin must force CPU even when CUDA is available."""
+        monkeypatch.setenv("PITCH_ENGINE", "pyin")
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "get_device_name", lambda i: "RTX 5070")
+        result = resolve_engine_runtime()
+        assert result.engine == Engine.PYIN
+        assert result.mode == "forced_cpu"
+
+    def test_env_aubio_forces_cpu(self, monkeypatch):
+        """PITCH_ENGINE=aubio is a supported alias for CPU mode."""
+        monkeypatch.setenv("PITCH_ENGINE", "aubio")
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        result = resolve_engine_runtime()
+        assert result.engine == Engine.PYIN
+        assert result.mode == "forced_cpu"
+
+    def test_env_cpu_forces_cpu(self, monkeypatch):
+        """PITCH_ENGINE=cpu is a supported alias for CPU mode."""
+        monkeypatch.setenv("PITCH_ENGINE", "cpu")
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        result = resolve_engine_runtime()
+        assert result.engine == Engine.PYIN
+        assert result.mode == "forced_cpu"
+
+    def test_no_cuda_auto_returns_pyin(self, monkeypatch):
+        """No CUDA, no env override → PYIN in auto mode."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        result = resolve_engine_runtime()
+        assert result.engine == Engine.PYIN
+        assert result.mode == "auto"
+        assert result.cuda is False
+        assert result.device == "CPU"
+
+    def test_cuda_available_auto_returns_torchcrepe(self, monkeypatch):
+        """CUDA present, no override → TORCHCREPE in auto mode."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "get_device_name", lambda i: "RTX 5070")
+        result = resolve_engine_runtime()
+        assert result.engine == Engine.TORCHCREPE
+        assert result.mode == "auto"
+        assert result.cuda is True
+        assert result.device == "RTX 5070"
+
+
+# ── librosa pYIN CPU fallback ──────────────────────────────────────────────────────────
 
 
 class TestPyinFallback:
@@ -217,7 +296,7 @@ class TestPitchPipeline:
         assert not errors
 
 
-# ── GPU tests (skipped if no CUDA) ────────────────────────────────────────────
+# ── GPU tests (skipped if no CUDA) ────────────────────────────────────────────────
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
