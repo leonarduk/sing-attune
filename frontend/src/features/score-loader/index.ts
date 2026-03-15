@@ -153,10 +153,8 @@ function mount(slot: HTMLElement): void {
     } catch (err) {
       showErrorBanner('Score loaded, but playback setup failed. Check audio/soundfont settings and try again.');
       setStatus(String(err), 'error');
-      console.error('Score load failed:', err);
-      resetDropZoneToIdle();
       console.error('Post-parse score setup failed:', err);
-      dropZoneEl.classList.remove('hidden');
+      resetDropZoneToIdle();
     } finally {
       hideLoading();
     }
