@@ -52,6 +52,8 @@ describe('SoundfontLoader.parseNoteMap', () => {
     await loader.load(ctx);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, expect.any(String), { cache: 'no-store' });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, expect.any(String), { cache: 'no-store' });
     expect(loader.loaded).toBe(true);
     expect(loader.sampleCount).toBe(1);
   });
