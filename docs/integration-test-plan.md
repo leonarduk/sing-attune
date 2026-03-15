@@ -31,7 +31,7 @@ Out of scope:
 
 ## Execution Contract
 
-- Execute scenarios in order (`IT-001` ... `IT-010`) unless explicitly marked independent.
+- Execute scenarios in order (`IT-001` ... `IT-011`) unless explicitly marked independent.
 - For each scenario:
   - stop immediately on first failed assertion;
   - record `PASS` or `FAIL` plus evidence payload (HTTP status/body, WS frame, DOM snapshot);
@@ -302,6 +302,35 @@ Required signals:
 ### Pass/fail criteria
 - **PASS:** WS emission obeys prompted-only contract.
 - **FAIL:** unsolicited frames while idle or no frames after valid prompt/input.
+
+---
+
+## Scenario IT-011 — End-to-end WS pitch frame latency < 80 ms
+
+- **Boundary:** audio input ingestion -> pitch inference -> WS frame emission
+- **hardware:** false
+- **Preconditions:** backend running; WS connected; playback started; CPU pitch engine active.
+
+### Steps
+1. Connect WS and start playback via `POST /playback/start`.
+2. Record wall-clock timestamp `t0` immediately before injecting `A4_440` synthetic audio into the backend pitch pipeline harness.
+3. Read the next non-status/non-ping WS frame; record receipt timestamp `t1`.
+4. Compute `latency_ms = (t1 - t0) * 1000`.
+5. Repeat steps 2–4 ten times; compute mean and p95 latency.
+
+### Expected outcome
+- Mean latency < 80 ms.
+- p95 latency < 80 ms.
+- All 10 frames carry valid schema (`t`, `midi`, `conf`).
+
+### Pass/fail criteria
+- **PASS:** mean and p95 both below 80 ms threshold; all frames valid.
+- **FAIL:** any latency measurement >= 80 ms at p95, or invalid/missing frame.
+
+### Notes
+- Timing must be measured on the same thread that injects audio; do not use `Date.now()` across thread boundaries.
+- Windows timer granularity (~15.6 ms) means single-sample measurements are unreliable — use the 10-sample p95 as the authoritative signal.
+- For the GPU path, repeat this scenario with torchcrepe engine selected (`hardware: true`); GPU p95 is expected to be lower but is not separately gated.
 
 ---
 
