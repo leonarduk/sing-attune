@@ -15,7 +15,7 @@
  * Imports getFrameXPosition from services/cursor-projection (not from the
  * playback feature) to preserve feature isolation.
  */
-import { onScoreLoaded, onScoreCleared, getSession } from '../../services/score-session';
+import { onScoreLoaded, onScoreCleared, onPartChanged, getSession } from '../../services/score-session';
 import { onPlaybackSyncEvent } from '../../services/playback-sync';
 import { showErrorBanner } from '../../services/backend';
 import { getFrameXPosition } from '../../services/cursor-projection';
@@ -26,7 +26,7 @@ import { syntheticPitchFrameAt } from '../../pitch/synthetic';
 import { buildWarmupSequence, warmupMidiAt, WarmupTonePlayer, type WarmupSegment } from '../../warmup/session';
 import { PitchTimelineSync } from '../../pitch/timeline-sync';
 import { parsePitchSocketMessage, reconnectDelayMs } from '../../pitch/socket';
-import { midiToFrequency, midiToNoteName } from '../../pitch/note-name';
+import { midiToNoteName } from '../../pitch/note-name';
 import { SessionRangeTracker } from '../../pitch/session-range';
 import { classifyVoiceType, getVoiceTypeById } from '../../pitch/voice-type';
 import { elapsedToBeat } from '../../score/timing';
@@ -35,6 +35,7 @@ import { PhraseSummaryTracker, type PhraseSummary } from '../../pitch/phrase-sum
 import { resolveSelectedDeviceId, type AudioInputDevice } from '../../audio/devices';
 import { PracticeRecorder } from '../../audio/recorder';
 import { type Feature } from '../../feature-types';
+import { analysePartPitchRange } from '../../score-analyser';
 import { loadUserVoiceTypeId } from '../../services/audio-preflight';
 
 // ── Module-level singletons (survive score reloads) ───────────────────────────
@@ -66,6 +67,7 @@ const timelineSync = new PitchTimelineSync();
 let playbackSyncUnsubscribe: (() => void) | null = null;
 let unsubscribeScoreLoaded: (() => void) | null = null;
 let unsubscribeScoreCleared: (() => void) | null = null;
+let unsubscribePartChanged: (() => void) | null = null;
 let syncOffsetWarningShown = false;
 
 let warmupActive = false;
@@ -84,11 +86,46 @@ const overlaySettings: OverlaySettings = {
 
 function updatePitchReadout(): void {
   const el = document.getElementById('pitch-readout') as HTMLSpanElement;
-  if (!lastPitchFrame) { el.textContent = 'Detected: —'; return; }
-  const hz = midiToFrequency(lastPitchFrame.midi);
-  const freqLabel = `${hz.toFixed(2)} Hz`;
-  if (!showNoteNames) { el.textContent = `Detected: ${freqLabel}`; return; }
-  el.textContent = `Detected: ${freqLabel} → ${midiToNoteName(lastPitchFrame.midi)}`;
+  const readout = document.getElementById('last-note-readout') as HTMLDivElement;
+  const session = getSession();
+
+  if (!session || activePartNotes.length === 0) {
+    el.textContent = 'Detected: —';
+    readout.classList.add('hidden');
+    readout.classList.remove('in-tune', 'out-of-tune', 'no-target');
+    readout.textContent = 'Sung: — | Expected: —';
+    return;
+  }
+
+  readout.classList.remove('hidden');
+
+  if (!lastPitchFrame) {
+    el.textContent = 'Detected: —';
+    readout.classList.remove('in-tune', 'out-of-tune');
+    readout.classList.add('no-target');
+    readout.textContent = 'Sung: — | Expected: —';
+    return;
+  }
+
+  const sungLabel = midiToNoteName(lastPitchFrame.midi);
+  const beat = session.engine.currentBeat;
+  const expected = expectedNoteAtBeat(beat, activePartNotes);
+
+  el.textContent = `Detected: ${sungLabel}`;
+
+  if (!expected) {
+    readout.classList.remove('in-tune', 'out-of-tune');
+    readout.classList.add('no-target');
+    readout.textContent = `Sung: ${sungLabel} | Expected: —`;
+    return;
+  }
+
+  const centsError = (lastPitchFrame.midi - expected.midi) * 100;
+  const inTune = Math.abs(centsError) <= GREEN_CENTS_THRESHOLD;
+  readout.classList.toggle('in-tune', inTune);
+  readout.classList.toggle('out-of-tune', !inTune);
+  readout.classList.remove('no-target');
+  readout.textContent = `Sung: ${sungLabel} | Expected: ${midiToNoteName(expected.midi)}`;
 }
 
 
@@ -154,6 +191,36 @@ function expectedMidiForFrame(frameTMs: number): number | null {
   if (!session || activePartNotes.length === 0) return null;
   const beat = elapsedToBeat(frameTMs, 0, session.model.tempo_marks);
   return expectedNoteAtBeat(beat, activePartNotes)?.midi ?? null;
+}
+
+function applyGraphRangeForSession(): void {
+  const session = getSession();
+  if (!pitchGraph || !session) {
+    pitchGraph?.resetRange();
+    return;
+  }
+
+  const range = analysePartPitchRange(session.model.notes, session.selectedPart);
+  if (!range) {
+    pitchGraph.resetRange();
+    return;
+  }
+  pitchGraph.setRange(range.minFreq, range.maxFreq);
+}
+
+function updatePitchGraphHeader(): void {
+  const header = document.getElementById('pitch-graph-title') as HTMLSpanElement;
+  const session = getSession();
+  if (!session || activePartNotes.length === 0) {
+    header.textContent = 'Pitch graph (C2–C6, 10s window)';
+    return;
+  }
+  const range = analysePartPitchRange(session.model.notes, session.selectedPart);
+  if (!range) {
+    header.textContent = 'Pitch graph (C2–C6, 10s window)';
+    return;
+  }
+  header.textContent = `Pitch graph (${midiToNoteName(range.minMidi)}–${midiToNoteName(range.maxMidi)}, 10s window)`;
 }
 
 function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number }): void {
@@ -316,12 +383,15 @@ function startPitchGraphLoop(): void {
     if (session?.engine.playing) {
       const playbackSec = Math.max(0, session.engine.ctx.currentTime - session.engine.startAudioTime);
       pitchGraphNowSec = Math.max(pitchGraphNowSec, playbackSec);
+      const expected = expectedNoteAtBeat(session.engine.currentBeat, activePartNotes);
+      pitchGraph?.autoCenterOnMidi(expected?.midi ?? null);
     }
     const isPlaying = !!session?.engine.playing;
     if (wasPlayingLastTick && !isPlaying) {
       finalizeSessionRangeSummary();
     }
     wasPlayingLastTick = isPlaying;
+    updatePitchReadout();
     pitchGraph?.tick(pitchGraphNowSec);
     pitchGraphRafId = requestAnimationFrame(tick);
   };
@@ -466,6 +536,8 @@ function mount(_slot: HTMLElement): void {
     pitchOverlay?.destroy();
     pitchOverlay = null;
     pitchGraph?.clear();
+    pitchGraph?.resetRange();
+    activePartNotes = [];
     timelineSync.reset();
     lastPitchFrame = null;
     pitchGraphNowSec = 0;
@@ -476,6 +548,7 @@ function mount(_slot: HTMLElement): void {
     hasSuggestedVoiceType = false;
     sessionRangeTracker.reset();
     updateSessionRangeReadout();
+    updatePitchGraphHeader();
   });
 
   unsubscribeScoreLoaded = onScoreLoaded((session) => {
@@ -485,6 +558,7 @@ function mount(_slot: HTMLElement): void {
     activePartNotes = session.model.notes.filter((n) => n.part === session.selectedPart);
     phraseSummaryTracker = new PhraseSummaryTracker(activePartNotes, session.model.tempo_marks);
     pitchGraph?.clear();
+    applyGraphRangeForSession();
     timelineSync.reset();
     lastPitchFrame = null;
     pitchGraphNowSec = 0;
@@ -494,8 +568,19 @@ function mount(_slot: HTMLElement): void {
     clearPhraseSummaryPanel();
     updatePitchReadout();
     updateSessionRangeReadout();
+    updatePitchGraphHeader();
     connectPitchSocket();
   });
+
+  unsubscribePartChanged = onPartChanged((session) => {
+    activePartNotes = session.model.notes.filter((n) => n.part === session.selectedPart);
+    phraseSummaryTracker = new PhraseSummaryTracker(activePartNotes, session.model.tempo_marks);
+    pitchGraph?.clear();
+    applyGraphRangeForSession();
+    updatePitchGraphHeader();
+    updatePitchReadout();
+  });
+
 
   btnStop.addEventListener('click', () => {
     phraseSummaryTracker?.reset();
@@ -514,6 +599,7 @@ function mount(_slot: HTMLElement): void {
   updateSettingsLabels();
   updatePitchReadout();
   updateSessionRangeReadout();
+  updatePitchGraphHeader();
   updateSessionRangeSummary();
   refreshRecordingControls(ctrl);
   updateWarmupUi('Warm-up idle.');
@@ -622,6 +708,8 @@ function unmount(): void {
   unsubscribeScoreLoaded = null;
   unsubscribeScoreCleared?.();
   unsubscribeScoreCleared = null;
+  unsubscribePartChanged?.();
+  unsubscribePartChanged = null;
   closePitchSocket();
   stopPitchGraphLoop();
   pitchOverlay?.destroy(); pitchOverlay = null;

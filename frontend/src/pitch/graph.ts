@@ -3,6 +3,8 @@ import { classifyGraphTraceColor, type GraphTraceColor } from './graph-colors';
 
 export const GRAPH_MIDI_MIN = 36; // C2
 export const GRAPH_MIDI_MAX = 84; // C6
+const DEFAULT_VIEWPORT_SEMITONE_SPAN = 24;
+const RECENTER_THRESHOLD_RATIO = 0.3;
 
 /** Default tolerance for the target-note band (±50 cents = ±0.5 semitone). */
 export const DEFAULT_BAND_CENTS_TOLERANCE = 50;
@@ -46,6 +48,10 @@ export function midiToGraphY(midi: number, height: number, minMidi = GRAPH_MIDI_
   const clamped = Math.max(minMidi, Math.min(maxMidi, midi));
   const norm = (clamped - minMidi) / Math.max(1, maxMidi - minMidi);
   return height - (norm * height);
+}
+
+function frequencyToMidi(freq: number): number {
+  return 69 + (12 * Math.log2(freq / 440));
 }
 
 export function timeToGraphX(sampleSec: number, nowSec: number, width: number, windowSec: number): number {
@@ -95,6 +101,10 @@ export class PitchGraphCanvas {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly opts: Required<PitchGraphOptions>;
   private samples: GraphSample[] = [];
+  private fullRangeMinMidi = GRAPH_MIDI_MIN;
+  private fullRangeMaxMidi = GRAPH_MIDI_MAX;
+  private viewRangeMinMidi = GRAPH_MIDI_MIN;
+  private viewRangeMaxMidi = GRAPH_MIDI_MAX;
 
   constructor(container: HTMLElement, opts: PitchGraphOptions = {}) {
     this.opts = {
@@ -136,6 +146,44 @@ export class PitchGraphCanvas {
 
   setBandCentsTolerance(cents: number): void {
     this.opts.bandCentsTolerance = Math.max(10, Math.min(200, cents));
+  }
+
+  setRange(minFreq: number, maxFreq: number): void {
+    const minMidi = frequencyToMidi(minFreq);
+    const maxMidi = frequencyToMidi(maxFreq);
+    if (!Number.isFinite(minMidi) || !Number.isFinite(maxMidi) || maxMidi <= minMidi) {
+      this.resetRange();
+      return;
+    }
+    this.fullRangeMinMidi = minMidi;
+    this.fullRangeMaxMidi = maxMidi;
+    this.resetViewport();
+  }
+
+  resetRange(): void {
+    this.fullRangeMinMidi = GRAPH_MIDI_MIN;
+    this.fullRangeMaxMidi = GRAPH_MIDI_MAX;
+    this.resetViewport();
+  }
+
+  autoCenterOnMidi(expectedMidi: number | null): void {
+    if (expectedMidi === null) return;
+
+    const fullSpan = this.fullRangeMaxMidi - this.fullRangeMinMidi;
+    if (fullSpan <= DEFAULT_VIEWPORT_SEMITONE_SPAN) {
+      this.resetViewport();
+      return;
+    }
+
+    const currentCenter = (this.viewRangeMinMidi + this.viewRangeMaxMidi) / 2;
+    const threshold = DEFAULT_VIEWPORT_SEMITONE_SPAN * RECENTER_THRESHOLD_RATIO;
+    if (Math.abs(expectedMidi - currentCenter) <= threshold) return;
+
+    const halfSpan = DEFAULT_VIEWPORT_SEMITONE_SPAN / 2;
+    const unclampedMin = expectedMidi - halfSpan;
+    const minMidi = Math.max(this.fullRangeMinMidi, Math.min(unclampedMin, this.fullRangeMaxMidi - DEFAULT_VIEWPORT_SEMITONE_SPAN));
+    this.viewRangeMinMidi = minMidi;
+    this.viewRangeMaxMidi = minMidi + DEFAULT_VIEWPORT_SEMITONE_SPAN;
   }
 
   clear(): void {
@@ -187,7 +235,7 @@ export class PitchGraphCanvas {
       if (segStart === null || segEnd === null || segMidi === null) return;
       const x1 = plotLeft + timeToGraphX(segStart, nowSec, plotWidth, this.opts.windowSeconds);
       const x2 = plotLeft + timeToGraphX(segEnd, nowSec, plotWidth, this.opts.windowSeconds);
-      const { topY, bottomY } = targetBandY(segMidi, tolerance, height);
+      const { topY, bottomY } = targetBandY(segMidi, tolerance, height, this.viewRangeMinMidi, this.viewRangeMaxMidi);
       const bandHeight = Math.max(1, bottomY - topY);
 
       // Band fill
@@ -195,7 +243,7 @@ export class PitchGraphCanvas {
       this.ctx.fillRect(x1, topY, x2 - x1, bandHeight);
 
       // Centre line — exact expected pitch for precision reference
-      const centreY = midiToGraphY(segMidi, height);
+      const centreY = midiToGraphY(segMidi, height, this.viewRangeMinMidi, this.viewRangeMaxMidi);
       this.ctx.strokeStyle = 'rgba(100, 180, 255, 0.75)';
       this.ctx.lineWidth = 1.5;
       this.ctx.beginPath();
@@ -231,11 +279,11 @@ export class PitchGraphCanvas {
     this.ctx.fillStyle = '#0a0f1c';
     this.ctx.fillRect(0, 0, plotLeft, height);
 
-    const lines = buildSemitoneGrid();
+    const lines = buildSemitoneGrid(Math.floor(this.viewRangeMinMidi), Math.ceil(this.viewRangeMaxMidi));
     for (const line of lines) {
       if (!line.isBlackKey) continue;
-      const topY = midiToGraphY(line.midi + 0.5, height);
-      const bottomY = midiToGraphY(line.midi - 0.5, height);
+      const topY = midiToGraphY(line.midi + 0.5, height, this.viewRangeMinMidi, this.viewRangeMaxMidi);
+      const bottomY = midiToGraphY(line.midi - 0.5, height, this.viewRangeMinMidi, this.viewRangeMaxMidi);
       const keyHeight = bottomY - topY;
       this.ctx.fillStyle = 'rgba(17, 24, 39, 0.95)';
       this.ctx.fillRect(0, topY, plotLeft * 0.64, keyHeight);
@@ -250,9 +298,9 @@ export class PitchGraphCanvas {
   }
 
   private drawYGrid(plotLeft: number, plotWidth: number, height: number): void {
-    const lines = buildSemitoneGrid();
+    const lines = buildSemitoneGrid(Math.floor(this.viewRangeMinMidi), Math.ceil(this.viewRangeMaxMidi));
     for (const line of lines) {
-      const y = midiToGraphY(line.midi, height);
+      const y = midiToGraphY(line.midi, height, this.viewRangeMinMidi, this.viewRangeMaxMidi);
       this.ctx.strokeStyle = line.isOctave ? 'rgba(168, 190, 220, 0.45)' : 'rgba(168, 190, 220, 0.15)';
       this.ctx.lineWidth = line.isOctave ? 1.5 : 1;
       this.ctx.beginPath();
@@ -294,9 +342,9 @@ export class PitchGraphCanvas {
       const next = this.samples[i];
 
       const x1 = plotLeft + timeToGraphX(prev.tSec, nowSec, plotWidth, this.opts.windowSeconds);
-      const y1 = midiToGraphY(prev.midi, height);
+      const y1 = midiToGraphY(prev.midi, height, this.viewRangeMinMidi, this.viewRangeMaxMidi);
       const x2 = plotLeft + timeToGraphX(next.tSec, nowSec, plotWidth, this.opts.windowSeconds);
-      const y2 = midiToGraphY(next.midi, height);
+      const y2 = midiToGraphY(next.midi, height, this.viewRangeMinMidi, this.viewRangeMaxMidi);
 
       this.ctx.strokeStyle = this.cssColor(next.color);
       this.ctx.beginPath();
@@ -321,4 +369,15 @@ export class PitchGraphCanvas {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.redraw(performance.now() / 1000);
   };
+
+  private resetViewport(): void {
+    const fullSpan = this.fullRangeMaxMidi - this.fullRangeMinMidi;
+    if (fullSpan <= DEFAULT_VIEWPORT_SEMITONE_SPAN) {
+      this.viewRangeMinMidi = this.fullRangeMinMidi;
+      this.viewRangeMaxMidi = this.fullRangeMaxMidi;
+      return;
+    }
+    this.viewRangeMinMidi = this.fullRangeMinMidi;
+    this.viewRangeMaxMidi = this.fullRangeMinMidi + DEFAULT_VIEWPORT_SEMITONE_SPAN;
+  }
 }
