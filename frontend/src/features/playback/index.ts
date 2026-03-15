@@ -272,21 +272,21 @@ function mount(_slot: HTMLElement): void {
     // Pause/Resume: enabled when playing or paused.
     if (!session) {
       btnPause.disabled = true;
-      btnPause.innerHTML = '&#9646;&#9646; Pause';
+      btnPause.innerHTML = '&#9646;&#9646; Pause (Space)';
       return;
     }
     if (session.engine.state === 'playing') {
       btnPause.disabled = false;
-      btnPause.innerHTML = '&#9646;&#9646; Pause';
+      btnPause.innerHTML = '&#9646;&#9646; Pause (Space)';
       return;
     }
     if (session.engine.state === 'paused') {
       btnPause.disabled = false;
-      btnPause.innerHTML = '&#9654; Resume';
+      btnPause.innerHTML = '&#9654; Resume (Space)';
       return;
     }
     btnPause.disabled = true;
-    btnPause.innerHTML = '&#9646;&#9646; Pause';
+    btnPause.innerHTML = '&#9646;&#9646; Pause (Space)';
   }
 
   const unsubscribeLoaded = onScoreLoaded((session) => {
@@ -305,17 +305,17 @@ function mount(_slot: HTMLElement): void {
     const session = getSession();
     if (!session || session.engine.state === 'idle') {
       btnPause.disabled = true;
-      btnPause.innerHTML = '&#9646;&#9646; Pause';
+      btnPause.innerHTML = '&#9646;&#9646; Pause (Space)';
       return;
     }
     if (session.engine.state === 'playing') {
       btnPause.disabled = false;
-      btnPause.innerHTML = '&#9646;&#9646; Pause';
+      btnPause.innerHTML = '&#9646;&#9646; Pause (Space)';
       return;
     }
     if (session.engine.state === 'paused') {
       btnPause.disabled = false;
-      btnPause.innerHTML = '&#9654; Resume';
+      btnPause.innerHTML = '&#9654; Resume (Space)';
     }
   }
 
