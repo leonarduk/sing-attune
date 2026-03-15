@@ -88,6 +88,9 @@ function mount(slot: HTMLElement): void {
     const previousSession = getSession();
     if (!previousSession) return;
 
+    // Capture state before stopping — engine.stop() transitions to 'idle'.
+    const wasActive = previousSession.engine.state !== 'idle';
+
     // Stop frontend audio unconditionally — this is the critical operation.
     // engine.stop() calls _stopSources() which wraps each src.stop() in
     // try/catch, so it cannot throw.
@@ -97,7 +100,7 @@ function mount(slot: HTMLElement): void {
 
     // Best-effort backend notification so the pipeline resets its state.
     // Failure is non-fatal — audio is already silent.
-    if (previousSession.engine.state !== 'idle') {
+    if (wasActive) {
       try {
         await postPlayback('/playback/stop');
       } catch (err) {
