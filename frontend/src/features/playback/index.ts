@@ -24,13 +24,43 @@ import { beatToMs, postPlayback, setPlaybackTempo, startPlayback, seekPlayback }
 import { sessionSummaryTracker, type SessionSummary } from '../../practice/session-summary';
 import { type Feature } from '../../feature-types';
 import { ensureAudioPreflightReady } from '../../services/audio-preflight';
+import { clearLoopRegion, getLoopRegion, setLoopEnd, setLoopStart } from '../../services/loop-region';
 
 // ── Cursor RAF ──────────────────────────────────────────────────────────────────
+
+
+async function restartLoopPlayback(): Promise<void> {
+  const session = getSession();
+  if (!session) return;
+  const region = getLoopRegion();
+  if (!region.active) return;
+
+  const { engine, cursor, model } = session;
+  const targetBeat = Math.max(0, Math.min(model.total_beats, region.startBeat));
+  try {
+    const audioTimeSec = engine.ctx.currentTime;
+    const response = await seekPlayback(beatToMs(targetBeat, model, engine.tempoMultiplier));
+    emitPlaybackSyncEvent({
+      type: 'seek',
+      tMs: response.t_ms,
+      audioTimeSec,
+      syncOffsetMs: null,
+    });
+  } catch (err) {
+    setStatus(`loop seek failed: ${String(err)}`, 'error');
+    console.error('Loop seek failed:', err);
+    return;
+  }
+
+  engine.seekToBeat(targetBeat);
+  cursor.seekToBeat(targetBeat);
+}
 
 let cursorRafId: number | null = null;
 let unsubscribeScoreLoaded: (() => void) | null = null;
 let unsubscribeScoreCleared: (() => void) | null = null;
 let removeKeydownListener: (() => void) | null = null;
+let loopSeekInFlight = false;
 
 function startCursorRaf(): void {
   stopCursorRaf();
@@ -38,6 +68,15 @@ function startCursorRaf(): void {
     const session = getSession();
     if (session?.engine.playing && session.cursor) {
       const beat = session.engine.currentBeat;
+      const region = getLoopRegion();
+
+      if (region.active && beat >= region.endBeat && !loopSeekInFlight) {
+        loopSeekInFlight = true;
+        void restartLoopPlayback().finally(() => {
+          loopSeekInFlight = false;
+        });
+      }
+
       session.cursor.seekToBeat(beat);
       recordBeatSample(beat, getCursorX());
       cursorRafId = requestAnimationFrame(tick);
@@ -52,6 +91,7 @@ function stopCursorRaf(): void {
     cursorRafId = null;
   }
   resetProjection();
+  loopSeekInFlight = false;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -207,6 +247,7 @@ function mount(_slot: HTMLElement): void {
   const unsubscribeCleared = onScoreCleared(() => {
     stopCursorRaf();
     finishPracticeSessionCapture();
+    clearLoopRegion();
     syncTransportButtons();
   });
 
@@ -234,6 +275,7 @@ function mount(_slot: HTMLElement): void {
   unsubscribeScoreCleared = onScoreCleared(() => {
     stopCursorRaf();
     finishPracticeSessionCapture();
+    clearLoopRegion();
     syncTransportButtons();
   });
 
@@ -403,6 +445,21 @@ function mount(_slot: HTMLElement): void {
     const session = getSession();
     if (!session) return;
 
+    if (e.code === 'Escape') {
+      e.preventDefault();
+      clearLoopRegion();
+      return;
+    }
+    if (e.code === 'KeyL') {
+      e.preventDefault();
+      const beat = session.engine.currentBeat;
+      if (e.shiftKey) {
+        setLoopEnd(beat);
+      } else {
+        setLoopStart(beat);
+      }
+      return;
+    }
     if (e.code === 'Space') {
       e.preventDefault();
       if (session.engine.state === 'playing') { btnPause.click(); } else { btnPlay.click(); }
