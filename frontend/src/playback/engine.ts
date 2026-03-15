@@ -64,6 +64,42 @@ export function beatToSeconds(
 
 export type PlaybackState = 'idle' | 'playing' | 'paused';
 
+export interface ScheduledNoteEvent {
+  note: NoteModel;
+  startAt: number;
+  durationS: number;
+}
+
+/**
+ * Build note schedule events for a given resume point and tempo multiplier.
+ *
+ * Returned startAt times are absolute AudioContext times in seconds.
+ */
+export function scheduleNotes(
+  notes: NoteModel[],
+  tempoMarks: TempoMark[],
+  fromBeat: number,
+  originTime: number,
+  tempoMultiplier: number,
+): ScheduledNoteEvent[] {
+  const originOffsetS = beatToSeconds(fromBeat, tempoMarks, tempoMultiplier);
+  return notes
+    .filter((note) => note.beat_start + note.duration > fromBeat)
+    .map((note) => {
+      const noteStartOffsetS =
+        beatToSeconds(note.beat_start, tempoMarks, tempoMultiplier) - originOffsetS;
+      const noteDurS =
+        beatToSeconds(note.beat_start + note.duration, tempoMarks, tempoMultiplier) -
+        beatToSeconds(note.beat_start, tempoMarks, tempoMultiplier) +
+        RELEASE_TAIL_S;
+      return {
+        note,
+        startAt: originTime + noteStartOffsetS,
+        durationS: noteDurS,
+      };
+    });
+}
+
 // Constants
 /** Seconds between play() call and first note — gives audio thread time to buffer. */
 const SCHEDULE_OFFSET_S = 0.1;
@@ -94,8 +130,7 @@ export class PlaybackEngine {
 
   // Cached schedule parameters
   private _allNotes: NoteModel[] = [];
-  private _selectedPart = '';
-  private _notes: NoteModel[] = [];
+  private _partGains = new Map<string, GainNode>();
   private _tempoMarks: TempoMark[] = [];
   private _tempoMultiplier = 1;
   private _transposeSemitones = 0;
@@ -139,12 +174,13 @@ export class PlaybackEngine {
   schedule(
     notes: NoteModel[],
     tempoMarks: TempoMark[],
-    partName: string,
+    _partName: string,
     tempoMultiplier = 1,
   ): void {
     this._allNotes = notes;
-    this._selectedPart = partName;
-    this._notes = this._allNotes.filter((n) => n.part === this._selectedPart);
+    for (const note of this._allNotes) {
+      this._ensurePartGain(note.part);
+    }
     this._tempoMarks = tempoMarks;
     this._tempoMultiplier = tempoMultiplier;
   }
@@ -158,9 +194,6 @@ export class PlaybackEngine {
   selectPart(partName: string): void {
     const partExists = this._allNotes.some((n) => n.part === partName);
     if (!partExists) return;
-
-    this._selectedPart = partName;
-    this._notes = this._allNotes.filter((n) => n.part === this._selectedPart);
 
     if (this._state !== 'playing') return;
 
@@ -254,14 +287,22 @@ export class PlaybackEngine {
     this._scheduleFrom(beat, this._startAudioTime);
   }
 
+
+  setPartGain(partName: string, gain: number): void {
+    const partGain = this._partGains.get(partName) ?? this._ensurePartGain(partName);
+    const clamped = Math.max(0, Math.min(1, gain));
+    partGain.gain.value = clamped;
+  }
+
   setTempoMultiplier(multiplier: number): void {
+    const clamped = Math.max(0.5, Math.min(1.25, multiplier));
     if (this._state !== 'playing') {
-      this._tempoMultiplier = multiplier;
+      this._tempoMultiplier = clamped;
       return;
     }
     const beat = this.currentBeat;
     this._stopSources();
-    this._tempoMultiplier = multiplier;
+    this._tempoMultiplier = clamped;
     this._startBeat = beat;
     this._startAudioTime = this.ctx.currentTime + RESCHEDULE_OFFSET_S;
     this._scheduleFrom(beat, this._startAudioTime);
@@ -276,6 +317,17 @@ export class PlaybackEngine {
    */
   private get _scaledTempoMarks(): TempoMark[] {
     return this._tempoMarks.map((m) => ({ ...m, bpm: m.bpm * this._tempoMultiplier }));
+  }
+
+
+  private _ensurePartGain(partName: string): GainNode {
+    const existing = this._partGains.get(partName);
+    if (existing) return existing;
+    const gain = this.ctx.createGain();
+    gain.gain.value = 1;
+    gain.connect(this.ctx.destination);
+    this._partGains.set(partName, gain);
+    return gain;
   }
 
   private _beatAtTime(audioTime: number): number {
@@ -295,7 +347,7 @@ export class PlaybackEngine {
   private _scheduleFrom(fromBeat: number, originTime: number): void {
     const originOffsetS = beatToSeconds(fromBeat, this._tempoMarks, this._tempoMultiplier);
 
-    for (const note of this._notes) {
+    for (const note of this._allNotes) {
       // Skip notes that ended before the resume point
       if (note.beat_start + note.duration <= fromBeat) continue;
 
@@ -303,19 +355,23 @@ export class PlaybackEngine {
         beatToSeconds(note.beat_start, this._tempoMarks, this._tempoMultiplier) - originOffsetS;
       const startAt = originTime + noteStartOffsetS;
 
-      // Skip notes that are already too late to schedule
-      if (startAt < this.ctx.currentTime - LATE_TOLERANCE_S) continue;
+    const events = scheduleNotes(
+      this._notes,
+      this._tempoMarks,
+      fromBeat,
+      originTime,
+      this._tempoMultiplier,
+    );
 
+    for (const event of events) {
+      // Skip notes that are already too late to schedule
+      if (event.startAt < this.ctx.currentTime - LATE_TOLERANCE_S) continue;
+
+      const note = event.note;
       const targetMidi = note.midi + this._transposeSemitones;
       const buf = this.sf.getBuffer(targetMidi);
-
-      // Duration in seconds + release tail for natural piano decay
-      const noteDurS =
-        beatToSeconds(note.beat_start + note.duration, this._tempoMarks, this._tempoMultiplier) -
-        beatToSeconds(note.beat_start, this._tempoMarks, this._tempoMultiplier) +
-        RELEASE_TAIL_S;
-
-      const safeStart = Math.max(startAt, this.ctx.currentTime + STOP_SAFETY_OFFSET_S);
+      const noteDurS = event.durationS;
+      const safeStart = Math.max(event.startAt, this.ctx.currentTime + STOP_SAFETY_OFFSET_S);
 
       if (buf) {
         const src = this.ctx.createBufferSource();
@@ -328,7 +384,8 @@ export class PlaybackEngine {
           src.detune.value = (targetMidi - sampledMidi) * 100;
         }
 
-        src.connect(this.ctx.destination);
+        const gain = this._ensurePartGain(note.part);
+        src.connect(gain);
         src.start(safeStart);
         src.stop(safeStart + noteDurS);
         this._sources.push(src);
@@ -354,7 +411,8 @@ export class PlaybackEngine {
       gain.gain.linearRampToValueAtTime(0.0001, noteEnd);
 
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
+      const partGain = this._ensurePartGain(note.part);
+      gain.connect(partGain);
       osc.start(safeStart);
       osc.stop(noteEnd);
       this._sources.push(osc);

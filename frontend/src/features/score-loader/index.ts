@@ -27,6 +27,8 @@ import { getVisiblePartOptions } from '../../part-options';
 import { beatToMs, seekPlayback } from '../../transport/controls';
 import { beatFromClick, extractMeasureHitZones, measureBoundaryFromPoint } from '../../score/click-seek';
 import { clearLoopRegion, getLoopRegion, onLoopRegionChanged, setLoopEnd, setLoopStart } from '../../services/loop-region';
+import { beatToMs, seekPlayback, postPlayback } from '../../transport/controls';
+import { beatFromClick, extractMeasureHitZones } from '../../score/click-seek';
 import { type Feature } from '../../feature-types';
 
 let removeLoopRegionListener: (() => void) | null = null;
@@ -133,6 +135,31 @@ function mount(slot: HTMLElement): void {
 
   // ── Score loading ─────────────────────────────────────────────────────────
 
+  async function teardownPreviousSession(): Promise<void> {
+    const previousSession = getSession();
+    if (!previousSession) return;
+
+    // Capture state before stopping — engine.stop() transitions to 'idle'.
+    const wasActive = previousSession.engine.state !== 'idle';
+
+    // Stop frontend audio unconditionally — this is the critical operation.
+    // engine.stop() calls _stopSources() which wraps each src.stop() in
+    // try/catch, so it cannot throw.
+    previousSession.engine.stop();
+    previousSession.cursor.stop();
+    previousSession.cursor.osmd.cursor.show();
+
+    // Best-effort backend notification so the pipeline resets its state.
+    // Failure is non-fatal — audio is already silent.
+    if (wasActive) {
+      try {
+        await postPlayback('/playback/stop');
+      } catch (err) {
+        console.warn('Score swap: backend stop notification failed (non-fatal):', err);
+      }
+    }
+  }
+
   async function loadDevTestScore(filename: string): Promise<void> {
     try {
       setStatus(`Loading test score ${filename}…`, 'loading');
@@ -156,6 +183,9 @@ function mount(slot: HTMLElement): void {
     dropZoneEl.classList.add('hidden');
     scoreInfoEl.textContent = '';
     headphoneWarning.classList.add('hidden');
+    setTransportEnabled(false);
+
+    await teardownPreviousSession();
 
     // Let other features tear down state from the previous session.
     clearSession();

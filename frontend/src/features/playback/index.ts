@@ -20,7 +20,7 @@ import { setStatus } from '../../services/backend';
 import { recordBeatSample, resetProjection, getCursorX } from '../../services/cursor-projection';
 import { finishPracticeSessionCapture, startPracticeSessionCapture } from '../../services/progress-history';
 import { emitPlaybackSyncEvent } from '../../services/playback-sync';
-import { beatToMs, postPlayback, startPlayback, seekPlayback } from '../../transport/controls';
+import { beatToMs, postPlayback, setPlaybackTempo, startPlayback, seekPlayback } from '../../transport/controls';
 import { sessionSummaryTracker, type SessionSummary } from '../../practice/session-summary';
 import { type Feature } from '../../feature-types';
 import { ensureAudioPreflightReady } from '../../services/audio-preflight';
@@ -122,6 +122,41 @@ async function seekByBeats(delta: number): Promise<void> {
   if (engine.state !== 'playing') stopCursorRaf();
 }
 
+
+
+async function adjustTempoByStep(stepPercent: number): Promise<void> {
+  const session = getSession();
+  if (!session) return;
+
+  const tempoSliderEl = document.getElementById('tempo-slider') as HTMLInputElement | null;
+  const tempoLabelEl = document.getElementById('tempo-label') as HTMLSpanElement | null;
+  if (!tempoSliderEl || !tempoLabelEl) return;
+
+  const currentPercent = parseInt(tempoSliderEl.value, 10);
+  if (Number.isNaN(currentPercent)) return;
+
+  const nextPercent = Math.max(50, Math.min(125, currentPercent + stepPercent));
+  if (nextPercent === currentPercent) return;
+
+  const previousMultiplier = session.engine.tempoMultiplier;
+  const nextMultiplier = nextPercent / 100;
+
+  tempoSliderEl.value = String(nextPercent);
+  tempoLabelEl.textContent = `${nextPercent}%`;
+
+  session.engine.setTempoMultiplier(nextMultiplier);
+  try {
+    await setPlaybackTempo(nextMultiplier);
+  } catch (err) {
+    session.engine.setTempoMultiplier(previousMultiplier);
+    const previousPercent = Math.round(previousMultiplier * 100);
+    tempoSliderEl.value = String(previousPercent);
+    tempoLabelEl.textContent = `${previousPercent}%`;
+    setStatus(`tempo update failed: ${String(err)}`, 'error');
+    console.error('Tempo update failed:', err);
+  }
+}
+
 function getSelectedDeviceId(): number | null {
   const el = document.getElementById('settings-device') as HTMLSelectElement | null;
   if (!el || el.value === '') return null;
@@ -218,7 +253,7 @@ function mount(_slot: HTMLElement): void {
 
   function syncPauseButton(): void {
     const session = getSession();
-    if (!session || session.engine.state === 'stopped') {
+    if (!session || session.engine.state === 'idle') {
       btnPause.disabled = true;
       btnPause.innerHTML = '&#9646;&#9646; Pause';
       return;
@@ -432,7 +467,9 @@ function mount(_slot: HTMLElement): void {
     }
     if (e.code === 'KeyR') { e.preventDefault(); if (!btnRewind.disabled) btnRewind.click(); return; }
     if (e.code === 'ArrowLeft')  { e.preventDefault(); if (session.engine.state !== 'playing') void seekByBeats(-1); return; }
-    if (e.code === 'ArrowRight') { e.preventDefault(); if (session.engine.state !== 'playing') void seekByBeats(1); }
+    if (e.code === 'ArrowRight') { e.preventDefault(); if (session.engine.state !== 'playing') void seekByBeats(1); return; }
+    if (e.key === '[') { e.preventDefault(); void adjustTempoByStep(-5); return; }
+    if (e.key === ']') { e.preventDefault(); void adjustTempoByStep(5); }
   };
   window.addEventListener('keydown', onKeydown);
 

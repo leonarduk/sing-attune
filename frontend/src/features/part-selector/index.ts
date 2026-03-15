@@ -25,6 +25,37 @@ function mount(_slot: HTMLElement): void {
   const tempoSliderEl     = document.getElementById('tempo-slider')       as HTMLInputElement;
   const tempoLabelEl      = document.getElementById('tempo-label')        as HTMLSpanElement;
 
+
+  function clampTempoPercent(percent: number): number {
+    return Math.max(50, Math.min(125, percent));
+  }
+
+  function applyTempoUi(percent: number): void {
+    const clampedPercent = clampTempoPercent(percent);
+    tempoSliderEl.value = String(clampedPercent);
+    tempoLabelEl.textContent = `${clampedPercent}%`;
+  }
+
+  async function commitTempoChange(nextPercent: number): Promise<void> {
+    const session = getSession();
+    if (!session) return;
+    const { engine } = session;
+    const previousMultiplier = engine.tempoMultiplier;
+    const clampedPercent = clampTempoPercent(nextPercent);
+    const nextMultiplier = clampedPercent / 100;
+
+    applyTempoUi(clampedPercent);
+    engine.setTempoMultiplier(nextMultiplier);
+    try {
+      await setPlaybackTempo(nextMultiplier);
+    } catch (err) {
+      engine.setTempoMultiplier(previousMultiplier);
+      applyTempoUi(Math.round(previousMultiplier * 100));
+      setStatus(`tempo update failed: ${String(err)}`, 'error');
+      console.error('Tempo update failed:', err);
+    }
+  }
+
   function getTransposeSemitones(): number {
     const parsed = parseInt(transposeSelectEl.value, 10);
     return Number.isNaN(parsed) ? 0 : parsed;
@@ -79,26 +110,12 @@ function mount(_slot: HTMLElement): void {
   showAccompEl.addEventListener('change', () => { refreshPartSelector(); });
 
   // Tempo
-  tempoLabelEl.textContent = `${tempoSliderEl.value}%`;
+  applyTempoUi(parseInt(tempoSliderEl.value, 10));
   tempoSliderEl.addEventListener('input', () => {
-    tempoLabelEl.textContent = `${tempoSliderEl.value}%`;
+    applyTempoUi(parseInt(tempoSliderEl.value, 10));
   });
-  tempoSliderEl.addEventListener('change', async () => {
-    const session = getSession();
-    if (!session) return;
-    const { engine } = session;
-    const previousMultiplier = engine.tempoMultiplier;
-    const nextMultiplier = parseFloat(tempoSliderEl.value) / 100;
-    engine.setTempoMultiplier(nextMultiplier);
-    try {
-      await setPlaybackTempo(nextMultiplier);
-    } catch (err) {
-      engine.setTempoMultiplier(previousMultiplier);
-      tempoSliderEl.value = String(Math.round(previousMultiplier * 100));
-      tempoLabelEl.textContent = `${tempoSliderEl.value}%`;
-      setStatus(`tempo update failed: ${String(err)}`, 'error');
-      console.error('Tempo update failed:', err);
-    }
+  tempoSliderEl.addEventListener('change', () => {
+    void commitTempoChange(parseInt(tempoSliderEl.value, 10));
   });
 
   // Transpose
