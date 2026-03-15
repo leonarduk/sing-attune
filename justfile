@@ -33,3 +33,7 @@ test:
 # Build frontend for production
 build-frontend:
     cd {{frontend-dir}}; npm run build
+
+# Build a Windows NSIS installer via electron-builder
+package:
+    cd {{frontend-dir}}; npm run package:win

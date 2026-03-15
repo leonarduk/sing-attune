@@ -87,7 +87,7 @@ This keeps the backend real-time pipeline simple while score-aware interpretatio
 | Score playback (Web Audio) | 🔲 Day 9 |
 | Real-time pitch overlay | ✅ Done (Day 10) |
 | Transport controls | 🔲 Day 11 |
-| Electron packaging | 🔲 Day 16 |
+| Electron packaging | ✅ Done (Day 16c) |
 
 ---
 
@@ -163,6 +163,41 @@ API docs: http://localhost:8000/docs
 | Desktop packaging | Electron (planned) |
 
 ---
+
+## Desktop packaging (Windows installer)
+
+The repository now includes `electron-builder` wiring for a Windows NSIS installer (`.exe`).
+
+### Prerequisites
+
+- Frontend dependencies installed (`cd frontend && npm install`)
+- Frontend build succeeds (`npm run build`)
+- PyInstaller backend bundle present at `dist/backend/` (this folder is copied into the installer as an app resource)
+
+### Build installer
+
+From the repository root:
+
+```powershell
+just package
+```
+
+Or directly:
+
+```powershell
+cd frontend
+npm run package:win
+```
+
+Installer artifacts are written to `frontend/release/`.
+
+**Current installer-size expectation:** ~200 MB once bundled with backend runtime dependencies (Tensor/PyTorch stack dominates size).
+
+## Known limitations
+
+- Real-time pitch tracking is monophonic: **polyphonic singing is not supported**.
+- Melisma detection remains approximate in challenging passages with rapid ornaments.
+- Falsetto/airy tone can reduce CREPE confidence and produce unstable pitch traces.
 
 ## CI / development
 
