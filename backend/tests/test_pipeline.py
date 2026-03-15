@@ -15,6 +15,7 @@ import asyncio
 import time
 
 import pytest
+import torch
 from fastapi.testclient import TestClient
 
 from backend.audio.pipeline import PlaybackPipeline, PlaybackState
@@ -201,6 +202,23 @@ class TestPlaybackStateMachine:
 # ── set_force_cpu ─────────────────────────────────────────────────────────────
 
 
+def _patch_pipeline_hardware(monkeypatch):
+    """Patch MicCapture and PitchPipeline in pipeline_mod so no hardware is touched."""
+    import backend.audio.pipeline as pipeline_mod
+    monkeypatch.setattr(pipeline_mod, "MicCapture", _MockCapture)
+    monkeypatch.setattr(pipeline_mod, "PitchPipeline", _MockPitchPipelineFactory)
+
+
+class _MockPitchPipelineFactory:
+    """Drop-in for PitchPipeline construction inside set_force_cpu."""
+    def __init__(self, engine=None, on_frame=None):
+        self.engine = engine
+        self._on_frame = on_frame
+    def start(self): pass
+    def stop(self): pass
+    def push(self, _): pass
+
+
 class TestSetForceCpu:
     """Tests for the live engine-switching hot-swap path (the 8 uncovered lines)."""
 
@@ -209,7 +227,7 @@ class TestSetForceCpu:
         return PlaybackPipeline(engine=Engine.PYIN)
 
     def test_set_force_cpu_true_when_stopped(self, monkeypatch):
-        """STOPPED: no hardware to rebuild, just updates flags."""
+        """STOPPED: no hardware rebuilt, just updates flags."""
         monkeypatch.delenv("PITCH_ENGINE", raising=False)
         monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
         p = self._pipeline()
@@ -229,9 +247,10 @@ class TestSetForceCpu:
         assert p.state == PlaybackState.STOPPED
 
     def test_set_force_cpu_when_playing_rebuilds_and_restores_playing(self, monkeypatch):
-        """PLAYING: teardown + rebuild, state restored to PLAYING, capture started."""
+        """PLAYING: teardown + rebuild, state restored to PLAYING."""
         monkeypatch.delenv("PITCH_ENGINE", raising=False)
         monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        _patch_pipeline_hardware(monkeypatch)
 
         p = self._pipeline()
         original_capture = _MockCapture()
@@ -245,7 +264,6 @@ class TestSetForceCpu:
 
         assert p.state == PlaybackState.PLAYING
         assert p.force_cpu is True
-        # New objects must have been constructed
         assert p._capture is not original_capture
         assert p._pitch is not original_pitch
 
@@ -253,6 +271,7 @@ class TestSetForceCpu:
         """PAUSED: teardown + rebuild, state restored to PAUSED, capture NOT started."""
         monkeypatch.delenv("PITCH_ENGINE", raising=False)
         monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        _patch_pipeline_hardware(monkeypatch)
 
         p = self._pipeline()
         original_capture = _MockCapture()
@@ -274,15 +293,9 @@ class TestSetForceCpu:
         monkeypatch.delenv("PITCH_ENGINE", raising=False)
         monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
 
-        p = self._pipeline()
-        p._capture = _MockCaptureWithDeviceId(device_id=7)
-        p._pitch = _MockPitch()
-        p._state = PlaybackState.PLAYING
-        p._play_monotonic = time.monotonic()
+        import backend.audio.pipeline as pipeline_mod
 
         created_with_device_id = []
-
-        import backend.audio.pipeline as pipeline_mod
 
         class RecordingMicCapture:
             def __init__(self, device_id=None, on_window=None):
@@ -292,12 +305,20 @@ class TestSetForceCpu:
             def stop(self): pass
 
         monkeypatch.setattr(pipeline_mod, "MicCapture", RecordingMicCapture)
+        monkeypatch.setattr(pipeline_mod, "PitchPipeline", _MockPitchPipelineFactory)
+
+        p = self._pipeline()
+        p._capture = _MockCaptureWithDeviceId(device_id=7)
+        p._pitch = _MockPitch()
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+
         p.set_force_cpu(True)
 
         assert created_with_device_id == [7]
 
 
-# ── Frame fan-out ──────────────────────────────────────────────────────────────
+# ── Frame fan-out ─────────────────────────────────────────────────────────────
 
 
 class TestFrameFanout:
@@ -429,7 +450,7 @@ class TestFrameFanout:
         asyncio.run(_run())
 
 
-# ── HTTP endpoints ──────────────────────────────────────────────────────────────
+# ── HTTP endpoints ─────────────────────────────────────────────────────────────
 
 
 class TestPlaybackEndpoints:
@@ -541,9 +562,7 @@ class TestWebSocketEndpoint:
             assert msg == {"status": "connected"}
 
 
-# ── Mock helpers ───────────────────────────────────────────────────────────────
-
-import torch
+# ── Mock helpers ─────────────────────────────────────────────────────────────
 
 
 class _MockCapture:
