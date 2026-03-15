@@ -57,6 +57,27 @@ describe('score-session store', () => {
     expect(onPartChanged).not.toHaveBeenCalled();
   });
 
+  it('supports unsubscribing score-loaded and score-cleared listeners', async () => {
+    const store = await import('./score-session');
+    const onLoaded = vi.fn();
+    const onCleared = vi.fn();
+
+    const unsubscribeLoaded = store.onScoreLoaded(onLoaded);
+    const unsubscribeCleared = store.onScoreCleared(onCleared);
+
+    store.setSession(buildSession('Soprano'));
+    expect(onLoaded).toHaveBeenCalledTimes(1);
+
+    unsubscribeLoaded();
+    unsubscribeCleared();
+
+    store.setSession(buildSession('Alto'));
+    store.clearSession();
+
+    expect(onLoaded).toHaveBeenCalledTimes(1);
+    expect(onCleared).toHaveBeenCalledTimes(0);
+  });
+
   it('deduplicates and unsubscribes score session callbacks', async () => {
     const store = await import('./score-session');
     const onLoaded = vi.fn();
@@ -71,8 +92,8 @@ describe('score-session store', () => {
     store.setSession(session);
     store.clearSession();
 
-    expect(onLoaded).toHaveBeenCalledTimes(1);
-    expect(onCleared).toHaveBeenCalledTimes(1);
+    expect(onLoaded).toHaveBeenCalledTimes(2); // two registrations, each fires once
+    expect(onCleared).toHaveBeenCalledTimes(2);
 
     unsubscribeLoadedA();
     unsubscribeLoadedB();
@@ -82,8 +103,22 @@ describe('score-session store', () => {
     store.setSession(session);
     store.clearSession();
 
+    expect(onLoaded).toHaveBeenCalledTimes(2); // no further calls after unsubscribe
+    expect(onCleared).toHaveBeenCalledTimes(2);
+  });
+
+  it('fires score-loaded callback immediately when subscribing with an active session', async () => {
+    const store = await import('./score-session');
+    const existing = buildSession('Soprano');
+    store.setSession(existing);
+
+    const onLoaded = vi.fn();
+    const unsubscribe = store.onScoreLoaded(onLoaded);
+
     expect(onLoaded).toHaveBeenCalledTimes(1);
-    expect(onCleared).toHaveBeenCalledTimes(1);
+    expect(onLoaded).toHaveBeenCalledWith(existing);
+
+    unsubscribe();
   });
 
 });

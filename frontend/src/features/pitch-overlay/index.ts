@@ -61,6 +61,8 @@ let wasPlayingLastTick = false;
 const sessionRangeTracker = new SessionRangeTracker();
 const timelineSync = new PitchTimelineSync();
 let playbackSyncUnsubscribe: (() => void) | null = null;
+let unsubscribeScoreLoaded: (() => void) | null = null;
+let unsubscribeScoreCleared: (() => void) | null = null;
 let syncOffsetWarningShown = false;
 
 let warmupActive = false;
@@ -437,7 +439,10 @@ function mount(_slot: HTMLElement): void {
   startPitchGraphLoop();
   clearPhraseSummaryPanel();
 
-  onScoreCleared(() => {
+  unsubscribeScoreCleared?.();
+  unsubscribeScoreLoaded?.();
+
+  unsubscribeScoreCleared = onScoreCleared(() => {
     closePitchSocket();
     finalizeSessionRangeSummary();
     pitchOverlay?.destroy();
@@ -454,7 +459,7 @@ function mount(_slot: HTMLElement): void {
     updateSessionRangeReadout();
   });
 
-  onScoreLoaded((session) => {
+  unsubscribeScoreLoaded = onScoreLoaded((session) => {
     pitchOverlay?.destroy();
     pitchOverlay = new PitchOverlay(
       scoreContainerEl, session.model, session.selectedPart, overlaySettings);
@@ -593,6 +598,10 @@ function mount(_slot: HTMLElement): void {
 function unmount(): void {
   playbackSyncUnsubscribe?.();
   playbackSyncUnsubscribe = null;
+  unsubscribeScoreLoaded?.();
+  unsubscribeScoreLoaded = null;
+  unsubscribeScoreCleared?.();
+  unsubscribeScoreCleared = null;
   closePitchSocket();
   stopPitchGraphLoop();
   pitchOverlay?.destroy(); pitchOverlay = null;
