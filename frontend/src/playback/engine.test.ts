@@ -79,7 +79,7 @@ describe('beatToSeconds / elapsedToBeat round-trip', () => {
 });
 
 describe('PlaybackEngine part selection', () => {
-  it('selectPart filters notes used by the scheduler', () => {
+  it('schedules all notes regardless of selected part', () => {
     const starts: number[] = [];
 
     class FakeBufferSource {
@@ -96,6 +96,9 @@ describe('PlaybackEngine part selection', () => {
       destination = {} as AudioDestinationNode;
       createBufferSource(): AudioBufferSourceNode {
         return new FakeBufferSource() as unknown as AudioBufferSourceNode;
+      }
+      createGain(): GainNode {
+        return { gain: { value: 1 }, connect(): void {} } as unknown as GainNode;
       }
       resume(): Promise<void> {
         return Promise.resolve();
@@ -124,13 +127,13 @@ describe('PlaybackEngine part selection', () => {
 
     engine.schedule(notes, BPM120, 'PART I', 1);
     engine.play(0);
-    expect(starts).toHaveLength(2);
+    expect(starts).toHaveLength(3);
 
     starts.length = 0;
     engine.stop();
     engine.selectPart('Piano');
     engine.play(0);
-    expect(starts).toHaveLength(1);
+    expect(starts).toHaveLength(3);
   });
 
 
@@ -151,6 +154,9 @@ describe('PlaybackEngine part selection', () => {
       destination = {} as AudioDestinationNode;
       createBufferSource(): AudioBufferSourceNode {
         return new FakeBufferSource() as unknown as AudioBufferSourceNode;
+      }
+      createGain(): GainNode {
+        return { gain: { value: 1 }, connect(): void {} } as unknown as GainNode;
       }
       resume(): Promise<void> {
         return Promise.resolve();
@@ -180,7 +186,7 @@ describe('PlaybackEngine part selection', () => {
     engine.selectPart('DOES NOT EXIST');
     engine.play(0);
 
-    expect(starts).toHaveLength(1);
+    expect(starts).toHaveLength(2);
   });
 
   it('maintains beat continuity across mid-session part switch offset', () => {
@@ -198,6 +204,9 @@ describe('PlaybackEngine part selection', () => {
       destination = {} as AudioDestinationNode;
       createBufferSource(): AudioBufferSourceNode {
         return new FakeBufferSource() as unknown as AudioBufferSourceNode;
+      }
+      createGain(): GainNode {
+        return { gain: { value: 1 }, connect(): void {} } as unknown as GainNode;
       }
       resume(): Promise<void> {
         return Promise.resolve();

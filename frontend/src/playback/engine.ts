@@ -94,8 +94,7 @@ export class PlaybackEngine {
 
   // Cached schedule parameters
   private _allNotes: NoteModel[] = [];
-  private _selectedPart = '';
-  private _notes: NoteModel[] = [];
+  private _partGains = new Map<string, GainNode>();
   private _tempoMarks: TempoMark[] = [];
   private _tempoMultiplier = 1;
   private _transposeSemitones = 0;
@@ -139,12 +138,13 @@ export class PlaybackEngine {
   schedule(
     notes: NoteModel[],
     tempoMarks: TempoMark[],
-    partName: string,
+    _partName: string,
     tempoMultiplier = 1,
   ): void {
     this._allNotes = notes;
-    this._selectedPart = partName;
-    this._notes = this._allNotes.filter((n) => n.part === this._selectedPart);
+    for (const note of this._allNotes) {
+      this._ensurePartGain(note.part);
+    }
     this._tempoMarks = tempoMarks;
     this._tempoMultiplier = tempoMultiplier;
   }
@@ -158,9 +158,6 @@ export class PlaybackEngine {
   selectPart(partName: string): void {
     const partExists = this._allNotes.some((n) => n.part === partName);
     if (!partExists) return;
-
-    this._selectedPart = partName;
-    this._notes = this._allNotes.filter((n) => n.part === this._selectedPart);
 
     if (this._state !== 'playing') return;
 
@@ -254,6 +251,13 @@ export class PlaybackEngine {
     this._scheduleFrom(beat, this._startAudioTime);
   }
 
+
+  setPartGain(partName: string, gain: number): void {
+    const partGain = this._partGains.get(partName) ?? this._ensurePartGain(partName);
+    const clamped = Math.max(0, Math.min(1, gain));
+    partGain.gain.value = clamped;
+  }
+
   setTempoMultiplier(multiplier: number): void {
     if (this._state !== 'playing') {
       this._tempoMultiplier = multiplier;
@@ -278,6 +282,17 @@ export class PlaybackEngine {
     return this._tempoMarks.map((m) => ({ ...m, bpm: m.bpm * this._tempoMultiplier }));
   }
 
+
+  private _ensurePartGain(partName: string): GainNode {
+    const existing = this._partGains.get(partName);
+    if (existing) return existing;
+    const gain = this.ctx.createGain();
+    gain.gain.value = 1;
+    gain.connect(this.ctx.destination);
+    this._partGains.set(partName, gain);
+    return gain;
+  }
+
   private _beatAtTime(audioTime: number): number {
     const elapsedS = audioTime - this._startAudioTime;
     if (elapsedS < 0) return this._startBeat;
@@ -295,7 +310,7 @@ export class PlaybackEngine {
   private _scheduleFrom(fromBeat: number, originTime: number): void {
     const originOffsetS = beatToSeconds(fromBeat, this._tempoMarks, this._tempoMultiplier);
 
-    for (const note of this._notes) {
+    for (const note of this._allNotes) {
       // Skip notes that ended before the resume point
       if (note.beat_start + note.duration <= fromBeat) continue;
 
@@ -328,7 +343,8 @@ export class PlaybackEngine {
           src.detune.value = (targetMidi - sampledMidi) * 100;
         }
 
-        src.connect(this.ctx.destination);
+        const gain = this._ensurePartGain(note.part);
+        src.connect(gain);
         src.start(safeStart);
         src.stop(safeStart + noteDurS);
         this._sources.push(src);
@@ -354,7 +370,8 @@ export class PlaybackEngine {
       gain.gain.linearRampToValueAtTime(0.0001, noteEnd);
 
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
+      const partGain = this._ensurePartGain(note.part);
+      gain.connect(partGain);
       osc.start(safeStart);
       osc.stop(noteEnd);
       this._sources.push(osc);
