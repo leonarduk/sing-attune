@@ -28,12 +28,6 @@ import { PitchTimelineSync } from '../../pitch/timeline-sync';
 import { parsePitchSocketMessage, reconnectDelayMs } from '../../pitch/socket';
 import { midiToFrequency, midiToNoteName } from '../../pitch/note-name';
 import { SessionRangeTracker } from '../../pitch/session-range';
-import {
-  DEFAULT_STABLE_NOTE_SETTINGS,
-  StableNoteDetector,
-  type StableNoteSettings,
-} from '../../pitch/stable-note';
-import { StablePitchTracker } from '../../pitch/diagnostics';
 import { elapsedToBeat } from '../../score/timing';
 import { type NoteModel } from '../../score/renderer';
 import { PhraseSummaryTracker, type PhraseSummary } from '../../pitch/phrase-summary';
@@ -62,12 +56,8 @@ let syntheticModeEnabled = false;
 let selectedDeviceId: number | null = null;
 let recordingError: string | null = null;
 let phraseSummaryTracker: PhraseSummaryTracker | null = null;
-let lastStableMidi: number | null = null;
 let sessionRangeSummaryText = 'Last session range: —';
 let wasPlayingLastTick = false;
-let phraseSummaryTracker: PhraseSummaryTracker | null = null;
-let diagnosticsModeEnabled = false;
-const stablePitchTracker = new StablePitchTracker();
 const sessionRangeTracker = new SessionRangeTracker();
 const timelineSync = new PitchTimelineSync();
 let playbackSyncUnsubscribe: (() => void) | null = null;
@@ -166,16 +156,14 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
   if (sessionRangeTracker.ingest(frame, overlaySettings.confidenceThreshold)) {
     updateSessionRangeReadout();
   }
-  sessionSummaryTracker.recordFrame(frame);
   window.dispatchEvent(new CustomEvent('stable-pitch-frame', {
     detail: {
       t: frame.t,
-      rawMidi: stableState.rawMidi,
-      stableMidi: stableState.stableMidi,
+      rawMidi: frame.midi,
+      stableMidi: frame.midi,
       conf: frame.conf,
     },
   }));
-  capturePitchFrame(frame);
   const completedPhrases = phraseSummaryTracker?.pushFrame(frame) ?? [];
   // Render all completed summaries — multiple can flush in a single frame after
   // a seek or discontinuity. Only the last one will remain visible, but each
@@ -297,7 +285,6 @@ function startPitchGraphLoop(): void {
         warmupActive = false;
         warmupTargetMidi = null;
         syncWarmupUi('Warm-up complete. You can start rehearsal.');
-        setStatus('warm-up complete', 'ok');
       }
     }
     if (syntheticModeEnabled && (session?.engine.playing || warmupActive)) {
@@ -440,7 +427,6 @@ function mount(_slot: HTMLElement): void {
     warmupStartPerfMs = performance.now();
     warmupTargetMidi = warmupSequence[0]?.midi ?? null;
     warmupActive = true;
-    setStatus('warm-up running', 'ok');
     updateWarmupUi('Warm-up in progress: sirens');
     connectPitchSocket();
   }
@@ -453,7 +439,6 @@ function mount(_slot: HTMLElement): void {
   onScoreCleared(() => {
     closePitchSocket();
     finalizeSessionRangeSummary();
-    if (!diagnosticsModeEnabled) closePitchSocket();
     pitchOverlay?.destroy();
     pitchOverlay = null;
     pitchGraph?.clear();
@@ -465,13 +450,7 @@ function mount(_slot: HTMLElement): void {
     updatePitchReadout();
     wasPlayingLastTick = false;
     sessionRangeTracker.reset();
-    sessionSummaryTracker.reset();
-    phraseSummaryTracker = null;
-    clearPhraseSummaryPanel();
-    updatePitchReadout();
     updateSessionRangeReadout();
-    clearDiagnostics();
-    if (diagnosticsModeEnabled) connectPitchSocket();
   });
 
   onScoreLoaded((session) => {
@@ -489,7 +468,6 @@ function mount(_slot: HTMLElement): void {
     clearPhraseSummaryPanel();
     updatePitchReadout();
     updateSessionRangeReadout();
-    clearDiagnostics();
     connectPitchSocket();
   });
 
