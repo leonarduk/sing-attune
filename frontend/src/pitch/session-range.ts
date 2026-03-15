@@ -6,6 +6,7 @@ export interface SessionRange {
 export interface SessionRangeSummary extends SessionRange {
   semitoneSpan: number;
   octaveSpan: number;
+  stableNoteCount: number;
 }
 
 export interface SessionRangeTrackerOptions {
@@ -27,6 +28,8 @@ export class SessionRangeTracker {
 
   private lowMidi: number | null = null;
   private highMidi: number | null = null;
+  private stableNoteCount = 0;
+  private lastStableMidi: number | null = null;
 
   private candidateMidi: number | null = null;
   private candidateSinceMs: number | null = null;
@@ -68,6 +71,8 @@ export class SessionRangeTracker {
   reset(): void {
     this.lowMidi = null;
     this.highMidi = null;
+    this.stableNoteCount = 0;
+    this.lastStableMidi = null;
     this.resetCandidate();
   }
 
@@ -85,10 +90,16 @@ export class SessionRangeTracker {
       highMidi: this.highMidi,
       semitoneSpan,
       octaveSpan: semitoneSpan / 12,
+      stableNoteCount: this.stableNoteCount,
     };
   }
 
   private commitStableMidi(stableMidi: number): boolean {
+    if (this.lastStableMidi !== stableMidi) {
+      this.stableNoteCount += 1;
+      this.lastStableMidi = stableMidi;
+    }
+
     let changed = false;
     if (this.lowMidi === null || stableMidi < this.lowMidi) {
       this.lowMidi = stableMidi;
