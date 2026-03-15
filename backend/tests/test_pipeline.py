@@ -203,17 +203,24 @@ class TestPlaybackStateMachine:
 
 
 def _patch_pipeline_hardware(monkeypatch):
-    """Patch MicCapture and PitchPipeline in pipeline_mod so no hardware is touched."""
+    """Replace MicCapture and PitchPipeline in the pipeline module with no-op fakes."""
     import backend.audio.pipeline as pipeline_mod
-    monkeypatch.setattr(pipeline_mod, "MicCapture", _MockCapture)
-    monkeypatch.setattr(pipeline_mod, "PitchPipeline", _MockPitchPipelineFactory)
+    monkeypatch.setattr(pipeline_mod, "MicCapture", _FakeMicCapture)
+    monkeypatch.setattr(pipeline_mod, "PitchPipeline", _FakePitchPipeline)
 
 
-class _MockPitchPipelineFactory:
-    """Drop-in for PitchPipeline construction inside set_force_cpu."""
+class _FakeMicCapture:
+    """No-op replacement for MicCapture — accepts the same constructor args."""
+    def __init__(self, device_id=None, on_window=None):
+        self.device_id = device_id
+    def start(self): pass
+    def stop(self): pass
+
+
+class _FakePitchPipeline:
+    """No-op replacement for PitchPipeline — accepts the same constructor args."""
     def __init__(self, engine=None, on_frame=None):
         self.engine = engine
-        self._on_frame = on_frame
     def start(self): pass
     def stop(self): pass
     def push(self, _): pass
@@ -305,7 +312,7 @@ class TestSetForceCpu:
             def stop(self): pass
 
         monkeypatch.setattr(pipeline_mod, "MicCapture", RecordingMicCapture)
-        monkeypatch.setattr(pipeline_mod, "PitchPipeline", _MockPitchPipelineFactory)
+        monkeypatch.setattr(pipeline_mod, "PitchPipeline", _FakePitchPipeline)
 
         p = self._pipeline()
         p._capture = _MockCaptureWithDeviceId(device_id=7)
@@ -566,13 +573,14 @@ class TestWebSocketEndpoint:
 
 
 class _MockCapture:
-    """Stands in for MicCapture — no hardware interaction."""
+    """Minimal stand-in for MicCapture used where no construction args are needed."""
     device_id = None
     def start(self): pass
     def stop(self): pass
 
 
 class _MockCaptureWithDeviceId:
+    """Stand-in for MicCapture when the device_id value needs to be inspected."""
     def __init__(self, device_id):
         self.device_id = device_id
     def start(self): pass
