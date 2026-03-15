@@ -168,15 +168,38 @@ API docs: http://localhost:8000/docs
 
 Every pull request runs:
 - **ruff** — Python linter
-- **pytest** — full test suite with coverage (hardware tests auto-skip in CI)
+- **pytest** — backend test suite with coverage (hardware tests auto-skip in CI)
+- **frontend-test** — frontend unit tests (Vitest)
+- **e2e** — frontend end-to-end tests (Playwright + Chromium)
 - **Codecov** — coverage delta reported on every PR
 - **Claude AI review** — reviews the diff against the linked issue's acceptance criteria
 
 Run locally before pushing:
+
+Backend (lint + tests):
 ```powershell
 uv run ruff check backend/ --fix
 uv run pytest -v --cov=backend --cov-report=term-missing
 ```
+
+Frontend unit tests (Vitest):
+```powershell
+cd frontend
+npm install
+npm test
+```
+
+Frontend E2E tests (Playwright):
+```powershell
+cd frontend
+npm install
+npx playwright install chromium   # one-time, downloads ~120MB
+npm run test:e2e
+```
+
+> [!NOTE]
+> `npx playwright install chromium` downloads browser binaries from `https://playwright.azureedge.net`.
+> On restricted networks this can fail; when that happens, rely on the CI `e2e` job instead of local E2E runs.
 
 See [CLAUDE.md](CLAUDE.md) for branching conventions and the full pre-commit checklist.
 
@@ -193,7 +216,7 @@ backend/
 frontend/
   src/            Vite + TypeScript — score renderer, pitch canvas, playback, controls
 .github/
-  workflows/      PR review: ruff + pytest + Codecov + Claude AI review
+  workflows/      PR review: ruff + pytest + frontend-test + e2e + Codecov + Claude AI review
   scripts/        claude_review.py — AI review script
 musescore/        Test scores (Homeward Bound, Parts I & II)
 ```
