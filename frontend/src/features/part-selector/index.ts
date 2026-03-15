@@ -15,6 +15,9 @@ import { getVisiblePartOptions } from '../../part-options';
 import { setPlaybackTempo, setPlaybackTranspose } from '../../transport/controls';
 import { type Feature } from '../../feature-types';
 
+let unsubscribeScoreLoaded: (() => void) | null = null;
+let unsubscribeScoreCleared: (() => void) | null = null;
+
 function mount(_slot: HTMLElement): void {
   const partSelectEl      = document.getElementById('part-select')        as HTMLSelectElement;
   const showAccompEl      = document.getElementById('show-accompaniment') as HTMLInputElement;
@@ -63,8 +66,10 @@ function mount(_slot: HTMLElement): void {
     if (session.selectedPart !== selectedPart) updateSelectedPart(selectedPart);
   }
 
-  onScoreCleared(() => { partSelectEl.innerHTML = ''; });
-  onScoreLoaded(() => { refreshPartSelector(); });
+  unsubscribeScoreCleared?.();
+  unsubscribeScoreLoaded?.();
+  unsubscribeScoreCleared = onScoreCleared(() => { partSelectEl.innerHTML = ''; });
+  unsubscribeScoreLoaded = onScoreLoaded(() => { refreshPartSelector(); });
 
   partSelectEl.addEventListener('change', () => {
     scheduleSelectedPart(partSelectEl.value);
@@ -112,7 +117,12 @@ function mount(_slot: HTMLElement): void {
   });
 }
 
-function unmount(): void { /* stateless */ }
+function unmount(): void {
+  unsubscribeScoreCleared?.();
+  unsubscribeScoreCleared = null;
+  unsubscribeScoreLoaded?.();
+  unsubscribeScoreLoaded = null;
+}
 
 export const partSelectorFeature: Feature = {
   id: 'slot-part-selector',

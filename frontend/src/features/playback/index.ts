@@ -28,6 +28,8 @@ import { ensureAudioPreflightReady } from '../../services/audio-preflight';
 // ── Cursor RAF ──────────────────────────────────────────────────────────────────
 
 let cursorRafId: number | null = null;
+let unsubscribeScoreLoaded: (() => void) | null = null;
+let unsubscribeScoreCleared: (() => void) | null = null;
 
 function startCursorRaf(): void {
   stopCursorRaf();
@@ -134,9 +136,6 @@ function mount(_slot: HTMLElement): void {
   const summaryRetry     = document.getElementById('btn-summary-retry')  as HTMLButtonElement;
   const summaryReplay    = document.getElementById('btn-summary-replay') as HTMLButtonElement;
 
-  // Merge into a single onScoreCleared callback so both always fire together,
-  // regardless of whether the implementation replaces or appends listeners.
-  onScoreCleared(() => { stopCursorRaf(); finishPracticeSessionCapture(); });
 
   function syncTransportButtons(): void {
     const session = getSession();
@@ -186,8 +185,14 @@ function mount(_slot: HTMLElement): void {
     }
   }
 
-  onScoreLoaded(() => { syncTransportButtons(); });
-  onScoreCleared(() => { stopCursorRaf(); syncTransportButtons(); });
+  unsubscribeScoreLoaded?.();
+  unsubscribeScoreCleared?.();
+  unsubscribeScoreLoaded = onScoreLoaded(() => { syncTransportButtons(); });
+  unsubscribeScoreCleared = onScoreCleared(() => {
+    stopCursorRaf();
+    finishPracticeSessionCapture();
+    syncTransportButtons();
+  });
 
   btnPlay.addEventListener('click', async () => {
     const session = getSession();
@@ -365,6 +370,10 @@ function mount(_slot: HTMLElement): void {
 
 function unmount(): void {
   stopCursorRaf();
+  unsubscribeScoreLoaded?.();
+  unsubscribeScoreLoaded = null;
+  unsubscribeScoreCleared?.();
+  unsubscribeScoreCleared = null;
 }
 
 export const playbackFeature: Feature = {
