@@ -39,6 +39,7 @@ let voiceTypeSelectEl: HTMLSelectElement | null = null;
 let voiceTypeSuggestionEl: HTMLDivElement | null = null;
 let octaveCompCheckboxEl: HTMLInputElement | null = null;
 const METER_GAIN_SCALE = 140;
+let removeEscapeListener: (() => void) | null = null;
 
 let selectedDeviceId: string | null = loadPreflightDeviceId();
 let selectedVoiceTypeId: string | null = loadUserVoiceTypeId();
@@ -316,6 +317,17 @@ function ensureStyles(): void {
 async function openModal(): Promise<boolean> {
   if (!modalEl) return false;
   modalEl.classList.remove('hidden');
+  removeEscapeListener?.();
+  const onEscape = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape' || isPreflightModalHidden()) return;
+    event.preventDefault();
+    closeModal(false);
+  };
+  window.addEventListener('keydown', onEscape);
+  removeEscapeListener = () => {
+    window.removeEventListener('keydown', onEscape);
+    removeEscapeListener = null;
+  };
   await requestPermissionAndDevices();
   return new Promise<boolean>((resolve) => {
     resolver = resolve;
@@ -324,6 +336,7 @@ async function openModal(): Promise<boolean> {
 
 function closeModal(completed: boolean): void {
   if (modalEl) modalEl.classList.add('hidden');
+  removeEscapeListener?.();
   monitorGain && (monitorGain.gain.value = 0);
   isMonitoring = false;
   if (testButtonEl) testButtonEl.textContent = 'Test my mic';
@@ -403,6 +416,7 @@ function mount(_slot: HTMLElement): void {
 
 function unmount(): void {
   cleanupMonitor();
+  removeEscapeListener?.();
   // monitorCtx is already closed and nulled by cleanupMonitor()
   modalEl?.remove();
   modalEl = null;
@@ -411,7 +425,12 @@ function unmount(): void {
 
 export const __audioPreflightInternals = {
   resolveSelectedDeviceId,
+  isPreflightModalHidden,
 };
+
+function isPreflightModalHidden(): boolean {
+  return !modalEl || modalEl.classList.contains('hidden');
+}
 
 export const audioPreflightFeature: Feature = {
   id: 'slot-audio-preflight',
