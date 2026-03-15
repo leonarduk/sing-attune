@@ -3,7 +3,6 @@ import {
   DEFAULT_CONFIDENCE_THRESHOLD,
   MAX_CONFIDENCE_THRESHOLD,
   MAX_TRAIL_MS,
-  MIN_CONFIDENCE_THRESHOLD,
   MIN_TRAIL_MS,
   normalizeOverlaySettings,
 } from './overlay';
