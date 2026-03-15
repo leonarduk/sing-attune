@@ -201,11 +201,14 @@ describe('pitchOverlayFeature warm-up controls', () => {
     const stop = document.getElementById('btn-stop-warmup') as HTMLButtonElement;
     const status = document.getElementById('warmup-status') as HTMLSpanElement;
 
-    stop.disabled = false;
-    const before = status.textContent;
-    stop.click();
-
-    expect(status.textContent).toBe(before);
+    // The stop button must remain disabled while idle — disabled buttons do not
+    // fire native click events, so this is the actual no-op mechanism.
+    expect(stop.disabled).toBe(true);
     expect(stop.classList.contains('hidden')).toBe(true);
+
+    // Dispatch a programmatic click to verify the handler guard also ignores it.
+    const before = status.textContent;
+    stop.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(status.textContent).toBe(before);
   });
 });
