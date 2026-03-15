@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildPitchGraphAriaLabel,
   buildSemitoneGrid,
   DEFAULT_BAND_CENTS_TOLERANCE,
   GRAPH_MIDI_MAX,
@@ -12,6 +13,15 @@ import {
 } from './graph';
 import { classifyGraphTraceColor, centsError, GRAPH_IN_TUNE_CENTS } from './graph-colors';
 
+
+
+describe('pitch graph accessibility label', () => {
+  it('describes note range and rolling time window', () => {
+    expect(buildPitchGraphAriaLabel(36, 84, 10)).toBe(
+      'Real-time pitch graph showing your sung pitch (C2–C6) over a 10-second rolling window',
+    );
+  });
+});
 describe('graph coordinate helpers', () => {
   it('maps midi bounds to canvas bounds', () => {
     expect(midiToGraphY(GRAPH_MIDI_MAX, 100)).toBe(0);
