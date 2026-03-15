@@ -64,6 +64,42 @@ export function beatToSeconds(
 
 export type PlaybackState = 'idle' | 'playing' | 'paused';
 
+export interface ScheduledNoteEvent {
+  note: NoteModel;
+  startAt: number;
+  durationS: number;
+}
+
+/**
+ * Build note schedule events for a given resume point and tempo multiplier.
+ *
+ * Returned startAt times are absolute AudioContext times in seconds.
+ */
+export function scheduleNotes(
+  notes: NoteModel[],
+  tempoMarks: TempoMark[],
+  fromBeat: number,
+  originTime: number,
+  tempoMultiplier: number,
+): ScheduledNoteEvent[] {
+  const originOffsetS = beatToSeconds(fromBeat, tempoMarks, tempoMultiplier);
+  return notes
+    .filter((note) => note.beat_start + note.duration > fromBeat)
+    .map((note) => {
+      const noteStartOffsetS =
+        beatToSeconds(note.beat_start, tempoMarks, tempoMultiplier) - originOffsetS;
+      const noteDurS =
+        beatToSeconds(note.beat_start + note.duration, tempoMarks, tempoMultiplier) -
+        beatToSeconds(note.beat_start, tempoMarks, tempoMultiplier) +
+        RELEASE_TAIL_S;
+      return {
+        note,
+        startAt: originTime + noteStartOffsetS,
+        durationS: noteDurS,
+      };
+    });
+}
+
 // Constants
 /** Seconds between play() call and first note — gives audio thread time to buffer. */
 const SCHEDULE_OFFSET_S = 0.1;
@@ -259,13 +295,14 @@ export class PlaybackEngine {
   }
 
   setTempoMultiplier(multiplier: number): void {
+    const clamped = Math.max(0.5, Math.min(1.25, multiplier));
     if (this._state !== 'playing') {
-      this._tempoMultiplier = multiplier;
+      this._tempoMultiplier = clamped;
       return;
     }
     const beat = this.currentBeat;
     this._stopSources();
-    this._tempoMultiplier = multiplier;
+    this._tempoMultiplier = clamped;
     this._startBeat = beat;
     this._startAudioTime = this.ctx.currentTime + RESCHEDULE_OFFSET_S;
     this._scheduleFrom(beat, this._startAudioTime);
@@ -318,19 +355,23 @@ export class PlaybackEngine {
         beatToSeconds(note.beat_start, this._tempoMarks, this._tempoMultiplier) - originOffsetS;
       const startAt = originTime + noteStartOffsetS;
 
-      // Skip notes that are already too late to schedule
-      if (startAt < this.ctx.currentTime - LATE_TOLERANCE_S) continue;
+    const events = scheduleNotes(
+      this._notes,
+      this._tempoMarks,
+      fromBeat,
+      originTime,
+      this._tempoMultiplier,
+    );
 
+    for (const event of events) {
+      // Skip notes that are already too late to schedule
+      if (event.startAt < this.ctx.currentTime - LATE_TOLERANCE_S) continue;
+
+      const note = event.note;
       const targetMidi = note.midi + this._transposeSemitones;
       const buf = this.sf.getBuffer(targetMidi);
-
-      // Duration in seconds + release tail for natural piano decay
-      const noteDurS =
-        beatToSeconds(note.beat_start + note.duration, this._tempoMarks, this._tempoMultiplier) -
-        beatToSeconds(note.beat_start, this._tempoMarks, this._tempoMultiplier) +
-        RELEASE_TAIL_S;
-
-      const safeStart = Math.max(startAt, this.ctx.currentTime + STOP_SAFETY_OFFSET_S);
+      const noteDurS = event.durationS;
+      const safeStart = Math.max(event.startAt, this.ctx.currentTime + STOP_SAFETY_OFFSET_S);
 
       if (buf) {
         const src = this.ctx.createBufferSource();

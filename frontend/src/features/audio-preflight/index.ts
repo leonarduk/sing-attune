@@ -2,11 +2,16 @@ import { type Feature } from '../../feature-types';
 import {
   loadPreflightDeviceId,
   loadPreflightLatencyMs,
+  loadOctaveCompensationEnabled,
+  loadUserVoiceTypeId,
   markAudioPreflightComplete,
+  persistOctaveCompensationEnabled,
   persistPreflightDeviceId,
   persistPreflightLatencyMs,
+  persistUserVoiceTypeId,
   registerAudioPreflightOpener,
 } from '../../services/audio-preflight';
+import { VOICE_TYPES, getVoiceTypeById } from '../../pitch/voice-type';
 
 interface BrowserAudioInputDevice {
   deviceId: string;
@@ -30,10 +35,32 @@ let latencyValueEl: HTMLSpanElement | null = null;
 let errorEl: HTMLDivElement | null = null;
 let testButtonEl: HTMLButtonElement | null = null;
 let continueButtonEl: HTMLButtonElement | null = null;
+let voiceTypeSelectEl: HTMLSelectElement | null = null;
+let voiceTypeSuggestionEl: HTMLDivElement | null = null;
+let octaveCompCheckboxEl: HTMLInputElement | null = null;
 const METER_GAIN_SCALE = 140;
 
 let selectedDeviceId: string | null = loadPreflightDeviceId();
+let selectedVoiceTypeId: string | null = loadUserVoiceTypeId();
 let isMonitoring = false;
+
+function applyVoiceTypeSuggestionFromEvent(event: Event): void {
+  const custom = event as CustomEvent<{ suggestedVoiceTypeId: string; message: string }>;
+  const suggestedVoiceType = getVoiceTypeById(custom.detail.suggestedVoiceTypeId);
+  if (!voiceTypeSuggestionEl || !suggestedVoiceType) return;
+  voiceTypeSuggestionEl.textContent = custom.detail.message;
+
+  if (!selectedVoiceTypeId) {
+    selectedVoiceTypeId = suggestedVoiceType.id;
+    persistUserVoiceTypeId(selectedVoiceTypeId);
+    if (voiceTypeSelectEl) voiceTypeSelectEl.value = selectedVoiceTypeId;
+  }
+
+  if (suggestedVoiceType.male && octaveCompCheckboxEl && !loadOctaveCompensationEnabled()) {
+    octaveCompCheckboxEl.checked = true;
+    persistOctaveCompensationEnabled(true);
+  }
+}
 
 function setError(message: string): void {
   if (errorEl) errorEl.textContent = message;
@@ -230,6 +257,15 @@ function buildModal(): HTMLDivElement {
           <span id="audio-preflight-latency-value"></span>
         </div>
       </div>
+      <div class="audio-preflight-row">
+        <label for="audio-preflight-voice-type">Voice type</label>
+        <select id="audio-preflight-voice-type"></select>
+      </div>
+      <div id="audio-preflight-voice-suggestion" class="audio-preflight-status">Voice type suggestion: complete one session to get a recommendation.</div>
+      <div class="audio-preflight-row">
+        <label for="audio-preflight-octave-comp">Octave compensation</label>
+        <input id="audio-preflight-octave-comp" type="checkbox" />
+      </div>
       <div class="audio-preflight-tip">🎧 Use headphones to avoid feedback and mic bleed.</div>
       <div id="audio-preflight-error" class="audio-preflight-error" role="alert"></div>
       <div class="audio-preflight-actions">
@@ -310,6 +346,9 @@ function mount(_slot: HTMLElement): void {
   errorEl = document.getElementById('audio-preflight-error') as HTMLDivElement;
   testButtonEl = document.getElementById('audio-preflight-test') as HTMLButtonElement;
   continueButtonEl = document.getElementById('audio-preflight-continue') as HTMLButtonElement;
+  voiceTypeSelectEl = document.getElementById('audio-preflight-voice-type') as HTMLSelectElement;
+  voiceTypeSuggestionEl = document.getElementById('audio-preflight-voice-suggestion') as HTMLDivElement;
+  octaveCompCheckboxEl = document.getElementById('audio-preflight-octave-comp') as HTMLInputElement;
 
   const requestButton = document.getElementById('audio-preflight-request') as HTMLButtonElement;
   const latencyEl = document.getElementById('audio-preflight-latency') as HTMLInputElement;
@@ -317,6 +356,13 @@ function mount(_slot: HTMLElement): void {
   const latencyMs = loadPreflightLatencyMs();
   latencyEl.value = String(latencyMs);
   latencyValueEl.textContent = `${latencyMs} ms`;
+
+  voiceTypeSelectEl.innerHTML = [
+    '<option value="">Not set</option>',
+    ...VOICE_TYPES.map((type) => `<option value="${type.id}">${type.label}</option>`),
+  ].join('');
+  if (selectedVoiceTypeId) voiceTypeSelectEl.value = selectedVoiceTypeId;
+  octaveCompCheckboxEl.checked = loadOctaveCompensationEnabled();
 
   requestButton.addEventListener('click', () => {
     void requestPermissionAndDevices();
@@ -334,6 +380,15 @@ function mount(_slot: HTMLElement): void {
     if (latencyValueEl) latencyValueEl.textContent = `${value} ms`;
   });
 
+  voiceTypeSelectEl.addEventListener('change', () => {
+    selectedVoiceTypeId = voiceTypeSelectEl?.value || null;
+    persistUserVoiceTypeId(selectedVoiceTypeId);
+  });
+
+  octaveCompCheckboxEl.addEventListener('change', () => {
+    persistOctaveCompensationEnabled(Boolean(octaveCompCheckboxEl?.checked));
+  });
+
   testButtonEl.addEventListener('click', () => {
     void toggleMicTest();
   });
@@ -343,6 +398,7 @@ function mount(_slot: HTMLElement): void {
   });
 
   registerAudioPreflightOpener(openModal);
+  window.addEventListener('voice-type-suggested', applyVoiceTypeSuggestionFromEvent as EventListener);
 }
 
 function unmount(): void {
@@ -350,6 +406,7 @@ function unmount(): void {
   // monitorCtx is already closed and nulled by cleanupMonitor()
   modalEl?.remove();
   modalEl = null;
+  window.removeEventListener('voice-type-suggested', applyVoiceTypeSuggestionFromEvent as EventListener);
 }
 
 export const __audioPreflightInternals = {
