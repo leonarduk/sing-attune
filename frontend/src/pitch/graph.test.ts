@@ -38,11 +38,11 @@ describe('graph color classification', () => {
     expect(classifyGraphTraceColor(60, null)).toBe('grey');
   });
 
-  it('respects ±25 cents in-tune threshold', () => {
-    expect(GRAPH_IN_TUNE_CENTS).toBe(25);
-    expect(classifyGraphTraceColor(60.25, 60)).toBe('green');
-    expect(classifyGraphTraceColor(60.26, 60)).toBe('red');
-    expect(Math.round(centsError(60.26, 60))).toBe(26);
+  it('respects ±50 cents in-tune threshold', () => {
+    expect(GRAPH_IN_TUNE_CENTS).toBe(50);
+    expect(classifyGraphTraceColor(60.5, 60)).toBe('green');
+    expect(classifyGraphTraceColor(60.51, 60)).toBe('red');
+    expect(Math.round(centsError(60.51, 60))).toBe(51);
   });
 });
 
