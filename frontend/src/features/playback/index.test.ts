@@ -76,6 +76,9 @@ function installPlaybackDom(): void {
     <button id="btn-summary-close">Close</button>
     <button id="btn-summary-retry">Retry</button>
     <button id="btn-summary-replay">Replay</button>
+    <button id="btn-session-record">Record session</button>
+    <button id="btn-session-review">Review latest session</button>
+    <button id="btn-session-csv">Export latest CSV</button>
     <div id="session-summary-modal" class="hidden"></div>
     <pre id="session-summary-content"></pre>
     <input id="tempo-slider" value="100" />

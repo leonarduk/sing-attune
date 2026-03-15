@@ -37,6 +37,7 @@ import { PracticeRecorder } from '../../audio/recorder';
 import { type Feature } from '../../feature-types';
 import { analysePartPitchRange } from '../../score-analyser';
 import { loadUserVoiceTypeId } from '../../services/audio-preflight';
+import { recordSessionFrame } from '../../services/session-recording';
 
 // ── Module-level singletons (survive score reloads) ──────────────────────────
 
@@ -69,6 +70,8 @@ let unsubscribeScoreLoaded: (() => void) | null = null;
 let unsubscribeScoreCleared: (() => void) | null = null;
 let unsubscribePartChanged: (() => void) | null = null;
 let syncOffsetWarningShown = false;
+let reviewFrameListener: ((event: Event) => void) | null = null;
+let reviewClearListener: (() => void) | null = null;
 
 let warmupActive = false;
 let warmupStartPerfMs = 0;
@@ -249,6 +252,7 @@ function handleIncomingPitchFrame(frame: { t: number; midi: number; conf: number
     pitchGraphNowSec = Math.max(pitchGraphNowSec, frameSec);
   }
   pitchOverlay?.pushFrame(frame, getFrameXPosition(frame.t));
+  recordSessionFrame(frame);
   pitchGraph?.pushFrame(frame, expectedMidiForFrame(frame.t));
   if (sessionRangeTracker.ingest(frame, overlaySettings.confidenceThreshold)) {
     updateSessionRangeReadout();
@@ -501,6 +505,14 @@ async function refreshAudioSettings(
 // ── mount ─────────────────────────────────────────────────────
 
 function mount(_slot: HTMLElement): void {
+  reviewFrameListener = (event: Event): void => {
+    const custom = event as CustomEvent<{ t: number; midi: number; conf: number }>;
+    if (custom.detail) handleIncomingPitchFrame(custom.detail);
+  };
+  reviewClearListener = (): void => {
+    pitchOverlay?.clear();
+    pitchGraph?.clear();
+  };
   const scoreContainerEl    = document.getElementById('score-container')           as HTMLDivElement;
   const warmupDurationEl    = document.getElementById('warmup-duration')           as HTMLSelectElement;
   const btnStartWarmup      = document.getElementById('btn-start-warmup')          as HTMLButtonElement;
@@ -560,6 +572,8 @@ function mount(_slot: HTMLElement): void {
   }
 
   pitchGraph = new PitchGraphCanvas(pitchGraphCanvasEl);
+  if (reviewFrameListener) window.addEventListener('session-review-frame', reviewFrameListener as EventListener);
+  if (reviewClearListener) window.addEventListener('session-review-clear', reviewClearListener);
   bindPlaybackSync();
   startPitchGraphLoop();
   clearPhraseSummaryPanel();
@@ -764,12 +778,16 @@ function mount(_slot: HTMLElement): void {
   });
 
   window.addEventListener('beforeunload', () => {
+    if (reviewFrameListener) window.removeEventListener('session-review-frame', reviewFrameListener as EventListener);
+    if (reviewClearListener) window.removeEventListener('session-review-clear', reviewClearListener);
     closePitchSocket(); stopPitchGraphLoop();
     pitchOverlay?.destroy(); pitchGraph?.destroy(); practiceRecorder.destroy();
   });
 }
 
 function unmount(): void {
+  if (reviewFrameListener) window.removeEventListener('session-review-frame', reviewFrameListener as EventListener);
+  if (reviewClearListener) window.removeEventListener('session-review-clear', reviewClearListener);
   playbackSyncUnsubscribe?.();
   playbackSyncUnsubscribe = null;
   unsubscribeScoreLoaded?.();
@@ -783,6 +801,8 @@ function unmount(): void {
   pitchOverlay?.destroy(); pitchOverlay = null;
   pitchGraph?.destroy();   pitchGraph = null;
   practiceRecorder.destroy();
+  reviewFrameListener = null;
+  reviewClearListener = null;
 }
 
 export const pitchOverlayFeature: Feature = {

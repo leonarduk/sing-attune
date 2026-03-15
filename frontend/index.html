@@ -220,6 +220,7 @@
       width: 100%;
     }
     .transport-btn:hover:not(:disabled) { background: #1a5276; }
+    .transport-btn.active { background: #7b1d2a; border-color: #e94560; }
     .transport-btn:disabled { opacity: 0.4; cursor: default; }
 
     .toolbar-divider {
@@ -671,6 +672,9 @@
       <button id="btn-browse"   class="transport-btn">Browse…</button>
       <button id="btn-load-test-score" class="transport-btn" style="display:none;">Load test score</button>
       <button id="btn-diagnostics" class="transport-btn">Pitch diagnostics</button>
+      <button id="btn-session-record" class="transport-btn">⏺ Record session</button>
+      <button id="btn-session-review" class="transport-btn">Review latest session</button>
+      <button id="btn-session-csv" class="transport-btn">Export latest CSV</button>
       <button
         id="btn-settings"
         class="transport-btn"
