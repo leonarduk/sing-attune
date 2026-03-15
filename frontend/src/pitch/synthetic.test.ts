@@ -15,6 +15,12 @@ describe('syntheticPitchFrameAt', () => {
     expect(frame.conf).toBe(0.95);
   });
 
+
+  it('uses explicit frame timestamp when provided', () => {
+    const frame = syntheticPitchFrameAt(4.2, 62, 9876);
+    expect(frame.t).toBe(9876);
+  });
+
   it('falls back to sweep when no expected midi exists', () => {
     const frame = syntheticPitchFrameAt(7, null);
     expect(frame.midi).toBeGreaterThan(48);
