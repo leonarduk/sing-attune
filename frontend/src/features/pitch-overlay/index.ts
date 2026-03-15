@@ -606,22 +606,38 @@ function mount(_slot: HTMLElement): void {
   refreshRecordingControls(ctrl);
   updateWarmupUi('Warm-up idle.');
 
+  async function openSettingsPanel(): Promise<void> {
+    settingsPanelEl.classList.add('visible');
+    btnSettings.setAttribute('aria-expanded', 'true');
+    await refreshAudioSettings(settingsDeviceEl, settingsEngineEl);
+  }
+
+  function closeSettingsPanel(): void {
+    if (!settingsPanelEl.classList.contains('visible')) return;
+    settingsPanelEl.classList.remove('visible');
+    btnSettings.setAttribute('aria-expanded', 'false');
+    btnSettings.focus();
+  }
+
   btnSettings.addEventListener('click', async (event) => {
     event.stopPropagation();
-    const visible = settingsPanelEl.classList.toggle('visible');
-    if (visible) await refreshAudioSettings(settingsDeviceEl, settingsEngineEl);
+    if (settingsPanelEl.classList.contains('visible')) {
+      closeSettingsPanel();
+      return;
+    }
+    await openSettingsPanel();
   });
-  btnSettingsClose.addEventListener('click', () => { settingsPanelEl.classList.remove('visible'); });
+  btnSettingsClose.addEventListener('click', () => { closeSettingsPanel(); });
   settingsPanelEl.addEventListener('click', (e) => { e.stopPropagation(); });
   window.addEventListener('click', (e) => {
     if (!settingsPanelEl.classList.contains('visible')) return;
     const target = e.target;
     if (!(target instanceof Node)) return;
     if (settingsPanelEl.contains(target) || btnSettings.contains(target)) return;
-    settingsPanelEl.classList.remove('visible');
+    closeSettingsPanel();
   });
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') settingsPanelEl.classList.remove('visible');
+    if (e.key === 'Escape') closeSettingsPanel();
   });
   settingsDeviceEl.addEventListener('change', () => {
     const v = settingsDeviceEl.value;
