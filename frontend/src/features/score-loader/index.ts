@@ -24,7 +24,7 @@ import { setSession, clearSession, getSession } from '../../services/score-sessi
 import { setStatus, showErrorBanner, clearErrorBanner } from '../../services/backend';
 import { showToast } from '../../services/toast';
 import { getVisiblePartOptions } from '../../part-options';
-import { beatToMs, seekPlayback } from '../../transport/controls';
+import { beatToMs, seekPlayback, postPlayback } from '../../transport/controls';
 import { beatFromClick, extractMeasureHitZones } from '../../score/click-seek';
 import { type Feature } from '../../feature-types';
 
@@ -84,6 +84,24 @@ function mount(slot: HTMLElement): void {
 
   // ── Score loading ─────────────────────────────────────────────────────────
 
+  async function teardownPreviousSession(): Promise<void> {
+    const previousSession = getSession();
+    if (!previousSession) return;
+
+    try {
+      if (previousSession.engine.state === 'playing' || previousSession.engine.state === 'paused') {
+        await postPlayback('/playback/stop');
+      }
+    } catch (err) {
+      setStatus(`playback stop failed during score swap: ${String(err)}`, 'error');
+      console.error('Score swap playback stop failed:', err);
+    } finally {
+      previousSession.engine.stop();
+      previousSession.cursor.stop();
+      previousSession.cursor.osmd.cursor.show();
+    }
+  }
+
   async function loadDevTestScore(filename: string): Promise<void> {
     try {
       setStatus(`Loading test score ${filename}…`, 'loading');
@@ -107,6 +125,9 @@ function mount(slot: HTMLElement): void {
     dropZoneEl.classList.add('hidden');
     scoreInfoEl.textContent = '';
     headphoneWarning.classList.add('hidden');
+    setTransportEnabled(false);
+
+    await teardownPreviousSession();
 
     // Let other features tear down state from the previous session.
     clearSession();
