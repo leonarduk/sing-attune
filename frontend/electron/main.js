@@ -26,6 +26,11 @@ function startBackend() {
     stdio: 'pipe',
   });
 
+  backendProcess.on('error', (err) => {
+    console.error(`[backend] failed to start: ${err.message}`);
+    backendProcess = null;
+  });
+
   backendProcess.stdout.on('data', (data) => {
     console.log(`[backend] ${data}`);
   });
@@ -38,6 +43,17 @@ function startBackend() {
     console.log(`[backend] exited with code ${code}`);
     backendProcess = null;
   });
+}
+
+function killBackend() {
+  if (!backendProcess) return;
+  const proc = backendProcess;
+  backendProcess = null;
+  proc.kill('SIGTERM');
+  const timer = setTimeout(() => {
+    try { proc.kill('SIGKILL'); } catch (_) { /* already gone */ }
+  }, 5000);
+  if (timer.unref) timer.unref();
 }
 
 function createWindow() {
@@ -66,10 +82,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  if (backendProcess) {
-    backendProcess.kill();
-    backendProcess = null;
-  }
+  killBackend();
   if (process.platform !== 'darwin') {
     app.quit();
   }
