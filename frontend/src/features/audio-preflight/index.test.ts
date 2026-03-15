@@ -26,16 +26,26 @@ class MockAudioContext {
   }) as unknown as GainNode);
 }
 
-function installMediaMocks(): void {
-  const getUserMedia = vi.fn(async () => ({
-    getAudioTracks: () => [
-      {
-        getSettings: () => ({ deviceId: 'dev-1' }),
-        stop: vi.fn(),
-      },
-    ],
-    getTracks: () => [{ stop: vi.fn() }],
-  }));
+function installMediaMocks(options: { permissionState?: PermissionState; getUserMediaError?: Error } = {}): void {
+  const getUserMedia = vi.fn(async () => {
+    if (options.getUserMediaError) throw options.getUserMediaError;
+
+    return {
+      getAudioTracks: () => [
+        {
+          getSettings: () => ({ deviceId: 'dev-1' }),
+          stop: vi.fn(),
+        },
+      ],
+      getTracks: () => [{ stop: vi.fn() }],
+    };
+  });
+
+  const queryPermission = vi.fn(async () =>
+    ({
+      state: options.permissionState ?? 'prompt',
+    }) as PermissionStatus,
+  );
 
   const enumerateDevices = vi.fn(async () => [
     { kind: 'audioinput', deviceId: 'dev-1', label: 'Mic 1' },
@@ -50,10 +60,13 @@ function installMediaMocks(): void {
     },
   });
 
+  Object.defineProperty(navigator, 'permissions', {
+    configurable: true,
+    value: { query: queryPermission },
+  });
+
   vi.stubGlobal('AudioContext', MockAudioContext as unknown as typeof AudioContext);
 }
-
-
 
 function openModalAndWaitUntilReady(): Promise<boolean> {
   return __audioPreflightInternals.openModal();
@@ -177,5 +190,69 @@ describe('audio preflight Escape handling', () => {
 
     await expect(openPromise).resolves.toBe(false);
     expect(__audioPreflightInternals.isPreflightModalHidden()).toBe(true);
+  });
+});
+
+
+describe('audio preflight permission request button visibility', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="slot-audio-preflight"></div>';
+    installMediaMocks();
+    const slot = document.getElementById('slot-audio-preflight') as HTMLDivElement;
+    audioPreflightFeature.mount(slot);
+  });
+
+  it('hides the "Allow microphone" button once permission is granted', async () => {
+    const openPromise = openModalAndWaitUntilReady();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const requestButton = document.getElementById('audio-preflight-request') as HTMLButtonElement;
+    expect(requestButton.style.display).toBe('none');
+
+    __audioPreflightInternals.closeModal(false);
+    await expect(openPromise).resolves.toBe(false);
+
+    audioPreflightFeature.unmount?.();
+  });
+
+  it('hides the request button on mount when browser permission is already granted', async () => {
+    audioPreflightFeature.unmount?.();
+
+    document.body.innerHTML = '<div id="slot-audio-preflight"></div>';
+    installMediaMocks({ permissionState: 'granted' });
+    const slot = document.getElementById('slot-audio-preflight') as HTMLDivElement;
+    audioPreflightFeature.mount(slot);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const requestButton = document.getElementById('audio-preflight-request') as HTMLButtonElement;
+    const status = document.getElementById('audio-preflight-permission') as HTMLDivElement;
+    const continueButton = document.getElementById('audio-preflight-continue') as HTMLButtonElement;
+
+    expect(requestButton.style.display).toBe('none');
+    expect(status.textContent).toBe('Microphone permission granted.');
+    expect(continueButton.disabled).toBe(false);
+
+    audioPreflightFeature.unmount?.();
+  });
+
+  it('keeps the "Allow microphone" button visible when permission request fails', async () => {
+    audioPreflightFeature.unmount?.();
+
+    document.body.innerHTML = '<div id="slot-audio-preflight"></div>';
+    installMediaMocks({ getUserMediaError: new Error('permission denied') });
+    const slot = document.getElementById('slot-audio-preflight') as HTMLDivElement;
+    audioPreflightFeature.mount(slot);
+
+    const openPromise = openModalAndWaitUntilReady();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const requestButton = document.getElementById('audio-preflight-request') as HTMLButtonElement;
+    expect(requestButton.style.display).toBe('');
+
+    __audioPreflightInternals.closeModal(false);
+    await expect(openPromise).resolves.toBe(false);
+
+    audioPreflightFeature.unmount?.();
   });
 });

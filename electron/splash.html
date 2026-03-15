@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>sing-attune</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, Segoe UI, sans-serif;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: radial-gradient(circle at 30% 20%, #1c1c1c, #090909 70%);
+        color: #f3f3f3;
+      }
+      .panel {
+        display: grid;
+        gap: 8px;
+        text-align: center;
+      }
+      .spinner {
+        width: 28px;
+        height: 28px;
+        margin: 0 auto 8px;
+        border: 3px solid #333;
+        border-top-color: #4caf50;
+        border-radius: 50%;
+        animation: spin 900ms linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .subtitle {
+        opacity: 0.75;
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <div class="spinner" aria-hidden="true"></div>
+      <strong>Starting sing-attune…</strong>
+      <span class="subtitle">Launching backend service</span>
+    </div>
+  </body>
+</html>

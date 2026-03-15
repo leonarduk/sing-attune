@@ -86,6 +86,16 @@
       cursor: pointer;
       font-size: 0.8rem;
     }
+    #error-banner-action {
+      background: rgba(255, 208, 216, 0.14);
+      border: 1px solid #e57386;
+      color: #ffd0d8;
+      border-radius: 4px;
+      padding: 2px 8px;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    #error-banner-action.hidden { display: none; }
     #error-banner-dismiss.hidden { display: none; }
 
     /* ── Toast notifications ── */
@@ -369,6 +379,17 @@
       font-size: 0.82rem;
     }
     #settings-engine { color: var(--color-text-muted); font-size: 0.75rem; }
+    #settings-cpu-warning {
+      display: none;
+      margin-top: 8px;
+      padding: 6px 8px;
+      border: 1px solid var(--color-warning-border);
+      border-radius: 4px;
+      background: rgba(123, 63, 0, 0.35);
+      color: var(--color-warning-text);
+      font-size: 0.75rem;
+    }
+    #settings-cpu-warning.visible { display: block; }
 
     .recording-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     #recording-status { color: var(--color-text-muted); font-size: 0.75rem; min-height: 1em; }
@@ -568,6 +589,7 @@
 
   <div id="error-banner" role="alert">
     <span id="error-banner-message"></span>
+    <button id="error-banner-action" class="hidden" aria-label="Retry action">Retry</button>
     <button id="error-banner-dismiss" class="hidden" aria-label="Dismiss error">Dismiss</button>
   </div>
   <div id="toast-stack" aria-live="polite" aria-atomic="false"></div>
@@ -716,6 +738,7 @@
       <div class="settings-row">
         <label><input id="settings-show-note-names" type="checkbox" /> Show note names in pitch readout</label>
         <label><input id="settings-synthetic-mode" type="checkbox" /> Synthetic pitch input (no WebSocket)</label>
+        <label><input id="settings-force-cpu" type="checkbox" /> Force CPU pitch engine (pYIN)</label>
       </div>
       <div class="settings-row">
         <label><input id="recording-enabled" type="checkbox" /> Enable session recording</label>
@@ -729,6 +752,7 @@
         <div id="recording-status" aria-live="polite"></div>
       </div>
       <div id="settings-engine">Pitch engine: loading…</div>
+      <div id="settings-cpu-warning" role="status">Running on CPU — latency may be higher</div>
     </aside>
 
     <div id="content-area">

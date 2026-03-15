@@ -35,6 +35,7 @@ let latencyValueEl: HTMLSpanElement | null = null;
 let errorEl: HTMLDivElement | null = null;
 let testButtonEl: HTMLButtonElement | null = null;
 let continueButtonEl: HTMLButtonElement | null = null;
+let requestButtonEl: HTMLButtonElement | null = null;
 let voiceTypeSelectEl: HTMLSelectElement | null = null;
 let voiceTypeSuggestionEl: HTMLDivElement | null = null;
 let octaveCompCheckboxEl: HTMLInputElement | null = null;
@@ -69,6 +70,46 @@ function setError(message: string): void {
 
 function setPermissionStatus(message: string): void {
   if (permissionStatusEl) permissionStatusEl.textContent = message;
+}
+
+function setRequestButtonVisibility(shouldShow: boolean): void {
+  if (!requestButtonEl) return;
+  requestButtonEl.style.display = shouldShow ? '' : 'none';
+}
+
+type MicrophonePermissionState = PermissionState | 'unsupported';
+
+async function getMicrophonePermissionState(): Promise<MicrophonePermissionState> {
+  if (!navigator.permissions?.query) return 'unsupported';
+
+  try {
+    const status = await navigator.permissions.query({
+      // `microphone` is supported in modern browsers but not yet in TS libdom.
+      name: 'microphone' as PermissionName,
+    });
+    return status.state;
+  } catch {
+    return 'unsupported';
+  }
+}
+
+async function syncPermissionUiFromBrowserState(): Promise<void> {
+  const permissionState = await getMicrophonePermissionState();
+  if (permissionState === 'granted') {
+    setPermissionStatus('Microphone permission granted.');
+    setRequestButtonVisibility(false);
+    if (continueButtonEl) continueButtonEl.disabled = false;
+    return;
+  }
+
+  if (permissionState === 'denied') {
+    setPermissionStatus('Microphone permission denied or unavailable.');
+    setRequestButtonVisibility(true);
+    if (continueButtonEl) continueButtonEl.disabled = true;
+    return;
+  }
+
+  setRequestButtonVisibility(true);
 }
 
 function cleanupMonitor(): void {
@@ -199,10 +240,12 @@ async function requestPermissionAndDevices(): Promise<void> {
     }
 
     setPermissionStatus('Microphone permission granted.');
+    setRequestButtonVisibility(false);
     if (continueButtonEl) continueButtonEl.disabled = false;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     setPermissionStatus('Microphone permission denied or unavailable.');
+    setRequestButtonVisibility(true);
     setError(`Could not access microphone: ${msg}`);
     cleanupMonitor();
     if (continueButtonEl) continueButtonEl.disabled = true;
@@ -348,6 +391,7 @@ async function openModal(): Promise<boolean> {
     window.removeEventListener('keydown', onEscape);
     removeEscapeListener = null;
   };
+  void syncPermissionUiFromBrowserState();
   void requestPermissionAndDevices();
   return new Promise<boolean>((resolve) => {
     resolver = resolve;
@@ -383,7 +427,7 @@ function mount(_slot: HTMLElement): void {
   voiceTypeSuggestionEl = document.getElementById('audio-preflight-voice-suggestion') as HTMLDivElement;
   octaveCompCheckboxEl = document.getElementById('audio-preflight-octave-comp') as HTMLInputElement;
 
-  const requestButton = document.getElementById('audio-preflight-request') as HTMLButtonElement;
+  requestButtonEl = document.getElementById('audio-preflight-request') as HTMLButtonElement;
   const cancelButton = document.getElementById('audio-preflight-cancel') as HTMLButtonElement;
   const closeButton = document.getElementById('audio-preflight-close') as HTMLButtonElement;
   const backdrop = modalEl.querySelector('.audio-preflight-backdrop') as HTMLDivElement;
@@ -400,10 +444,11 @@ function mount(_slot: HTMLElement): void {
   if (selectedVoiceTypeId) voiceTypeSelectEl.value = selectedVoiceTypeId;
   octaveCompCheckboxEl.checked = loadOctaveCompensationEnabled();
 
-  requestButton.addEventListener('click', () => {
+  requestButtonEl.addEventListener('click', () => {
     void requestPermissionAndDevices();
   });
 
+  void syncPermissionUiFromBrowserState();
   cancelButton.addEventListener('click', () => {
     closeModal(false);
   });
@@ -467,6 +512,9 @@ export const __audioPreflightInternals = {
   isPreflightModalHidden,
   openModal,
   closeModal,
+  setRequestButtonVisibility,
+  getMicrophonePermissionState,
+  syncPermissionUiFromBrowserState,
 };
 
 function isPreflightModalHidden(): boolean {

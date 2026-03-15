@@ -124,7 +124,9 @@ describe('pitchOverlayFeature warm-up controls', () => {
       <span id="settings-trail-label"></span>
       <input id="settings-show-note-names" type="checkbox" />
       <input id="settings-synthetic-mode" type="checkbox" />
+      <input id="settings-force-cpu" type="checkbox" />
       <div id="settings-engine"></div>
+      <div id="settings-cpu-warning"></div>
       <input id="recording-enabled" type="checkbox" />
       <button id="btn-stop"></button>
       <button id="btn-rewind"></button>
