@@ -12,8 +12,9 @@
 import { onScoreLoaded, onScoreCleared, getSession, updateSelectedPart } from '../../services/score-session';
 import { setAppStatus } from '../../services/status';
 import { getVisiblePartOptions } from '../../part-options';
-import { setPlaybackTempo, setPlaybackTranspose } from '../../transport/controls';
+import { setPlaybackTranspose } from '../../transport/controls';
 import { type Feature } from '../../feature-types';
+import { applyTempoChange } from '../../services/tempo';
 
 let unsubscribeScoreLoaded: (() => void) | null = null;
 let unsubscribeScoreCleared: (() => void) | null = null;
@@ -37,23 +38,7 @@ function mount(_slot: HTMLElement): void {
   }
 
   async function commitTempoChange(nextPercent: number): Promise<void> {
-    const session = getSession();
-    if (!session) return;
-    const { engine } = session;
-    const previousMultiplier = engine.tempoMultiplier;
-    const clampedPercent = clampTempoPercent(nextPercent);
-    const nextMultiplier = clampedPercent / 100;
-
-    applyTempoUi(clampedPercent);
-    engine.setTempoMultiplier(nextMultiplier);
-    try {
-      await setPlaybackTempo(nextMultiplier);
-    } catch (err) {
-      engine.setTempoMultiplier(previousMultiplier);
-      applyTempoUi(Math.round(previousMultiplier * 100));
-      setAppStatus(`tempo update failed: ${String(err)}`, 'error');
-      console.error('Tempo update failed:', err);
-    }
+    await applyTempoChange(nextPercent);
   }
 
   function getTransposeSemitones(): number {
