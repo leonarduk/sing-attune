@@ -15,11 +15,13 @@
  * at the local path (e.g. '/assets/acoustic_grand_piano-mp3.js').
  */
 
-const SOUNDFONT_URLS = [
+// Mirror order is intentional: prefer CDN-backed endpoints first, then fall
+// back to a raw GitHub URL as a last resort.
+export const SOUNDFONT_URLS = [
   'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_grand_piano-mp3.js',
   'https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@gh-pages/FluidR3_GM/acoustic_grand_piano-mp3.js',
-  'https://raw.githubusercontent.com/gleitz/midi-js-soundfonts/gh-pages/FluidR3_GM/acoustic_grand_piano-mp3.js',
-  'https://unpkg.com/@midi-js-soundfonts/FluidR3_GM@latest/FluidR3_GM/acoustic_grand_piano-mp3.js',
+  'https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@master/FluidR3_GM/acoustic_grand_piano-mp3.js',
+  'https://raw.githubusercontent.com/gleitz/midi-js-soundfonts/master/FluidR3_GM/acoustic_grand_piano-mp3.js',
 ] as const;
 
 const SOUNDFONT_ASSIGNMENT_RE = /MIDI\.Soundfont\.[A-Za-z0-9_]+\s*=/;
@@ -139,6 +141,7 @@ export class SoundfontLoader {
     let lastError: unknown;
     for (const url of SOUNDFONT_URLS) {
       try {
+        // Avoid serving a previously cached corrupt/truncated payload.
         const resp = await fetch(url, { cache: 'no-store' });
         if (!resp.ok) {
           throw new Error(`Soundfont fetch failed (HTTP ${resp.status}): ${url}`);
