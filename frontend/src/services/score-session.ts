@@ -30,9 +30,9 @@ type SessionCallback = (session: ScoreSession) => void;
 type ClearCallback = () => void;
 type Unsubscribe = () => void;
 
-const loadedCallbacks = new Set<SessionCallback>();
+const loadedCallbacks: SessionCallback[] = [];
 const partChangedCallbacks = new Set<SessionCallback>();
-const clearCallbacks = new Set<ClearCallback>();
+const clearCallbacks: ClearCallback[] = [];
 
 let current: ScoreSession | null = null;
 
@@ -63,18 +63,15 @@ export function getSession(): ScoreSession | null {
  * Register a callback fired whenever a new score session becomes ready.
  * If a session already exists at registration time the callback fires
  * immediately — useful for features that mount after a score has loaded.
+ * Returns an unsubscribe function to deregister the callback.
  */
-export function onScoreLoaded(cb: SessionCallback): () => void {
+export function onScoreLoaded(cb: SessionCallback): Unsubscribe {
   loadedCallbacks.push(cb);
   if (current) cb(current);
   return () => {
     const idx = loadedCallbacks.indexOf(cb);
     if (idx !== -1) loadedCallbacks.splice(idx, 1);
   };
-export function onScoreLoaded(cb: SessionCallback): Unsubscribe {
-  loadedCallbacks.add(cb);
-  if (current) cb(current);
-  return () => { loadedCallbacks.delete(cb); };
 }
 
 /**
@@ -88,16 +85,16 @@ export function onPartChanged(cb: SessionCallback): Unsubscribe {
   return () => { partChangedCallbacks.delete(cb); };
 }
 
-/** Register a callback fired just before each session tear-down. */
-export function onScoreCleared(cb: ClearCallback): () => void {
+/**
+ * Register a callback fired just before each session tear-down.
+ * Returns an unsubscribe function to deregister the callback.
+ */
+export function onScoreCleared(cb: ClearCallback): Unsubscribe {
   clearCallbacks.push(cb);
   return () => {
     const idx = clearCallbacks.indexOf(cb);
     if (idx !== -1) clearCallbacks.splice(idx, 1);
   };
-export function onScoreCleared(cb: ClearCallback): Unsubscribe {
-  clearCallbacks.add(cb);
-  return () => { clearCallbacks.delete(cb); };
 }
 
 /**
