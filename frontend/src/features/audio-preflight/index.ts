@@ -428,7 +428,6 @@ function mount(_slot: HTMLElement): void {
   octaveCompCheckboxEl = document.getElementById('audio-preflight-octave-comp') as HTMLInputElement;
 
   requestButtonEl = document.getElementById('audio-preflight-request') as HTMLButtonElement;
-  const requestButton = document.getElementById('audio-preflight-request') as HTMLButtonElement;
   const cancelButton = document.getElementById('audio-preflight-cancel') as HTMLButtonElement;
   const closeButton = document.getElementById('audio-preflight-close') as HTMLButtonElement;
   const backdrop = modalEl.querySelector('.audio-preflight-backdrop') as HTMLDivElement;
