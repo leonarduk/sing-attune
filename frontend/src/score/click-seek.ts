@@ -7,6 +7,15 @@ export interface MeasureHitZone {
   beatDuration: number;
 }
 
+export interface MeasureBoundary {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  startBeat: number;
+  endBeat: number;
+}
+
 function asFiniteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
@@ -78,7 +87,7 @@ export function extractMeasureHitZones(osmd: unknown): MeasureHitZone[] {
   return zones;
 }
 
-export function beatFromClick(zones: MeasureHitZone[], clickX: number, clickY: number): number | null {
+export function measureBoundaryFromPoint(zones: MeasureHitZone[], clickX: number, clickY: number): MeasureBoundary | null {
   if (zones.length === 0) return null;
 
   const containing = zones.filter((zone) => (
@@ -104,6 +113,20 @@ export function beatFromClick(zones: MeasureHitZone[], clickX: number, clickY: n
     }
   }
 
+  return {
+    x: bestZone.x,
+    y: bestZone.y,
+    width: bestZone.width,
+    height: bestZone.height,
+    startBeat: bestZone.beatStart,
+    endBeat: bestZone.beatStart + bestZone.beatDuration,
+  };
+}
+
+export function beatFromClick(zones: MeasureHitZone[], clickX: number, clickY: number): number | null {
+  const bestZone = measureBoundaryFromPoint(zones, clickX, clickY);
+  if (!bestZone) return null;
+
   const relativeX = Math.max(0, Math.min(1, (clickX - bestZone.x) / bestZone.width));
-  return bestZone.beatStart + (bestZone.beatDuration * relativeX);
+  return bestZone.startBeat + ((bestZone.endBeat - bestZone.startBeat) * relativeX);
 }
