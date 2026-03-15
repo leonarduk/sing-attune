@@ -261,13 +261,19 @@ function mount(_slot: HTMLElement): void {
 
   function syncTransportButtons(): void {
     const session = getSession();
+    const playbackState = session?.engine.state ?? 'idle';
+    const canTransport = playbackState === 'playing' || playbackState === 'paused';
 
     // Play: enabled only when a score is loaded and not already playing.
-    if (!session || session.engine.state === 'playing') {
+    if (!session || playbackState === 'playing') {
       btnPlay.disabled = true;
     } else {
       btnPlay.disabled = false;
     }
+
+    // Stop/Rewind: enabled only while transport is active (playing/paused).
+    btnStop.disabled = !canTransport;
+    btnRewind.disabled = !canTransport;
 
     // Pause/Resume: enabled when playing or paused.
     if (!session) {
@@ -275,12 +281,12 @@ function mount(_slot: HTMLElement): void {
       btnPause.innerHTML = '&#9646;&#9646; Pause';
       return;
     }
-    if (session.engine.state === 'playing') {
+    if (playbackState === 'playing') {
       btnPause.disabled = false;
       btnPause.innerHTML = '&#9646;&#9646; Pause';
       return;
     }
-    if (session.engine.state === 'paused') {
+    if (playbackState === 'paused') {
       btnPause.disabled = false;
       btnPause.innerHTML = '&#9654; Resume';
       return;
