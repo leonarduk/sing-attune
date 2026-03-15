@@ -72,8 +72,21 @@
       padding: 8px 20px;
       font-size: 0.85rem;
       flex-shrink: 0;
+      align-items: center;
+      gap: 12px;
     }
-    #error-banner.visible { display: block; }
+    #error-banner.visible { display: flex; }
+    #error-banner-message { flex: 1; }
+    #error-banner-dismiss {
+      background: transparent;
+      border: 1px solid #e57386;
+      color: #ffd0d8;
+      border-radius: 4px;
+      padding: 2px 8px;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    #error-banner-dismiss.hidden { display: none; }
 
     /* ── Toast notifications ── */
     #toast-stack {
@@ -553,7 +566,10 @@
     </div>
   </header>
 
-  <div id="error-banner" role="alert"></div>
+  <div id="error-banner" role="alert">
+    <span id="error-banner-message"></span>
+    <button id="error-banner-dismiss" class="hidden" aria-label="Dismiss error">Dismiss</button>
+  </div>
   <div id="toast-stack" aria-live="polite" aria-atomic="false"></div>
 
   <div id="headphone-warning" class="hidden">

@@ -15,8 +15,10 @@
  * at the local path (e.g. '/assets/acoustic_grand_piano-mp3.js').
  */
 
-const SOUNDFONT_URL =
-  'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_grand_piano-mp3.js';
+const SOUNDFONT_URLS = [
+  'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_grand_piano-mp3.js',
+  'https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@gh-pages/FluidR3_GM/acoustic_grand_piano-mp3.js',
+] as const;
 
 const SOUNDFONT_ASSIGNMENT_RE = /MIDI\.Soundfont\.[A-Za-z0-9_]+\s*=/;
 
@@ -60,16 +62,10 @@ export class SoundfontLoader {
   async load(ctx: AudioContext): Promise<void> {
     if (this._loaded) return;
 
-    // 1. Fetch the MIDI.js-format soundfont JS file
-    const resp = await fetch(SOUNDFONT_URL);
-    if (!resp.ok) {
-      throw new Error(`Soundfont fetch failed (HTTP ${resp.status}): ${SOUNDFONT_URL}`);
-    }
-    const js = await resp.text();
-
-    // 2. Extract the embedded JSON object
-    // File structure: MIDI.Soundfont.acoustic_grand_piano = { "A0": "data:…", … }
-    const noteMap = SoundfontLoader.parseNoteMap(js);
+    // 1. Fetch the MIDI.js-format soundfont JS file.
+    // Some CDN mirrors occasionally return a corrupt/truncated payload; we
+    // retry against a secondary mirror before falling back to synth mode.
+    const noteMap = await SoundfontLoader.loadNoteMapFromMirror();
 
     // 3. Decode all samples concurrently
     const entries = Object.entries(noteMap);
@@ -136,6 +132,24 @@ export class SoundfontLoader {
   // Exposed for tests
   static midiToNoteName = midiToNoteName;
   static noteNameToMidi = noteNameToMidi;
+
+  private static async loadNoteMapFromMirror(): Promise<Record<string, string>> {
+    let lastError: unknown;
+    for (const url of SOUNDFONT_URLS) {
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) {
+          throw new Error(`Soundfont fetch failed (HTTP ${resp.status}): ${url}`);
+        }
+        const js = await resp.text();
+        return SoundfontLoader.parseNoteMap(js);
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw lastError ?? new Error('Soundfont fetch failed from all mirrors');
+  }
+
   static parseNoteMap(js: string): Record<string, string> {
     const assignment = js.match(SOUNDFONT_ASSIGNMENT_RE);
     if (!assignment || assignment.index === undefined) {
