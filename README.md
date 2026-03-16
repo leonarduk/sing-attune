@@ -7,6 +7,10 @@
 
 sing-attune plays your part from a MusicXML score through your headphones. You sing along. As you sing, your pitch appears live on the score — a moving dot over the notation, green when you're on it, red when you're not. No post-hoc analysis, no percentage scores. Just an honest mirror of what your voice is doing, in the moment, against what the music asks for.
 
+## Demo
+
+Demo GIF is shared in the PR/release notes (kept out of the repository to avoid committing binary assets).
+
 ---
 
 ## The loop
@@ -94,8 +98,16 @@ This keeps the backend real-time pipeline simple while score-aware interpretatio
 | Score playback (Web Audio) | 🔲 Day 9 |
 | Real-time pitch overlay | ✅ Done (Day 10) |
 | Transport controls | 🔲 Day 11 |
-| Electron packaging | 🟡 Day 16 in progress |
+| Electron packaging | ✅ Done (Day 16c) |
 | Backend standalone binary (PyInstaller) | ✅ Done (Day 16b) |
+
+---
+
+## Known limitations (v1.0)
+
+- **Polyphony is not supported** — pitch tracking assumes one singing voice at a time.
+- **Melisma alignment is approximate** — long syllables spanning many notes can produce ambiguous note matching.
+- **Falsetto / airy phonation can confuse CREPE** — confidence may drop and cause gaps in the visible pitch trace.
 
 ---
 
@@ -222,6 +234,41 @@ Output is written to `dist/sing-attune-backend/` and can be launched with:
 - Expected Windows GPU build with torchcrepe + CUDA DLLs: **~200 MB** (issue estimate; varies by CUDA/torch versions)
 
 ---
+
+## Desktop packaging (Windows installer)
+
+The repository now includes `electron-builder` wiring for a Windows NSIS installer (`.exe`).
+
+### Prerequisites
+
+- Frontend dependencies installed (`cd frontend && npm install`)
+- Frontend build succeeds (`npm run build`)
+- PyInstaller backend bundle present at `dist/backend/` (this folder is copied into the installer as an app resource)
+
+### Build installer
+
+From the repository root:
+
+```powershell
+just package
+```
+
+Or directly:
+
+```powershell
+cd frontend
+npm run package:win
+```
+
+Installer artifacts are written to `frontend/release/`.
+
+**Current installer-size expectation:** ~200 MB once bundled with backend runtime dependencies (Tensor/PyTorch stack dominates size).
+
+## Known limitations
+
+- Real-time pitch tracking is monophonic: **polyphonic singing is not supported**.
+- Melisma detection remains approximate in challenging passages with rapid ornaments.
+- Falsetto/airy tone can reduce CREPE confidence and produce unstable pitch traces.
 
 ## CI / development
 

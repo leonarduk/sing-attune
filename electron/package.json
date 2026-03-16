@@ -5,8 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "prepackage:win": "node scripts/preflight-package-win.js",
-    "package:win": "electron-builder --win nsis"
+    "dist": "electron-builder"
   },
   "devDependencies": {
     "electron": "^31.0.2",
