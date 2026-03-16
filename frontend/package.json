@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc && vite build",
     "dev": "vite",
-    "package:win": "npm run build && electron-builder --win zip",
+    "package:win": "npm run build && node ./scripts/prepackage-win.mjs && electron-builder --win nsis",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test"
