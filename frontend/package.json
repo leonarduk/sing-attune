@@ -1,12 +1,12 @@
 {
   "name": "sing-attune-frontend",
-  "version": "0.1.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "tsc && vite build",
     "dev": "vite",
-    "package:win": "npm run build && electron-builder --win nsis",
+    "package:win": "npm run build && electron-builder --win zip",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test"

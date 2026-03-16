@@ -17,9 +17,9 @@ uv.lock
 frontend/node_modules/
 frontend/dist/
 
-# Electron (Day 16+)
-electron/node_modules/
-electron/dist/
+# Electron build output
+release/
+frontend/release/
 
 # IDE
 .vscode/

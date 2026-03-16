@@ -2,7 +2,7 @@ appId: com.singattune.desktop
 productName: sing-attune
 artifactName: sing-attune-${version}-${arch}.${ext}
 directories:
-  output: release
+  output: ../release
 files:
   - dist/**/*
   - electron/**/*
@@ -13,12 +13,7 @@ extraResources:
       - '**/*'
 win:
   target:
-    - target: nsis
+    - target: zip
       arch:
         - x64
   icon: electron/assets/icon.ico
-nsis:
-  oneClick: false
-  perMachine: false
-  allowToChangeInstallationDirectory: true
-  deleteAppDataOnUninstall: true
