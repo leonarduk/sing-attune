@@ -7,6 +7,7 @@
 #   just install        install all dependencies
 #   just test           run backend tests
 #   just build-backend  build standalone backend binary
+#   just package        package Electron Windows installer
 
 backend-dir := "backend"
 frontend-dir := "frontend"
@@ -38,3 +39,7 @@ build-backend:
 # Build frontend for production
 build-frontend:
     cd {{frontend-dir}}; npm run build
+
+# Build Electron Windows installer (requires backend binary)
+package:
+    cd electron; npm run package:win
