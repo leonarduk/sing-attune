@@ -10,6 +10,7 @@ Acceptance criteria from issue #3:
 
 import time
 import threading
+import builtins
 
 import numpy as np
 import pytest
@@ -26,6 +27,7 @@ from backend.audio.pitch import (
     midi_to_hz,
     resolve_engine_runtime,
     select_engine,
+    _infer_torchcrepe,
     _infer_pyin,
 )
 
@@ -317,6 +319,30 @@ class TestThinBuildFallback:
 
         assert pipeline.engine == Engine.PYIN
         assert pipeline.device == "cpu"
+
+    def test_infer_torchcrepe_errors_when_torch_missing(self, monkeypatch):
+        from backend.audio import pitch as pitch_module
+
+        monkeypatch.setattr(pitch_module, "torch", None)
+
+        with pytest.raises(RuntimeError, match="PyTorch is not installed"):
+            _infer_torchcrepe(np.zeros(2048, dtype=np.float32), "cpu", 0.0)
+
+    def test_infer_torchcrepe_errors_when_torchcrepe_missing(self, monkeypatch):
+        from backend.audio import pitch as pitch_module
+
+        original_import = builtins.__import__
+
+        def _fake_import(name, *args, **kwargs):
+            if name == "torchcrepe":
+                raise ImportError("mocked missing torchcrepe")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(pitch_module, "torch", torch)
+        monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+        with pytest.raises(RuntimeError, match="torchcrepe is not installed"):
+            _infer_torchcrepe(np.zeros(2048, dtype=np.float32), "cpu", 0.0)
 
 
 # ── GPU tests (skipped if no CUDA) ────────────────────────────────────────────────
