@@ -118,7 +118,7 @@ This keeps the backend real-time pipeline simple while score-aware interpretatio
 - Node 18+
 - [uv](https://github.com/astral-sh/uv) — `winget install astral-sh.uv`
 - [just](https://github.com/casey/just)
-- Windows Developer Mode enabled (required for electron-builder `winCodeSign` extraction symlinks)
+- Windows Developer Mode enabled (required for Windows packaging symlink creation checks)
 - NVIDIA GPU with CUDA 12.x recommended (for torchcrepe pitch detection; librosa pYIN works on CPU)
 - **Headphones** — essential during practice to prevent mic picking up the playback
 
@@ -208,7 +208,7 @@ just build-backend
 - Verifies `dist/sing-attune-backend` exists
 - Materializes `electron/assets/icon.ico` from committed `electron/assets/icon.ico.base64` placeholder data when needed
 - Verifies `electron/assets/icon.ico` is present and non-empty
-- On Windows, verifies symlink privileges required by `winCodeSign` extraction
+- On Windows, verifies symlink privileges required by the packaging pipeline
 
 If any prerequisite is missing, packaging stops with a clear error message.
 
