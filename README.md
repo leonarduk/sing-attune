@@ -250,6 +250,9 @@ Every pull request runs:
 - **Codecov** — coverage delta reported on every PR
 - **Claude AI review** — reviews the diff against the linked issue's acceptance criteria
 
+Every published GitHub release runs:
+- **package-on-release** — Windows packaging pipeline that lints/tests, builds the backend with PyInstaller, packages the Electron app, uploads artifacts to the workflow run, and attaches the ZIP + `SHA256SUMS.txt` to the Release page.
+
 Run locally before pushing:
 
 Backend (lint + tests):
