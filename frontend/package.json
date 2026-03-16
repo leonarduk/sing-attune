@@ -1,17 +1,20 @@
 {
   "name": "sing-attune-frontend",
-  "version": "0.1.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
     "build": "tsc && vite build",
+    "dev": "vite",
+    "package:win": "npm run build && electron-builder --win zip",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },
   "devDependencies": {
     "@playwright/test": "^1.53.2",
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3",
     "jsdom": "^24.0.0",
     "typescript": "^5.4.0",
     "vite": "^5.2.0",
@@ -20,5 +23,8 @@
   "dependencies": {
     "opensheetmusicdisplay": "^1.8.0"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "main": "electron/main.js",
+  "description": "Desktop frontend and packaging config for sing-attune",
+  "author": "sing-attune contributors"
 }
