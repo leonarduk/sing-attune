@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Callable
 
+from backend.models.transcription import PitchFrame
+
 import numpy as np
 
 try:
@@ -102,29 +104,6 @@ def select_engine() -> Engine:
     torchcrepe on CPU is ~200ms/frame — too slow for real-time; fall back to pYIN.
     """
     return resolve_engine_runtime().engine
-
-
-# ── Data types ─────────────────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True)
-class PitchFrame:
-    """
-    Single pitch detection result.
-
-    midi: float MIDI note number preserving cent detail.
-          e.g. 60.3 = C4 + 30 cents, 60.0 = C4 exactly.
-    """
-    time_ms: float
-    midi: float
-    confidence: float
-
-    def to_dict(self) -> dict:
-        return {
-            "time_ms": self.time_ms,
-            "midi": self.midi,
-            "confidence": self.confidence,
-        }
 
 
 # ── Conversion helpers ─────────────────────────────────────────────────────────
