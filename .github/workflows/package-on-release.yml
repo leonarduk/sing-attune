@@ -1,0 +1,91 @@
+name: Package on Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package desktop bundle (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        run: |
+          uv sync
+          uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+          uv pip install torchcrepe
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run backend lint
+        run: uv run ruff check backend/
+
+      - name: Run backend tests
+        run: uv run pytest backend/tests -v --tb=short
+
+      - name: Run frontend tests
+        run: npm test
+        working-directory: frontend
+
+      - name: Build backend bundle
+        run: uv run pyinstaller --noconfirm backend.spec
+
+      - name: Build desktop package
+        run: npm run package:win
+        working-directory: frontend
+
+      - name: Rename artifact and generate checksums
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          $zip = Get-ChildItem -Path release -Filter '*.zip' | Select-Object -First 1
+          if (-not $zip) {
+            throw 'No zip artifact was produced in release/'
+          }
+
+          $tag = "${{ github.ref_name }}"
+          $renamed = "sing-attune-$tag-windows-x64.zip"
+          Move-Item -Path $zip.FullName -Destination (Join-Path $zip.DirectoryName $renamed) -Force
+
+          $hash = Get-FileHash -Algorithm SHA256 (Join-Path $zip.DirectoryName $renamed)
+          "$($hash.Hash)  $renamed" | Out-File -FilePath (Join-Path $zip.DirectoryName 'SHA256SUMS.txt') -Encoding ascii
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sing-attune-${{ github.ref_name }}-windows-x64
+          path: |
+            release/sing-attune-${{ github.ref_name }}-windows-x64.zip
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attach artifacts to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/sing-attune-${{ github.ref_name }}-windows-x64.zip
+            release/SHA256SUMS.txt

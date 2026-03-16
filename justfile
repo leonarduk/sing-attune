@@ -8,6 +8,7 @@
 #   just test           run backend tests
 #   just build-backend  build standalone backend binary
 #   just package        package Electron Windows installer
+#   just build-backend-thin  build standalone backend binary (thin CPU-only)
 
 backend-dir := "backend"
 frontend-dir := "frontend"
@@ -43,3 +44,10 @@ build-frontend:
 # Build Electron Windows installer (requires backend binary)
 package:
     cd electron; npm run package:win
+# Build backend standalone binary (PyInstaller thin CPU-only variant)
+build-backend-thin:
+    uv run pyinstaller --noconfirm backend-thin.spec
+
+# Package thin desktop installer
+package-thin:
+    cd electron; npx electron-builder --config electron-builder-thin.yml

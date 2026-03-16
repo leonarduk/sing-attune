@@ -1,0 +1,65 @@
+name: Package installers
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  backend-thin:
+    name: Build backend thin artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies (CPU-only)
+        run: |
+          uv sync
+          uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+          uv pip install torchcrepe
+
+      - name: Build thin backend bundle
+        run: uv run pyinstaller --noconfirm backend-thin.spec
+
+      - name: Upload thin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sing-attune-backend-thin
+          path: dist/sing-attune-backend-thin/
+
+  backend-gpu:
+    name: Build backend full-fat artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies (GPU feature set)
+        run: |
+          uv sync
+          uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+          uv pip install torchcrepe
+
+      - name: Build full-fat backend bundle
+        run: uv run pyinstaller --noconfirm backend.spec
+
+      - name: Upload full-fat artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sing-attune-backend-gpu
+          path: dist/sing-attune-backend/

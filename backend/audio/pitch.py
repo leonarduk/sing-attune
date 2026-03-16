@@ -24,7 +24,11 @@ from enum import Enum, auto
 from typing import Callable
 
 import numpy as np
-import torch
+
+try:
+    import torch
+except ImportError:  # pragma: no cover - exercised by thin installer runtime
+    torch = None  # type: ignore[assignment]
 
 log = logging.getLogger(__name__)
 
@@ -61,7 +65,7 @@ def resolve_engine_runtime(force_cpu: bool = False) -> EngineRuntimeInfo:
     """Resolve active engine from env + runtime override + CUDA availability."""
     env_engine = os.getenv("PITCH_ENGINE", "").strip().lower()
     env_forces_cpu = env_engine in {"aubio", "pyin", "cpu"}
-    cuda_available = torch.cuda.is_available()
+    cuda_available = bool(torch and torch.cuda.is_available())
 
     if force_cpu or env_forces_cpu:
         reason = "runtime override" if force_cpu else "PITCH_ENGINE"
@@ -73,7 +77,7 @@ def resolve_engine_runtime(force_cpu: bool = False) -> EngineRuntimeInfo:
             mode="forced_cpu",
         )
 
-    if cuda_available:
+    if cuda_available and torch is not None:
         device_name = torch.cuda.get_device_name(0)
         log.info("CUDA available — using torchcrepe (GPU: %s)", device_name)
         return EngineRuntimeInfo(
@@ -143,7 +147,7 @@ def midi_to_hz(midi: float) -> float:
 
 def _infer_torchcrepe(
     window: np.ndarray,
-    device: torch.device,
+    device,
     capture_time_ms: float,
 ) -> PitchFrame | None:
     """
@@ -153,6 +157,9 @@ def _infer_torchcrepe(
     that Viterbi requires (blocked by Application Control on some machines).
     Returns None if confidence < threshold or no pitch detected.
     """
+    if torch is None:
+        raise RuntimeError("PyTorch is not installed. Install full-fat build for torchcrepe")
+
     try:
         import torchcrepe
     except ImportError:
@@ -259,12 +266,11 @@ class PitchPipeline:
         on_frame: Callable[[PitchFrame], None] | None = None,
     ) -> None:
         self._engine = engine or select_engine()
+        if self._engine == Engine.TORCHCREPE and torch is None:
+            log.warning("torchcrepe engine requested but PyTorch is unavailable; falling back to pYIN")
+            self._engine = Engine.PYIN
         self._on_frame = on_frame
-        self._device = (
-            torch.device("cuda")
-            if self._engine == Engine.TORCHCREPE
-            else torch.device("cpu")
-        )
+        self._device = "cuda" if self._engine == Engine.TORCHCREPE else "cpu"
         self._queue: queue.Queue[np.ndarray | None] = queue.Queue(
             maxsize=self._QUEUE_MAXSIZE
         )
@@ -301,7 +307,7 @@ class PitchPipeline:
         return self._engine
 
     @property
-    def device(self) -> torch.device:
+    def device(self) -> str:
         return self._device
 
     @property

@@ -1,0 +1,13 @@
+appId: com.singattune.app
+productName: sing-attune
+artifactName: sing-attune-${version}-gpu-${arch}.${ext}
+directories:
+  output: dist-gpu
+files:
+  - main.js
+  - preload.js
+  - splash.html
+  - package.json
+win:
+  target:
+    - nsis
