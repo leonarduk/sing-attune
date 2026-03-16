@@ -7,6 +7,7 @@
 #   just install        install all dependencies
 #   just test           run backend tests
 #   just build-backend  build standalone backend binary
+#   just build-backend-thin  build standalone backend binary (thin CPU-only)
 
 backend-dir := "backend"
 frontend-dir := "frontend"
@@ -38,3 +39,11 @@ build-backend:
 # Build frontend for production
 build-frontend:
     cd {{frontend-dir}}; npm run build
+
+# Build backend standalone binary (PyInstaller thin CPU-only variant)
+build-backend-thin:
+    uv run pyinstaller --noconfirm backend-thin.spec
+
+# Package thin desktop installer
+package-thin:
+    cd electron; npx electron-builder --config electron-builder-thin.yml

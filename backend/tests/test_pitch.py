@@ -296,6 +296,29 @@ class TestPitchPipeline:
         assert not errors
 
 
+class TestThinBuildFallback:
+    def test_resolve_engine_without_torch_uses_pyin(self, monkeypatch):
+        from backend.audio import pitch as pitch_module
+
+        monkeypatch.setattr(pitch_module, "torch", None)
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+
+        result = pitch_module.resolve_engine_runtime()
+
+        assert result.engine == Engine.PYIN
+        assert result.device == "CPU"
+
+    def test_pipeline_falls_back_when_torch_missing(self, monkeypatch):
+        from backend.audio import pitch as pitch_module
+
+        monkeypatch.setattr(pitch_module, "torch", None)
+
+        pipeline = pitch_module.PitchPipeline(engine=Engine.TORCHCREPE)
+
+        assert pipeline.engine == Engine.PYIN
+        assert pipeline.device == "cpu"
+
+
 # ── GPU tests (skipped if no CUDA) ────────────────────────────────────────────────
 
 
@@ -336,6 +359,6 @@ class TestTorchcrepeGPU:
 
     def test_pipeline_uses_gpu(self):
         pipeline = PitchPipeline(engine=Engine.TORCHCREPE)
-        assert pipeline.device.type == "cuda"
+        assert pipeline.device == "cuda"
         pipeline.start()
         pipeline.stop()
