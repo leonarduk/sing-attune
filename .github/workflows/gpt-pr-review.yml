@@ -35,7 +35,7 @@ jobs:
         run: |
           ISSUE_NUM=$(gh pr view ${{ github.event.pull_request.number }} --json body,title \
             | jq -r '[.title, .body] | join(" ")' \
-            | grep -oP '(?<=#)\d+' | head -1)
+            | grep -oE '(Closes|Refs) #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
           if [ -n "$ISSUE_NUM" ]; then
             ISSUE_BODY=$(gh issue view "$ISSUE_NUM" --json body -q .body 2>/dev/null || echo "Issue not found")
           else
@@ -54,6 +54,11 @@ jobs:
           ISSUE_BODY: ${{ steps.issue.outputs.body }}
         run: |
           python3 .github/scripts/gpt_review.py > /tmp/gpt_review_body.md
+
+          if [ ! -s /tmp/gpt_review_body.md ]; then
+            echo "ERROR: GPT review output was empty" >&2
+            exit 1
+          fi
 
       - name: Post GPT review comment
         if: success()

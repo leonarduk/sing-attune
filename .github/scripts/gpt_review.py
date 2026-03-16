@@ -1,14 +1,14 @@
-"""
-GPT AI code review script — called by gpt-pr-review.yml.
+"""GPT AI code review script called by gpt-pr-review.yml.
 
 Reads PR_TITLE, DIFF, ISSUE_BODY from environment variables,
-calls the OpenAI Responses API, and prints the review to stdout.
+calls the OpenAI Chat Completions API, and prints the review to stdout.
 The workflow captures stdout and posts it as a PR comment.
 """
 
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 
 api_key = os.environ.get("OPENAI_API_KEY", "")
@@ -71,12 +71,18 @@ End with a one-line summary verdict: **APPROVE**, **REQUEST CHANGES**,
 or **COMMENT** (no blocking concerns but worth noting)."""
 
 payload = {
-    "model": "gpt-5-mini",
-    "input": prompt,
+    "model": "gpt-4o-mini",
+    "messages": [
+        {
+            "role": "user",
+            "content": prompt,
+        }
+    ],
+    "temperature": 0.2,
 }
 
 req = urllib.request.Request(
-    "https://api.openai.com/v1/responses",
+    "https://api.openai.com/v1/chat/completions",
     data=json.dumps(payload).encode(),
     headers={
         "Authorization": f"Bearer {api_key}",
@@ -86,14 +92,25 @@ req = urllib.request.Request(
 )
 
 try:
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=60) as resp:
         data = json.loads(resp.read())
 except urllib.error.HTTPError as e:
     body = e.read().decode()
     print(f"ERROR: OpenAI API returned {e.code}: {body}", file=sys.stderr)
     sys.exit(1)
 
-review = data.get("output_text", "").strip()
+choices = data.get("choices", [])
+review = ""
+if choices:
+    message = choices[0].get("message", {})
+    content = message.get("content", "")
+    if isinstance(content, list):
+        review = "\n".join(
+            part.get("text", "") for part in content if part.get("type") == "text"
+        ).strip()
+    elif isinstance(content, str):
+        review = content.strip()
+
 if not review:
     print("ERROR: OpenAI API returned an empty review", file=sys.stderr)
     sys.exit(1)
