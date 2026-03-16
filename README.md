@@ -7,6 +7,10 @@
 
 sing-attune plays your part from a MusicXML score through your headphones. You sing along. As you sing, your pitch appears live on the score — a moving dot over the notation, green when you're on it, red when you're not. No post-hoc analysis, no percentage scores. Just an honest mirror of what your voice is doing, in the moment, against what the music asks for.
 
+## Demo
+
+Demo GIF is shared in the PR/release notes (kept out of the repository to avoid committing binary assets).
+
 ---
 
 ## The loop
@@ -96,6 +100,14 @@ This keeps the backend real-time pipeline simple while score-aware interpretatio
 | Transport controls | 🔲 Day 11 |
 | Electron packaging | 🟡 Day 16 in progress |
 | Backend standalone binary (PyInstaller) | ✅ Done (Day 16b) |
+
+---
+
+## Known limitations (v1.0)
+
+- **Polyphony is not supported** — pitch tracking assumes one singing voice at a time.
+- **Melisma alignment is approximate** — long syllables spanning many notes can produce ambiguous note matching.
+- **Falsetto / airy phonation can confuse CREPE** — confidence may drop and cause gaps in the visible pitch trace.
 
 ---
 
