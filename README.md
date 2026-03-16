@@ -184,15 +184,30 @@ API docs: http://localhost:8000/docs
 
 ---
 
+## Installer variants
+
+Two packaged variants are now produced for different hardware profiles:
+
+| Variant | Filename pattern | Includes | Best for |
+|---|---|---|---|
+| Thin (CPU) | `sing-attune-<version>-x64.exe` | librosa pYIN backend only | Most users, smallest download |
+| Full-fat (GPU) | `sing-attune-<version>-gpu-x64.exe` | torchcrepe + PyTorch + CPU fallback | NVIDIA GPU users needing lower latency |
+
+If you're unsure which one to download, start with the **thin** build.
+
 ## Backend packaging (Day 16b)
 
 Build a standalone backend binary with PyInstaller:
 
 ```powershell
 just build-backend
+
+# Thin CPU-only backend bundle
+just build-backend-thin
 ```
 
-Output is written to `dist/sing-attune-backend/` and can be launched with:
+Output is written to `dist/sing-attune-backend/` (full-fat) and `dist/sing-attune-backend-thin/` (thin).
+The bundles can be launched with:
 
 ```powershell
 ./dist/sing-attune-backend/sing-attune-backend
@@ -200,8 +215,8 @@ Output is written to `dist/sing-attune-backend/` and can be launched with:
 
 ### Bundle size
 
-- Measured local build (`dist/sing-attune-backend`): **~250 MB**
-- Expected Windows GPU build with torchcrepe + CUDA DLLs: **~200 MB** (issue estimate; varies by CUDA/torch versions)
+- Thin build target: **<250 MB** (`dist/sing-attune-backend-thin`)
+- Full-fat GPU build: typically significantly larger because torch/torchcrepe + CUDA libraries are bundled
 
 ---
 
@@ -249,6 +264,9 @@ Every pull request runs:
 - **e2e** — frontend end-to-end tests (Playwright + Chromium)
 - **Codecov** — coverage delta reported on every PR
 - **Claude AI review** — reviews the diff against the linked issue's acceptance criteria
+
+Every published GitHub release runs:
+- **package-on-release** — Windows packaging pipeline that lints/tests, builds the backend with PyInstaller, packages the Electron app, uploads artifacts to the workflow run, and attaches the ZIP + `SHA256SUMS.txt` to the Release page.
 
 Run locally before pushing:
 

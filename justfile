@@ -7,6 +7,7 @@
 #   just install        install all dependencies
 #   just test           run backend tests
 #   just build-backend  build standalone backend binary
+#   just build-backend-thin  build standalone backend binary (thin CPU-only)
 
 backend-dir := "backend"
 frontend-dir := "frontend"
@@ -39,6 +40,10 @@ build-backend:
 build-frontend:
     cd {{frontend-dir}}; npm run build
 
-# Build a Windows NSIS installer via electron-builder
-package:
-    cd {{frontend-dir}}; npm run package:win
+# Build backend standalone binary (PyInstaller thin CPU-only variant)
+build-backend-thin:
+    uv run pyinstaller --noconfirm backend-thin.spec
+
+# Package thin desktop installer
+package-thin:
+    cd electron; npx electron-builder --config electron-builder-thin.yml

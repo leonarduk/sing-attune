@@ -1,0 +1,13 @@
+appId: com.singattune.app
+productName: sing-attune
+artifactName: sing-attune-${version}-${arch}.${ext}
+directories:
+  output: dist-thin
+files:
+  - main.js
+  - preload.js
+  - splash.html
+  - package.json
+win:
+  target:
+    - nsis
