@@ -1,0 +1,19 @@
+appId: com.singattune.desktop
+productName: sing-attune
+artifactName: sing-attune-${version}-${arch}.${ext}
+directories:
+  output: ../release
+files:
+  - dist/**/*
+  - electron/**/*
+extraResources:
+  - from: ../dist/sing-attune-backend
+    to: backend
+    filter:
+      - '**/*'
+win:
+  target:
+    - target: zip
+      arch:
+        - x64
+  icon: electron/assets/icon.ico
