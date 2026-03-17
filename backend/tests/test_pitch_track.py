@@ -25,6 +25,17 @@ class TestExtractPitchFrames:
         config = PitchTrackConfig(sample_rate=22050)
         assert extract_pitch_frames(np.array([], dtype=np.float32), config) == []
 
+    def test_sub_frame_audio_returns_single_unvoiced_frame(self):
+        config = PitchTrackConfig(sample_rate=22050, hop_length=256, frame_length=2048)
+        audio = np.zeros(1024, dtype=np.float32)
+
+        frames = extract_pitch_frames(audio, config)
+
+        assert len(frames) == 1
+        assert frames[0].time_ms == 0.0
+        assert frames[0].midi == 0.0
+        assert frames[0].confidence == 0.0
+
     def test_sustained_a4_is_stable(self):
         config = PitchTrackConfig(sample_rate=22050, hop_length=256, frame_length=2048)
         frames = extract_pitch_frames(_sine(440.0, 1.5, 22050), config)

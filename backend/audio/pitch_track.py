@@ -70,6 +70,9 @@ def extract_pitch_frames(audio: np.ndarray, config: PitchTrackConfig) -> list[Pi
     if len(audio) == 0:
         return []
 
+    if len(audio) < config.frame_length:
+        return [PitchFrame(time_ms=0.0, midi=0.0, confidence=0.0)]
+
     f0_hz, voiced_flag, voiced_prob = librosa.pyin(
         audio.astype(np.float32, copy=False),
         fmin=config.fmin_hz,
@@ -109,7 +112,7 @@ def extract_pitch_frames(audio: np.ndarray, config: PitchTrackConfig) -> list[Pi
             corrected_midis[idx] = _closest_octave(midi, reference_midi)
 
     frames: list[PitchFrame] = []
-    for time_ms, midi, confidence in zip(frame_times_ms, corrected_midis, confidences, strict=False):
+    for time_ms, midi, confidence in zip(frame_times_ms, corrected_midis, confidences, strict=True):
         frames.append(PitchFrame(time_ms=time_ms, midi=midi, confidence=confidence))
 
     return frames
