@@ -14,6 +14,9 @@ DEFAULT_FMAX_HZ = 2093.0
 DEFAULT_FRAME_LENGTH = 2048
 DEFAULT_HOP_LENGTH = 256
 DEFAULT_CONFIDENCE_THRESHOLD = 0.6
+OCTAVE_ERROR_SEMITONES = 12.0
+OCTAVE_ERROR_TOLERANCE = 1.5
+NEIGHBOR_STABILITY_TOLERANCE = 2.0
 
 
 @dataclass(frozen=True)
@@ -33,15 +36,23 @@ def _closest_octave(midi: float, reference: float) -> float:
     if reference <= 0.0 or midi <= 0.0:
         return midi
 
-    best = midi
-    best_distance = abs(midi - reference)
-    for shift in (-24.0, -12.0, 12.0, 24.0):
-        candidate = midi + shift
-        distance = abs(candidate - reference)
-        if distance < best_distance:
-            best = candidate
-            best_distance = distance
-    return best
+    octave_shift = round((reference - midi) / OCTAVE_ERROR_SEMITONES)
+    return midi + (octave_shift * OCTAVE_ERROR_SEMITONES)
+
+
+def _is_likely_isolated_octave_error(previous_midi: float, midi: float, next_midi: float) -> bool:
+    """Return True when ``midi`` is likely an isolated octave-tracking error."""
+    if previous_midi <= 0.0 or midi <= 0.0 or next_midi <= 0.0:
+        return False
+
+    previous_next_stable = abs(previous_midi - next_midi) <= NEIGHBOR_STABILITY_TOLERANCE
+    previous_is_octave = (
+        abs(abs(midi - previous_midi) - OCTAVE_ERROR_SEMITONES) <= OCTAVE_ERROR_TOLERANCE
+    )
+    next_is_octave = (
+        abs(abs(midi - next_midi) - OCTAVE_ERROR_SEMITONES) <= OCTAVE_ERROR_TOLERANCE
+    )
+    return previous_next_stable and previous_is_octave and next_is_octave
 
 
 def extract_pitch_frames(audio: np.ndarray, config: PitchTrackConfig) -> list[PitchFrame]:
@@ -69,8 +80,9 @@ def extract_pitch_frames(audio: np.ndarray, config: PitchTrackConfig) -> list[Pi
         center=False,
     )
 
-    frames: list[PitchFrame] = []
-    previous_voiced_midi = 0.0
+    raw_midis: list[float] = []
+    frame_times_ms: list[float] = []
+    confidences: list[float] = []
 
     for idx in range(len(f0_hz)):
         time_ms = (idx * config.hop_length * 1000.0) / config.sample_rate
@@ -81,9 +93,23 @@ def extract_pitch_frames(audio: np.ndarray, config: PitchTrackConfig) -> list[Pi
         midi = 0.0
         if voiced and confidence >= config.confidence_threshold and frequency_hz > 0.0:
             midi = hz_to_midi(frequency_hz)
-            midi = _closest_octave(midi, previous_voiced_midi)
-            previous_voiced_midi = midi
 
+        frame_times_ms.append(time_ms)
+        confidences.append(confidence)
+        raw_midis.append(midi)
+
+    corrected_midis = list(raw_midis)
+    for idx in range(1, len(raw_midis) - 1):
+        previous_midi = raw_midis[idx - 1]
+        midi = raw_midis[idx]
+        next_midi = raw_midis[idx + 1]
+
+        if _is_likely_isolated_octave_error(previous_midi, midi, next_midi):
+            reference_midi = (previous_midi + next_midi) / 2.0
+            corrected_midis[idx] = _closest_octave(midi, reference_midi)
+
+    frames: list[PitchFrame] = []
+    for time_ms, midi, confidence in zip(frame_times_ms, corrected_midis, confidences, strict=False):
         frames.append(PitchFrame(time_ms=time_ms, midi=midi, confidence=confidence))
 
     return frames

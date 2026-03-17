@@ -16,8 +16,8 @@ class TestClosestOctave:
         assert _closest_octave(69.0, 0.0) == 69.0
 
     def test_shifts_to_nearest_octave(self):
-        corrected = _closest_octave(81.0, 69.0)
-        assert abs(corrected - 69.0) <= 1.0
+        corrected = _closest_octave(45.0, 69.0)
+        assert abs(corrected - 69.0) < 1e-6
 
 
 class TestExtractPitchFrames:
@@ -48,3 +48,20 @@ class TestExtractPitchFrames:
         delta = frames[1].time_ms - frames[0].time_ms
         assert abs(delta - (512 * 1000.0 / 22050)) < 1e-6
         assert all(frames[i].time_ms <= frames[i + 1].time_ms for i in range(len(frames) - 1))
+
+    def test_keeps_real_octave_jump(self):
+        sample_rate = 22050
+        config = PitchTrackConfig(sample_rate=sample_rate, hop_length=256, frame_length=2048)
+
+        first = _sine(440.0, 0.8, sample_rate)
+        second = _sine(880.0, 0.8, sample_rate)
+        audio = np.concatenate([first, second]).astype(np.float32)
+        frames = extract_pitch_frames(audio, config)
+
+        midpoint = len(frames) // 2
+        before = [frame.midi for frame in frames[:midpoint] if frame.midi > 0.0]
+        after = [frame.midi for frame in frames[midpoint:] if frame.midi > 0.0]
+
+        assert before and after
+        assert abs(float(np.median(before)) - 69.0) < 1.0
+        assert abs(float(np.median(after)) - 81.0) < 1.0
