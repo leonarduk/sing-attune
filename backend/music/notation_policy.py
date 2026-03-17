@@ -31,7 +31,8 @@ class NotationPolicy:
     - sixteenth = 0.25
     """
 
-    max_subdivision: Fraction = Fraction(1, 16)
+    # Beat unit is quarter-note beats; sixteenth-note resolution is 0.25 beats.
+    max_subdivision: Fraction = Fraction(1, 4)
     allowed_durations_beats: tuple[float, ...] = (4.0, 2.0, 1.0, 0.5, 0.25)
     cross_bar_notes: CrossBarNotePolicy = CrossBarNotePolicy.SPLIT_AND_TIE
     small_gap_merge_threshold_seconds: float = 0.05
@@ -49,7 +50,11 @@ class NotationPolicy:
         return duration_beats in self._allowed_durations_set
 
     def should_merge_small_gap(self, gap_seconds: float) -> bool:
-        """Return True when a short rest should merge into neighbouring notes."""
+        """Return True when a short rest should merge into neighbouring notes.
+
+        The threshold is exclusive so a gap exactly equal to
+        ``small_gap_merge_threshold_seconds`` is preserved as a rest.
+        """
 
         return gap_seconds < self.small_gap_merge_threshold_seconds
 
