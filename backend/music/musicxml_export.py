@@ -28,20 +28,17 @@ def score_model_to_music21_score(score_model: ScoreModel) -> stream.Score:
 
     part = stream.Part(id="P1")
     part.partName = "Voice"
-    part.append(clef.TrebleClef())
 
-    if score_model.metadata.tempo_bpm is not None:
-        part.append(tempo.MetronomeMark(number=score_model.metadata.tempo_bpm))
-
-    part.append(meter.TimeSignature(score_model.metadata.time_signature))
-
-    if score_model.metadata.key_signature is not None:
-        part.append(_build_key_signature(score_model.metadata.key_signature))
-
-    part.append(layout.StaffLayout(staffLines=5))
-
-    for measure_model in score_model.measures:
+    for index, measure_model in enumerate(score_model.measures):
         measure = stream.Measure(number=measure_model.number)
+        if index == 0:
+            measure.append(clef.TrebleClef())
+            if score_model.metadata.tempo_bpm is not None:
+                measure.append(tempo.MetronomeMark(number=score_model.metadata.tempo_bpm))
+            measure.append(meter.TimeSignature(score_model.metadata.time_signature))
+            if score_model.metadata.key_signature is not None:
+                measure.append(_build_key_signature(score_model.metadata.key_signature))
+            measure.append(layout.StaffLayout(staffLines=5))
         for event in measure_model.events:
             measure.append(_score_event_to_music21(event))
         part.append(measure)
@@ -113,12 +110,14 @@ def _attach_lyric(
     rendered_note.lyrics = [lyric]
 
 
-def _build_key_signature(key_signature: str) -> key.KeySignature:
+def _build_key_signature(key_signature: str) -> key.Key | key.KeySignature:
+    normalized_key = key_signature.strip()
+
     try:
-        if " " in key_signature.strip():
-            parsed_key = key.Key(key_signature)
-            return key.KeySignature(parsed_key.sharps)
-        parsed_key = key.Key(key_signature)
+        if " " in normalized_key:
+            tonic, mode = normalized_key.rsplit(" ", maxsplit=1)
+            return key.Key(tonic, mode.lower())
+        parsed_key = key.Key(normalized_key)
         return key.KeySignature(parsed_key.sharps)
     except Exception as exc:  # pragma: no cover - music21 raises varied exception types
         raise MusicXMLExportError(f"Unsupported key signature: {key_signature}") from exc
