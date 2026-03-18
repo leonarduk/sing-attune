@@ -51,6 +51,16 @@ class TestSegmentNotes:
         assert len(notes) == 1
         assert abs(notes[0].pitch - 69.0) < 0.1
 
+    def test_windowed_median_skips_outlier_without_crossing_silence(self):
+        frames = _frames([69.0, 72.0, 69.0, 69.0, 0.0, 69.0])
+
+        notes = segment_notes(frames, NoteSegmentationConfig(min_note_ms=20.0, max_gap_ms=0.0))
+
+        assert len(notes) == 2
+        assert abs(notes[0].pitch - 69.0) < 0.1
+        assert notes[0].end_time <= notes[1].start_time
+        assert notes[1].pitch == 69.0
+
     def test_short_adjacent_notes_are_filtered_instead_of_blended(self):
         frames = _frames([60.0, 60.0, 64.0, 64.0])
 

@@ -57,21 +57,27 @@ def _windowed_median(
     center_value = values[center_idx]
     window = [center_value] if center_value > 0.0 else []
 
-    left_idx = center_idx - 1
-    while left_idx >= 0 and center_idx - left_idx <= radius:
-        value = values[left_idx]
-        if value <= 0.0 or abs(value - center_value) > pitch_tolerance:
-            break
-        window.append(value)
-        left_idx -= 1
+    stop_left = False
+    stop_right = False
+    for offset in range(1, radius + 1):
+        left_idx = center_idx - offset
+        if not stop_left and left_idx >= 0:
+            value = values[left_idx]
+            if value <= 0.0:
+                stop_left = True
+            elif abs(value - center_value) <= pitch_tolerance:
+                window.append(value)
 
-    right_idx = center_idx + 1
-    while right_idx < len(values) and right_idx - center_idx <= radius:
-        value = values[right_idx]
-        if value <= 0.0 or abs(value - center_value) > pitch_tolerance:
+        right_idx = center_idx + offset
+        if not stop_right and right_idx < len(values):
+            value = values[right_idx]
+            if value <= 0.0:
+                stop_right = True
+            elif abs(value - center_value) <= pitch_tolerance:
+                window.append(value)
+
+        if stop_left and stop_right:
             break
-        window.append(value)
-        right_idx += 1
 
     return median(window) if window else 0.0
 
