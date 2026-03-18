@@ -8,7 +8,7 @@ import pytest
 
 from backend.models.transcription import NoteEvent
 from backend.music import ScoreMetadata, quantize_note_events, score_model_from_quantized_events
-from backend.music.quantization import _build_rest_events, _choose_duration
+from backend.music.quantization import _build_rest_events, _choose_duration, _midi_to_pitch_name
 from backend.music.notation_policy import V1_NOTATION_POLICY
 
 
@@ -143,3 +143,22 @@ class TestQuantizationHelpers:
         assert [event.duration_beats for event in note_events] == pytest.approx([4.0, 1.0])
         assert note_events[0].tie_start is True
         assert note_events[1].tie_stop is True
+
+
+class TestPitchNameValidation:
+    @pytest.mark.parametrize(
+        ("frequency_hz", "match"),
+        [
+            (math.nan, "must be finite"),
+            (math.inf, "must be finite"),
+            (0.0, "must be positive"),
+            (-1.0, "must be positive"),
+            (_hz_from_midi(-1), "between 0 and 127"),
+        ],
+    )
+    def test_rejects_invalid_or_out_of_range_frequencies(self, frequency_hz: float, match: str):
+        with pytest.raises(ValueError, match=match):
+            _midi_to_pitch_name(frequency_hz)
+
+    def test_accepts_lowest_renderable_midi(self):
+        assert _midi_to_pitch_name(_hz_from_midi(0)) == "C-1"

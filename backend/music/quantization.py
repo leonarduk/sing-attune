@@ -15,6 +15,9 @@ from .score_model import QuantizedEvent
 DEFAULT_TEMPO_BPM: Final[float] = 120.0
 # Floating-point tolerance for beat arithmetic and loop termination.
 GRID_EPSILON: Final[float] = 1e-9
+# MIDI note range we can render as pitch names without producing nonsense octaves.
+MIN_RENDERABLE_MIDI: Final[int] = 0
+MAX_RENDERABLE_MIDI: Final[int] = 127
 
 
 @dataclass(frozen=True)
@@ -244,9 +247,18 @@ def _quantize_to_grid(value: float, grid_step: float) -> float:
 
 
 def _midi_to_pitch_name(frequency_hz: float) -> str:
-    if not math.isfinite(frequency_hz) or frequency_hz <= 0.0:
+    if not math.isfinite(frequency_hz):
+        raise ValueError("Detected note pitch must be finite")
+    if frequency_hz <= 0.0:
         raise ValueError("Detected note pitch must be positive")
+
     midi_number = round(69 + (12 * math.log2(frequency_hz / 440.0)))
+    if midi_number < MIN_RENDERABLE_MIDI or midi_number > MAX_RENDERABLE_MIDI:
+        raise ValueError(
+            "Detected note pitch must map to a MIDI note between "
+            f"{MIN_RENDERABLE_MIDI} and {MAX_RENDERABLE_MIDI}"
+        )
+
     pitch_classes = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
     octave = (midi_number // 12) - 1
     pitch_class = pitch_classes[midi_number % 12]
