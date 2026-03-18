@@ -1,8 +1,9 @@
 name: PR Review
 
 on:
+  # Run the PR validation workflow, including the Codecov upload, on every PR update
+  # so new commits pushed to an open PR always refresh coverage.
   pull_request:
-    types: [opened, synchronize, reopened]
 
 jobs:
   lint:
