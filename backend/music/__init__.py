@@ -13,6 +13,7 @@ from .musicxml_export import (
     score_model_to_musicxml_string,
     write_score_model_musicxml,
 )
+from .quantization import quantize_note_events
 from .score_model import (
     LyricSyllabic,
     Measure,
@@ -30,6 +31,7 @@ __all__ = [
     "score_model_to_musicxml_bytes",
     "score_model_to_musicxml_string",
     "write_score_model_musicxml",
+    "quantize_note_events",
     "LyricSyllabic",
     "Measure",
     "NoteScoreEvent",

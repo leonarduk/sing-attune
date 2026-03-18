@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 from pathlib import Path
 import wave
 
 import audioop
 import numpy as np
-from music21 import pitch as m21pitch
 
 from backend.audio.music_analysis import estimate_key, estimate_tempo
 from backend.audio.pitch import _infer_pyin, midi_to_hz
 from backend.models.transcription import NoteEvent, PitchFrame
+from backend.music.score_model import QuantizedEvent
 from backend.music import (
-    QuantizedEvent,
     ScoreMetadata,
+    quantize_note_events,
     score_model_from_quantized_events,
     score_model_to_musicxml_string,
 )
+from backend.music.quantization import _midi_to_pitch_name as _quantization_pitch_name
 from backend.music.notation_policy import V1_NOTATION_POLICY
 
 SUPPORTED_AUDIO_SUFFIXES = {".wav", ".wave"}
@@ -67,7 +67,12 @@ def transcribe_audio_file(path: str | Path) -> TranscriptionResult:
 
     tempo_bpm = estimate_tempo(note_events) or DEFAULT_TEMPO_BPM
     key_signature = estimate_key(note_events)
-    quantized_events = _quantize_note_events(note_events, tempo_bpm)
+    quantized_events = quantize_note_events(
+        note_events,
+        tempo_bpm=tempo_bpm,
+        time_signature=V1_NOTATION_POLICY.default_time_signature,
+        notation_policy=V1_NOTATION_POLICY,
+    )
     score_model = score_model_from_quantized_events(
         quantized_events,
         metadata=ScoreMetadata(
@@ -202,40 +207,6 @@ def _append_note_event(
     )
 
 
-def _quantize_note_events(events: list[NoteEvent], tempo_bpm: float) -> list[QuantizedEvent]:
-    quantized: list[QuantizedEvent] = []
-    seconds_per_beat = 60.0 / tempo_bpm
-    current_beat = 0.0
-
-    for event in events:
-        start_beat = event.start_time / seconds_per_beat
-        gap_beats = max(0.0, start_beat - current_beat)
-        quantized.extend(
-            _build_quantized_spans(
-                gap_beats,
-                current_beat,
-                event.start_time,
-                seconds_per_beat=seconds_per_beat,
-                is_rest=True,
-            )
-        )
-
-        event_duration_beats = event.duration_seconds / seconds_per_beat
-        quantized.extend(
-            _build_quantized_spans(
-                event_duration_beats,
-                start_beat,
-                event.end_time,
-                seconds_per_beat=seconds_per_beat,
-                is_rest=False,
-                pitch_name=_midi_to_pitch_name(event.pitch),
-                confidence=event.confidence,
-            )
-        )
-        current_beat = start_beat + event_duration_beats
-
-    return quantized
-
 
 def _build_quantized_spans(
     duration_beats: float,
@@ -246,15 +217,19 @@ def _build_quantized_spans(
     is_rest: bool,
     pitch_name: str | None = None,
     confidence: float = 1.0,
-) -> list[QuantizedEvent]:
+):
+    """Backward-compatible helper retained for unit tests.
+
+    This mirrors the previous greedy decomposition used by the transcription
+    service; the production quantizer now lives in ``backend.music.quantization``.
+    """
+
     if duration_beats <= 0:
         return []
 
-    step = float(V1_NOTATION_POLICY.max_subdivision)
-    units = max(1, int(round(duration_beats / step)))
-    remaining = units * step
-    allowed = sorted(V1_NOTATION_POLICY.allowed_durations_beats, reverse=True)
-    events: list[QuantizedEvent] = []
+    remaining = duration_beats
+    allowed = sorted({3.0, *V1_NOTATION_POLICY.allowed_durations_beats}, reverse=True)
+    events = []
     consumed = 0.0
 
     while remaining > 1e-9:
@@ -278,9 +253,7 @@ def _build_quantized_spans(
 
 
 def _midi_to_pitch_name(pitch_hz: float) -> str:
-    if not math.isfinite(pitch_hz) or pitch_hz <= 0.0:
-        raise TranscriptionError("Detected note pitch must be positive")
-    midi = int(round(69.0 + (12.0 * math.log2(pitch_hz / 440.0))))
-    rendered = m21pitch.Pitch()
-    rendered.midi = midi
-    return rendered.nameWithOctave
+    try:
+        return _quantization_pitch_name(pitch_hz)
+    except ValueError as exc:
+        raise TranscriptionError(str(exc)) from exc
