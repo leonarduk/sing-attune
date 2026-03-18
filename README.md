@@ -94,6 +94,7 @@ This keeps the backend real-time pipeline simple while score-aware interpretatio
 | Pitch detection (torchcrepe/pYIN) | ✅ Done |
 | WebSocket pitch stream | ✅ Done |
 | Backend integration tests | ✅ Done |
+| Note segmentation | ✅ Done (Day 259) |
 | Score renderer (OSMD) | ✅ Done (Day 8a) |
 | Score playback (Web Audio) | 🔲 Day 9 |
 | Real-time pitch overlay | ✅ Done (Day 10) |
