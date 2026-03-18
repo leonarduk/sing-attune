@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 import uvicorn
 
 from .score.parser import parse_musicxml
@@ -17,6 +17,7 @@ from .score.upload import persist_upload_to_temp
 from .audio.capture import list_input_devices, default_input_device_id
 from .audio.pipeline import PlaybackPipeline, _CLIENT_QUEUE_MAXSIZE
 from .session.store import list_sessions, read_session, save_session
+from .transcription_service import TranscriptionError, transcribe_audio_file
 
 app = FastAPI(
     title="sing-attune",
@@ -289,6 +290,33 @@ async def session_get(session_id: str) -> JSONResponse:
 
 
 # ── Score upload ───────────────────────────────────────────────────────────────
+
+
+@app.post("/transcribe/audio")
+async def transcribe_audio(file: UploadFile = File(...)) -> Response:
+    suffix = Path(file.filename or "audio.wav").suffix.lower()
+    if suffix not in {".wav", ".wave"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{suffix}'. Upload a .wav audio file.",
+        )
+
+    tmp_path = await persist_upload_to_temp(file, suffix)
+
+    try:
+        transcription = transcribe_audio_file(tmp_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TranscriptionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    return Response(
+        content=transcription.musicxml,
+        media_type="application/vnd.recordare.musicxml+xml",
+        headers={"Content-Disposition": 'inline; filename="transcription.musicxml"'},
+    )
 
 
 @app.post("/score")
