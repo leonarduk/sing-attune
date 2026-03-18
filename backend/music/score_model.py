@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal, TypeAlias
 
+MEASURE_EPSILON = 1e-9
+
 
 class LyricSyllabic(StrEnum):
     """Supported MusicXML-compatible lyric syllabic values."""
@@ -28,9 +30,16 @@ class ScoreMetadata:
     def beats_per_measure(self) -> float:
         """Return measure length in quarter-note beats for the time signature."""
 
-        numerator_text, denominator_text = self.time_signature.split("/", maxsplit=1)
-        numerator = int(numerator_text)
-        denominator = int(denominator_text)
+        try:
+            numerator_text, denominator_text = self.time_signature.split("/", maxsplit=1)
+            numerator = int(numerator_text)
+            denominator = int(denominator_text)
+        except ValueError as exc:
+            raise ValueError(
+                "Time signature must use numerator/denominator format"
+            ) from exc
+        if numerator <= 0:
+            raise ValueError("Time signature numerator must be positive")
         if denominator <= 0:
             raise ValueError("Time signature denominator must be positive")
         return numerator * (4 / denominator)
@@ -167,7 +176,11 @@ def score_model_from_quantized_events(
     events: list[QuantizedEvent],
     metadata: ScoreMetadata | None = None,
 ) -> ScoreModel:
-    """Group quantized events into measures using score metadata."""
+    """Group quantized events into measures using score metadata.
+
+    Raises when an event would overflow the current measure by more than the
+    floating-point tolerance used for measure completion.
+    """
 
     score_metadata = metadata or ScoreMetadata()
     beats_per_measure = score_metadata.beats_per_measure
@@ -179,14 +192,14 @@ def score_model_from_quantized_events(
     for event in events:
         score_event = event.to_score_event()
         next_duration = current_duration + score_event.duration_beats
-        if current_events and next_duration > beats_per_measure + 1e-9:
+        if current_events and next_duration - beats_per_measure > MEASURE_EPSILON:
             raise ValueError(
                 f"Quantized events overflow measure {measure_number}: "
                 f"{next_duration} > {beats_per_measure} beats"
             )
         current_events.append(score_event)
         current_duration = next_duration
-        if abs(current_duration - beats_per_measure) <= 1e-9:
+        if abs(current_duration - beats_per_measure) <= MEASURE_EPSILON:
             measures.append(Measure(number=measure_number, events=current_events))
             measure_number += 1
             current_events = []
