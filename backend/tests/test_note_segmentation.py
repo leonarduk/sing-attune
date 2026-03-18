@@ -43,6 +43,14 @@ class TestSegmentNotes:
         assert abs(notes[1].pitch - 64.0) < 0.1
         assert notes[0].end_time <= notes[1].start_time
 
+    def test_single_outlier_frame_does_not_split_stable_note(self):
+        frames = _frames([69.0, 69.0, 72.0, 69.0, 69.0, 69.0])
+
+        notes = segment_notes(frames, NoteSegmentationConfig(min_note_ms=20.0))
+
+        assert len(notes) == 1
+        assert abs(notes[0].pitch - 69.0) < 0.1
+
     def test_short_adjacent_notes_are_filtered_instead_of_blended(self):
         frames = _frames([60.0, 60.0, 64.0, 64.0])
 
@@ -63,6 +71,25 @@ class TestSegmentNotes:
         assert abs(notes[1].pitch - 67.0) < 0.1
         assert notes[0].end_time <= 0.12
         assert notes[1].start_time >= 0.18
+
+    def test_missing_frames_create_silence_boundary_for_live_pitch_streams(self):
+        frames = [
+            PitchFrame(time_ms=0.0, midi=67.0, confidence=0.9),
+            PitchFrame(time_ms=20.0, midi=67.0, confidence=0.9),
+            PitchFrame(time_ms=40.0, midi=67.0, confidence=0.9),
+            PitchFrame(time_ms=1000.0, midi=67.0, confidence=0.9),
+            PitchFrame(time_ms=1020.0, midi=67.0, confidence=0.9),
+            PitchFrame(time_ms=1040.0, midi=67.0, confidence=0.9),
+        ]
+
+        notes = segment_notes(
+            frames,
+            NoteSegmentationConfig(max_gap_ms=40.0, min_note_ms=40.0),
+        )
+
+        assert len(notes) == 2
+        assert notes[0].end_time <= 0.06
+        assert notes[1].start_time >= 1.0
 
     def test_max_gap_ms_respects_floor_conversion(self):
         frames = _frames([67.0, 67.0, 0.0, 0.0, 67.0, 67.0])

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import insort
 from dataclasses import dataclass
 from math import floor
 from statistics import mean, median
@@ -13,6 +14,7 @@ DEFAULT_BOUNDARY_SEMITONES = 1.5
 DEFAULT_MIN_NOTE_MS = 80.0
 DEFAULT_MAX_GAP_MS = 60.0
 DEFAULT_SMOOTHING_WINDOW = 5
+DEFAULT_REQUIRED_CHANGE_FRAMES = 2
 
 
 @dataclass(frozen=True)
@@ -34,12 +36,6 @@ class _FrameSample:
     voiced: bool
 
 
-@dataclass
-class _ChangeRun:
-    start: int
-    end: int
-
-
 def _frame_step_ms(frames: list[PitchFrame]) -> float:
     if len(frames) < 2:
         return 0.0
@@ -52,13 +48,19 @@ def _frame_step_ms(frames: list[PitchFrame]) -> float:
     return median(deltas) if deltas else 0.0
 
 
-def _windowed_median(values: list[float], center_idx: int, radius: int) -> float:
-    window = [values[center_idx]] if values[center_idx] > 0.0 else []
+def _windowed_median(
+    values: list[float],
+    center_idx: int,
+    radius: int,
+    pitch_tolerance: float,
+) -> float:
+    center_value = values[center_idx]
+    window = [center_value] if center_value > 0.0 else []
 
     left_idx = center_idx - 1
     while left_idx >= 0 and center_idx - left_idx <= radius:
         value = values[left_idx]
-        if value <= 0.0:
+        if value <= 0.0 or abs(value - center_value) > pitch_tolerance:
             break
         window.append(value)
         left_idx -= 1
@@ -66,12 +68,41 @@ def _windowed_median(values: list[float], center_idx: int, radius: int) -> float
     right_idx = center_idx + 1
     while right_idx < len(values) and right_idx - center_idx <= radius:
         value = values[right_idx]
-        if value <= 0.0:
+        if value <= 0.0 or abs(value - center_value) > pitch_tolerance:
             break
         window.append(value)
         right_idx += 1
 
     return median(window) if window else 0.0
+
+
+def _build_samples(frames: list[PitchFrame], frame_step_ms: float) -> list[_FrameSample]:
+    samples: list[_FrameSample] = []
+    for idx, frame in enumerate(frames):
+        if idx > 0 and frame_step_ms > 0.0:
+            previous = frames[idx - 1]
+            delta_ms = frame.time_ms - previous.time_ms
+            missing_frames = max(0, round(delta_ms / frame_step_ms) - 1)
+            for gap_idx in range(missing_frames):
+                samples.append(
+                    _FrameSample(
+                        time_ms=previous.time_ms + ((gap_idx + 1) * frame_step_ms),
+                        midi=0.0,
+                        confidence=0.0,
+                        voiced=False,
+                    )
+                )
+
+        samples.append(
+            _FrameSample(
+                time_ms=frame.time_ms,
+                midi=frame.midi,
+                confidence=frame.confidence,
+                voiced=frame.midi > 0.0,
+            )
+        )
+
+    return samples
 
 
 def _bridge_short_gaps(samples: list[_FrameSample], max_gap_frames: int, pitch_tolerance: float) -> None:
@@ -104,21 +135,14 @@ def _bridge_short_gaps(samples: list[_FrameSample], max_gap_frames: int, pitch_t
             samples[gap_idx].confidence = fill_confidence
 
 
-def _find_change_run(
-    samples: list[_FrameSample],
-    start_idx: int,
-    reference_pitch: float,
-    boundary_semitones: float,
-) -> _ChangeRun | None:
-    for idx in range(start_idx, len(samples)):
-        sample = samples[idx]
-        if not sample.voiced:
-            return None
-
-        if abs(sample.midi - reference_pitch) >= boundary_semitones:
-            return _ChangeRun(start=idx, end=idx + 1)
-
-    return None
+def _median_from_sorted(values: list[float]) -> float:
+    count = len(values)
+    if count == 0:
+        return 0.0
+    midpoint = count // 2
+    if count % 2 == 1:
+        return values[midpoint]
+    return (values[midpoint - 1] + values[midpoint]) / 2.0
 
 
 def segment_notes(
@@ -136,20 +160,19 @@ def segment_notes(
         max_gap_frames = max(0, floor(cfg.max_gap_ms / frame_step_ms))
     smoothing_radius = max(0, cfg.smoothing_window // 2)
 
-    raw_samples = [
-        _FrameSample(
-            time_ms=frame.time_ms,
-            midi=frame.midi,
-            confidence=frame.confidence,
-            voiced=frame.midi > 0.0,
-        )
-        for frame in frames
-    ]
+    raw_samples = _build_samples(frames, frame_step_ms)
     _bridge_short_gaps(raw_samples, max_gap_frames, cfg.pitch_tolerance_semitones)
 
     voiced_midis = [sample.midi for sample in raw_samples]
     smoothed_midis = [
-        _windowed_median(voiced_midis, idx, smoothing_radius) if sample.voiced else 0.0
+        _windowed_median(
+            voiced_midis,
+            idx,
+            smoothing_radius,
+            cfg.pitch_tolerance_semitones,
+        )
+        if sample.voiced
+        else 0.0
         for idx, sample in enumerate(raw_samples)
     ]
     samples = [
@@ -170,33 +193,55 @@ def segment_notes(
             continue
 
         note_start = idx
-        note_end = idx + 1
+        note_pitches: list[float] = []
+        note_confidences: list[float] = []
+        note_last_time_ms = samples[idx].time_ms
+        scan_idx = idx
+        change_start: int | None = None
+        change_count = 0
 
-        while note_end < len(samples) and samples[note_end].voiced:
-            note_midis = [sample.midi for sample in samples[note_start:note_end] if sample.voiced]
-            reference_pitch = median(note_midis)
-            change_run = _find_change_run(
-                samples,
-                note_end,
-                reference_pitch,
-                cfg.boundary_semitones,
-            )
-            if change_run is None:
-                note_end += 1
+        while scan_idx < len(samples) and samples[scan_idx].voiced:
+            sample = samples[scan_idx]
+            reference_pitch = _median_from_sorted(note_pitches) if note_pitches else sample.midi
+            if note_pitches and abs(sample.midi - reference_pitch) >= cfg.boundary_semitones:
+                change_start = scan_idx if change_start is None else change_start
+                change_count += 1
+                if change_count >= DEFAULT_REQUIRED_CHANGE_FRAMES:
+                    break
+                scan_idx += 1
                 continue
-            note_end = change_run.start
-            break
 
-        note_samples = samples[note_start:note_end]
-        voiced_samples = [sample for sample in note_samples if sample.voiced]
-        duration_ms = (voiced_samples[-1].time_ms - voiced_samples[0].time_ms) + frame_step_ms
-        if duration_ms >= cfg.min_note_ms:
+            if change_start is not None:
+                for pending_idx in range(change_start, scan_idx):
+                    pending = samples[pending_idx]
+                    insort(note_pitches, pending.midi)
+                    note_confidences.append(pending.confidence)
+                    note_last_time_ms = pending.time_ms
+                change_start = None
+                change_count = 0
+
+            insort(note_pitches, sample.midi)
+            note_confidences.append(sample.confidence)
+            note_last_time_ms = sample.time_ms
+            scan_idx += 1
+
+        if change_start is not None and change_count < DEFAULT_REQUIRED_CHANGE_FRAMES:
+            for pending_idx in range(change_start, scan_idx):
+                pending = samples[pending_idx]
+                insort(note_pitches, pending.midi)
+                note_confidences.append(pending.confidence)
+                note_last_time_ms = pending.time_ms
+            change_start = None
+
+        note_end = change_start if change_start is not None else scan_idx
+        duration_ms = max(0.0, note_last_time_ms - samples[note_start].time_ms) + frame_step_ms
+        if note_pitches and duration_ms >= cfg.min_note_ms:
             notes.append(
                 NoteEvent(
-                    start_time=voiced_samples[0].time_ms / 1000.0,
-                    end_time=(voiced_samples[-1].time_ms + frame_step_ms) / 1000.0,
-                    pitch=median([sample.midi for sample in voiced_samples]),
-                    confidence=mean(sample.confidence for sample in voiced_samples),
+                    start_time=samples[note_start].time_ms / 1000.0,
+                    end_time=(note_last_time_ms + frame_step_ms) / 1000.0,
+                    pitch=_median_from_sorted(note_pitches),
+                    confidence=mean(note_confidences),
                 )
             )
 
