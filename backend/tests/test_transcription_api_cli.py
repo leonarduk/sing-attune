@@ -331,6 +331,9 @@ def test_build_quantized_spans_and_pitch_name_cover_rest_and_validation() -> Non
     with pytest.raises(TranscriptionError, match="pitch must be positive"):
         _midi_to_pitch_name(0.0)
 
+    with pytest.raises(TranscriptionError, match="pitch must be positive"):
+        _midi_to_pitch_name(math.inf)
+
 
 def test_transcribe_audio_endpoint_maps_service_errors(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(

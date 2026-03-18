@@ -67,12 +67,15 @@ def transcribe_audio_file(path: str | Path) -> TranscriptionResult:
 
     tempo_bpm = estimate_tempo(note_events) or DEFAULT_TEMPO_BPM
     key_signature = estimate_key(note_events)
-    quantized_events = quantize_note_events(
-        note_events,
-        tempo_bpm=tempo_bpm,
-        time_signature=V1_NOTATION_POLICY.default_time_signature,
-        notation_policy=V1_NOTATION_POLICY,
-    )
+    try:
+        quantized_events = quantize_note_events(
+            note_events,
+            tempo_bpm=tempo_bpm,
+            time_signature=V1_NOTATION_POLICY.default_time_signature,
+            notation_policy=V1_NOTATION_POLICY,
+        )
+    except ValueError as exc:
+        raise TranscriptionError(str(exc)) from exc
     score_model = score_model_from_quantized_events(
         quantized_events,
         metadata=ScoreMetadata(
@@ -218,7 +221,7 @@ def _build_quantized_spans(
     pitch_name: str | None = None,
     confidence: float = 1.0,
 ):
-    """Backward-compatible helper retained for unit tests.
+    """Deprecated compatibility helper retained for unit tests.
 
     This mirrors the previous greedy decomposition used by the transcription
     service; the production quantizer now lives in ``backend.music.quantization``.

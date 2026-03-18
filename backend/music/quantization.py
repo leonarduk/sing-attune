@@ -11,8 +11,10 @@ from backend.models.transcription import NoteEvent
 from .notation_policy import NotationPolicy, V1_NOTATION_POLICY
 from .score_model import QuantizedEvent
 
+# Default tempo used when callers do not provide one.
 DEFAULT_TEMPO_BPM: Final[float] = 120.0
-_GRID_EPSILON: Final[float] = 1e-9
+# Floating-point tolerance for beat arithmetic and loop termination.
+GRID_EPSILON: Final[float] = 1e-9
 
 
 @dataclass(frozen=True)
@@ -45,10 +47,10 @@ def quantize_note_events(
     for event in events:
         start_beat = _quantize_to_grid(event.start_time / seconds_per_beat, grid_step)
         end_beat = _quantize_to_grid(event.end_time / seconds_per_beat, grid_step)
-        if end_beat <= start_beat:
-            end_beat = start_beat + grid_step
+        if end_beat - start_beat <= GRID_EPSILON:
+            continue
 
-        if start_beat - previous_end_beat > _GRID_EPSILON:
+        if start_beat - previous_end_beat > GRID_EPSILON:
             quantized.extend(
                 _build_rest_events(
                     previous_end_beat,
@@ -82,6 +84,9 @@ def _build_rest_events(
     beats_per_measure: float,
     notation_policy: NotationPolicy,
 ) -> list[QuantizedEvent]:
+    if end_beat - start_beat <= GRID_EPSILON:
+        return []
+
     return [
         QuantizedEvent(
             event_type="rest",
@@ -145,7 +150,7 @@ def _decompose_across_bars_and_beats(
     spans: list[_BeatSpan] = []
     cursor = start_beat
 
-    while end_beat - cursor > _GRID_EPSILON:
+    while end_beat - cursor > GRID_EPSILON:
         measure_end = (math.floor(cursor / beats_per_measure) + 1) * beats_per_measure
         bounded_end = min(end_beat, measure_end)
         spans.extend(
@@ -169,9 +174,11 @@ def _decompose_measure_local_span(
     spans: list[_BeatSpan] = []
     cursor = start_beat
 
-    while end_beat - cursor > _GRID_EPSILON:
+    while end_beat - cursor > GRID_EPSILON:
         remaining = end_beat - cursor
         duration = _choose_duration(cursor, remaining, notation_policy)
+        if duration <= GRID_EPSILON:
+            break
         spans.append(_BeatSpan(start=cursor, end=cursor + duration))
         cursor += duration
 
@@ -179,17 +186,22 @@ def _decompose_measure_local_span(
 
 
 def _choose_duration(cursor: float, remaining: float, notation_policy: NotationPolicy) -> float:
+    if remaining <= GRID_EPSILON:
+        return 0.0
+
     candidates = _candidate_durations(notation_policy)
     beat_offset = cursor % 1.0
 
     for duration in candidates:
-        if duration - remaining > _GRID_EPSILON:
+        if duration - remaining > GRID_EPSILON:
             continue
         if _is_readable_choice(beat_offset, duration):
             return duration
 
-    grid_step = float(notation_policy.max_subdivision)
-    return min(remaining, grid_step)
+    smallest_duration = min(candidates)
+    if remaining >= smallest_duration:
+        return smallest_duration
+    return remaining
 
 
 def _candidate_durations(notation_policy: NotationPolicy) -> tuple[float, ...]:
