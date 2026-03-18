@@ -30,11 +30,12 @@ E4_MIDI = 64.0
 C5_MIDI = 72.0
 FRAME_STEP_MS = 20.0
 SAMPLE_RATE = 22050
+MAX_SHORT_GAP_MS = 40.0
 SHORT_GAP_FRAMES = 3
 
 
-def _hz_from_midi(midi: int) -> float:
-    """Convert an integer MIDI note number into frequency in Hz."""
+def _hz_from_midi(midi: float) -> float:
+    """Convert a MIDI note number into frequency in Hz."""
 
     return 440.0 * (2 ** ((midi - 69) / 12))
 
@@ -42,6 +43,7 @@ def _hz_from_midi(midi: int) -> float:
 def _write_wav(path: Path, *, duration_seconds: float = 2.0, frequency_hz: float = 440.0) -> None:
     """Write a simple mono sine-wave WAV fixture for transcription tests."""
 
+    assert SAMPLE_RATE == 22050
     t = np.linspace(0.0, duration_seconds, int(SAMPLE_RATE * duration_seconds), endpoint=False)
     samples = (0.3 * np.sin(2.0 * math.pi * frequency_hz * t)).astype(np.float32)
     pcm = np.clip(samples * 32767.0, -32768, 32767).astype("<i2")
@@ -132,10 +134,10 @@ def test_sustained_vibrato_note_round_trips_as_single_readable_note() -> None:
 def test_segmentation_stage_splits_repeated_notes_when_gap_exceeds_tolerance() -> None:
     segmented = _segment_midis(
         [G4_MIDI] * 5 + [0.0] * SHORT_GAP_FRAMES + [G4_MIDI] * 5,
-        config=NoteSegmentationConfig(max_gap_ms=40.0, min_note_ms=60.0),
+        config=NoteSegmentationConfig(max_gap_ms=MAX_SHORT_GAP_MS, min_note_ms=60.0),
     )
 
-    assert (SHORT_GAP_FRAMES * FRAME_STEP_MS) > 40.0
+    assert (SHORT_GAP_FRAMES * FRAME_STEP_MS) > MAX_SHORT_GAP_MS
     assert len(segmented) == 2
     assert segmented[0].end_time < segmented[1].start_time
 
@@ -144,7 +146,7 @@ def test_repeated_notes_with_short_gap_segment_into_two_attacks() -> None:
     notes = _segmented_events_to_hz(
         _segment_midis(
             [G4_MIDI] * 5 + [0.0] * SHORT_GAP_FRAMES + [G4_MIDI] * 5,
-            config=NoteSegmentationConfig(max_gap_ms=40.0, min_note_ms=60.0),
+            config=NoteSegmentationConfig(max_gap_ms=MAX_SHORT_GAP_MS, min_note_ms=60.0),
         )
     )
 
@@ -152,16 +154,20 @@ def test_repeated_notes_with_short_gap_segment_into_two_attacks() -> None:
     assert [round(69 + (12 * math.log2(note.pitch / 440.0))) for note in notes] == [67, 67]
 
 
-def test_quantization_stage_splits_barline_crossing_note_into_tied_events() -> None:
+def test_quantization_stage_inserts_leading_rest_and_splits_barline_crossing_note() -> None:
     events = [
         NoteEvent(start_time=1.5, end_time=2.5, pitch=_hz_from_midi(62), confidence=0.85),
     ]
 
     quantized = quantize_note_events(events, tempo_bpm=120.0, time_signature="4/4")
 
-    assert [event.duration_beats for event in quantized] == pytest.approx([3.0, 1.0, 1.0])
-    assert [event.tie_start for event in quantized if event.event_type == "note"] == [True, False]
-    assert [event.tie_stop for event in quantized if event.event_type == "note"] == [False, True]
+    rest_events = [event for event in quantized if event.event_type == "rest"]
+    note_events = [event for event in quantized if event.event_type == "note"]
+
+    assert [event.duration_beats for event in rest_events] == pytest.approx([3.0])
+    assert [event.duration_beats for event in note_events] == pytest.approx([1.0, 1.0])
+    assert [event.tie_start for event in note_events] == [True, False]
+    assert [event.tie_stop for event in note_events] == [False, True]
 
 
 def test_note_crossing_barline_quantizes_into_tied_musicxml_notes() -> None:
@@ -237,7 +243,7 @@ def test_ambiguous_tempo_defaults_to_safe_transcription_tempo(
     assert [note.nameWithOctave for note in converter.parseData(result.musicxml).parts[0].recurse().notes] == ["C4"]
 
 
-def test_octave_error_scenario_is_split_into_separate_notation_notes() -> None:
+def test_octave_error_scenario_splits_an_unexpected_octave_jump_into_two_notes() -> None:
     notes = _segmented_events_to_hz(
         _segment_midis(
             [C4_MIDI] * 6 + [C5_MIDI] * 6,
