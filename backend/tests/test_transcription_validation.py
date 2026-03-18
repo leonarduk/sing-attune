@@ -22,15 +22,26 @@ from backend.music import (
 from backend.music.score_model import Measure, NoteScoreEvent, ScoreModel
 from backend.transcription_service import DEFAULT_TEMPO_BPM, transcribe_audio_file
 
+A4_MIDI = 69.0
+G4_MIDI = 67.0
+C4_MIDI = 60.0
+D4_MIDI = 62.0
+E4_MIDI = 64.0
+C5_MIDI = 72.0
 FRAME_STEP_MS = 20.0
 SAMPLE_RATE = 22050
+SHORT_GAP_FRAMES = 3
 
 
 def _hz_from_midi(midi: int) -> float:
+    """Convert an integer MIDI note number into frequency in Hz."""
+
     return 440.0 * (2 ** ((midi - 69) / 12))
 
 
 def _write_wav(path: Path, *, duration_seconds: float = 2.0, frequency_hz: float = 440.0) -> None:
+    """Write a simple mono sine-wave WAV fixture for transcription tests."""
+
     t = np.linspace(0.0, duration_seconds, int(SAMPLE_RATE * duration_seconds), endpoint=False)
     samples = (0.3 * np.sin(2.0 * math.pi * frequency_hz * t)).astype(np.float32)
     pcm = np.clip(samples * 32767.0, -32768, 32767).astype("<i2")
@@ -47,6 +58,8 @@ def _pitch_frames(
     confidence: float = 0.9,
     frame_step_ms: float = FRAME_STEP_MS,
 ) -> list[PitchFrame]:
+    """Build synthetic pitch frames for segmentation-focused tests."""
+
     return [
         PitchFrame(
             time_ms=index * frame_step_ms,
@@ -57,13 +70,20 @@ def _pitch_frames(
     ]
 
 
-def _segmented_events(
+def _segment_midis(
     midis: list[float],
     *,
     confidence: float = 0.9,
     config: NoteSegmentationConfig | None = None,
 ) -> list[NoteEvent]:
-    segmented = segment_notes(_pitch_frames(midis, confidence=confidence), config)
+    """Run synthetic MIDI-like pitch frames through note segmentation only."""
+
+    return segment_notes(_pitch_frames(midis, confidence=confidence), config)
+
+
+def _segmented_events_to_hz(events: list[NoteEvent]) -> list[NoteEvent]:
+    """Convert segmentation output from MIDI-like pitch values into Hz-domain events."""
+
     return [
         NoteEvent(
             start_time=event.start_time,
@@ -71,7 +91,7 @@ def _segmented_events(
             pitch=_hz_from_midi(round(event.pitch)),
             confidence=event.confidence,
         )
-        for event in segmented
+        for event in events
     ]
 
 
@@ -81,6 +101,8 @@ def _musicxml_note_names(
     tempo_bpm: float = 120.0,
     time_signature: str = "4/4",
 ) -> list[str]:
+    """Quantize/export note events and return parsed MusicXML note names."""
+
     quantized = quantize_note_events(events, tempo_bpm=tempo_bpm, time_signature=time_signature)
     score_model = score_model_from_quantized_events(
         quantized,
@@ -90,23 +112,56 @@ def _musicxml_note_names(
     return [note.nameWithOctave for note in parsed.parts[0].recurse().notes]
 
 
+def test_segmentation_stage_keeps_sustained_vibrato_as_single_note() -> None:
+    segmented = _segment_midis([A4_MIDI, 69.3, 68.8, 69.4, 68.9, 69.2, 68.7, 69.1, 69.0, 68.8])
+
+    assert len(segmented) == 1
+    assert segmented[0].pitch == pytest.approx(A4_MIDI, abs=0.4)
+
+
 def test_sustained_vibrato_note_round_trips_as_single_readable_note() -> None:
-    notes = _segmented_events([69.0, 69.3, 68.8, 69.4, 68.9, 69.2, 68.7, 69.1, 69.0, 68.8])
+    notes = _segmented_events_to_hz(
+        _segment_midis([A4_MIDI, 69.3, 68.8, 69.4, 68.9, 69.2, 68.7, 69.1, 69.0, 68.8])
+    )
 
     assert len(notes) == 1
     assert notes[0].pitch == pytest.approx(_hz_from_midi(69), rel=0.02)
     assert _musicxml_note_names(notes) == ["A4"]
 
 
-def test_repeated_notes_with_short_gap_segment_into_two_attacks() -> None:
-    notes = _segmented_events(
-        [67.0] * 5 + [0.0] * 4 + [67.0] * 5,
+def test_segmentation_stage_splits_repeated_notes_when_gap_exceeds_tolerance() -> None:
+    segmented = _segment_midis(
+        [G4_MIDI] * 5 + [0.0] * SHORT_GAP_FRAMES + [G4_MIDI] * 5,
         config=NoteSegmentationConfig(max_gap_ms=40.0, min_note_ms=60.0),
+    )
+
+    assert (SHORT_GAP_FRAMES * FRAME_STEP_MS) > 40.0
+    assert len(segmented) == 2
+    assert segmented[0].end_time < segmented[1].start_time
+
+
+def test_repeated_notes_with_short_gap_segment_into_two_attacks() -> None:
+    notes = _segmented_events_to_hz(
+        _segment_midis(
+            [G4_MIDI] * 5 + [0.0] * SHORT_GAP_FRAMES + [G4_MIDI] * 5,
+            config=NoteSegmentationConfig(max_gap_ms=40.0, min_note_ms=60.0),
+        )
     )
 
     assert len(notes) == 2
     assert [round(69 + (12 * math.log2(note.pitch / 440.0))) for note in notes] == [67, 67]
-    assert notes[0].end_time < notes[1].start_time
+
+
+def test_quantization_stage_splits_barline_crossing_note_into_tied_events() -> None:
+    events = [
+        NoteEvent(start_time=1.5, end_time=2.5, pitch=_hz_from_midi(62), confidence=0.85),
+    ]
+
+    quantized = quantize_note_events(events, tempo_bpm=120.0, time_signature="4/4")
+
+    assert [event.duration_beats for event in quantized] == pytest.approx([3.0, 1.0, 1.0])
+    assert [event.tie_start for event in quantized if event.event_type == "note"] == [True, False]
+    assert [event.tie_stop for event in quantized if event.event_type == "note"] == [False, True]
 
 
 def test_note_crossing_barline_quantizes_into_tied_musicxml_notes() -> None:
@@ -122,13 +177,10 @@ def test_note_crossing_barline_quantizes_into_tied_musicxml_notes() -> None:
     parsed = converter.parseData(score_model_to_musicxml_string(score_model))
     parsed_notes = list(parsed.parts[0].recurse().notes)
 
-    assert [event.duration_beats for event in quantized] == pytest.approx([3.0, 1.0, 1.0])
-    assert [event.tie_start for event in quantized if event.event_type == "note"] == [True, False]
-    assert [event.tie_stop for event in quantized if event.event_type == "note"] == [False, True]
     assert [note.tie.type for note in parsed_notes] == ["start", "stop"]
 
 
-def test_pickup_measure_exports_as_anacrusis_that_music21_can_load() -> None:
+def test_export_stage_round_trips_pickup_measure_independently() -> None:
     score_model = ScoreModel(
         metadata=ScoreMetadata(tempo_bpm=96.0, time_signature="4/4"),
         measures=[
@@ -174,24 +226,39 @@ def test_ambiguous_tempo_defaults_to_safe_transcription_tempo(
 
     monkeypatch.setattr(
         "backend.transcription_service._detect_pitch_frames",
-        lambda _samples: _pitch_frames([60.0] * 6, confidence=0.95),
+        lambda _samples: _pitch_frames([C4_MIDI] * 6, confidence=0.95),
     )
 
     result = transcribe_audio_file(audio_path)
 
-    assert result.tempo_bpm == DEFAULT_TEMPO_BPM
-    assert "<sound tempo=\"120\"" in result.musicxml
+    assert DEFAULT_TEMPO_BPM == pytest.approx(120.0)
+    assert result.tempo_bpm == pytest.approx(DEFAULT_TEMPO_BPM)
+    assert f'<sound tempo="{int(DEFAULT_TEMPO_BPM)}"' in result.musicxml
     assert [note.nameWithOctave for note in converter.parseData(result.musicxml).parts[0].recurse().notes] == ["C4"]
 
 
 def test_octave_error_scenario_is_split_into_separate_notation_notes() -> None:
-    notes = _segmented_events(
-        [60.0] * 6 + [72.0] * 6,
-        config=NoteSegmentationConfig(min_note_ms=60.0),
+    notes = _segmented_events_to_hz(
+        _segment_midis(
+            [C4_MIDI] * 6 + [C5_MIDI] * 6,
+            config=NoteSegmentationConfig(min_note_ms=60.0),
+        )
     )
 
     assert len(notes) == 2
     assert _musicxml_note_names(notes) == ["C4", "C5"]
+
+
+def test_quantization_stage_preserves_low_confidence_values() -> None:
+    events = [
+        NoteEvent(start_time=0.0, end_time=0.5, pitch=_hz_from_midi(60), confidence=0.95),
+        NoteEvent(start_time=1.0, end_time=1.5, pitch=_hz_from_midi(62), confidence=0.1),
+        NoteEvent(start_time=2.0, end_time=2.5, pitch=_hz_from_midi(64), confidence=0.92),
+    ]
+
+    quantized = quantize_note_events(events, tempo_bpm=60.0)
+
+    assert [event.confidence for event in quantized if event.event_type == "note"] == pytest.approx([0.95, 0.1, 0.92])
 
 
 def test_low_confidence_pitch_region_is_preserved_and_exported() -> None:
@@ -201,9 +268,5 @@ def test_low_confidence_pitch_region_is_preserved_and_exported() -> None:
         NoteEvent(start_time=2.0, end_time=2.5, pitch=_hz_from_midi(64), confidence=0.92),
     ]
 
-    quantized = quantize_note_events(events, tempo_bpm=60.0)
-    note_confidences = [event.confidence for event in quantized if event.event_type == "note"]
-
     assert estimate_tempo(events) == pytest.approx(60.0)
-    assert note_confidences == pytest.approx([0.95, 0.1, 0.92])
     assert _musicxml_note_names(events, tempo_bpm=60.0) == ["C4", "D4", "E4"]
