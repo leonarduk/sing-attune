@@ -6,8 +6,26 @@ from .notation_policy import (
     NotationPolicy,
     V1_NOTATION_POLICY,
 )
+from .score_model import (
+    LyricSyllabic,
+    Measure,
+    NoteScoreEvent,
+    QuantizedEvent,
+    RestScoreEvent,
+    ScoreMetadata,
+    ScoreModel,
+    score_model_from_quantized_events,
+)
 
 __all__ = [
+    "LyricSyllabic",
+    "Measure",
+    "NoteScoreEvent",
+    "QuantizedEvent",
+    "RestScoreEvent",
+    "ScoreMetadata",
+    "ScoreModel",
+    "score_model_from_quantized_events",
     "CrossBarNotePolicy",
     "DottedVsTiedPolicy",
     "NotationPolicy",
