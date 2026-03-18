@@ -43,6 +43,13 @@ class TestSegmentNotes:
         assert abs(notes[1].pitch - 64.0) < 0.1
         assert notes[0].end_time <= notes[1].start_time
 
+    def test_short_adjacent_notes_are_filtered_instead_of_blended(self):
+        frames = _frames([60.0, 60.0, 64.0, 64.0])
+
+        notes = segment_notes(frames, NoteSegmentationConfig(min_note_ms=60.0))
+
+        assert notes == []
+
     def test_silence_gap_splits_repeated_note_reattack(self):
         frames = _frames([67.0] * 5 + [0.0] * 5 + [67.0] * 5)
 
@@ -56,6 +63,56 @@ class TestSegmentNotes:
         assert abs(notes[1].pitch - 67.0) < 0.1
         assert notes[0].end_time <= 0.12
         assert notes[1].start_time >= 0.18
+
+    def test_max_gap_ms_respects_floor_conversion(self):
+        frames = _frames([67.0, 67.0, 0.0, 0.0, 67.0, 67.0])
+
+        notes = segment_notes(
+            frames,
+            NoteSegmentationConfig(max_gap_ms=30.0, min_note_ms=40.0),
+        )
+
+        assert len(notes) == 2
+
+    def test_gap_between_different_pitches_is_not_bridged(self):
+        frames = _frames([60.0, 0.0, 64.0, 64.0])
+
+        notes = segment_notes(
+            frames,
+            NoteSegmentationConfig(max_gap_ms=20.0, min_note_ms=20.0),
+        )
+
+        assert len(notes) == 2
+        assert notes[0].pitch == 60.0
+        assert notes[1].pitch == 64.0
+
+    def test_zero_gap_tolerance_disables_gap_bridging(self):
+        frames = _frames([67.0, 0.0, 67.0, 67.0])
+
+        notes = segment_notes(
+            frames,
+            NoteSegmentationConfig(max_gap_ms=0.0, min_note_ms=20.0),
+        )
+
+        assert len(notes) == 2
+        assert notes[0].end_time <= notes[1].start_time
+
+    def test_single_frame_clip_does_not_emit_false_note_by_default(self):
+        frames = _frames([60.0])
+
+        notes = segment_notes(frames)
+
+        assert notes == []
+
+    def test_single_frame_note_can_be_retained_with_zero_minimum_duration(self):
+        frames = _frames([60.0])
+
+        notes = segment_notes(frames, NoteSegmentationConfig(min_note_ms=0.0))
+
+        assert len(notes) == 1
+        assert notes[0].start_time == 0.0
+        assert notes[0].end_time == 0.0
+        assert notes[0].pitch == 60.0
 
     def test_very_short_segments_are_suppressed(self):
         frames = _frames([60.0, 60.0, 0.0, 0.0, 0.0])

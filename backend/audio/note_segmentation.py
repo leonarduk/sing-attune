@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import floor
 from statistics import mean, median
 
 from backend.models.transcription import NoteEvent, PitchFrame
@@ -34,12 +35,6 @@ class _FrameSample:
 
 
 @dataclass
-class _GapRun:
-    start: int
-    end: int
-
-
-@dataclass
 class _ChangeRun:
     start: int
     end: int
@@ -47,20 +42,35 @@ class _ChangeRun:
 
 def _frame_step_ms(frames: list[PitchFrame]) -> float:
     if len(frames) < 2:
-        return DEFAULT_MIN_NOTE_MS
+        return 0.0
 
     deltas = [
         frames[idx + 1].time_ms - frames[idx].time_ms
         for idx in range(len(frames) - 1)
         if frames[idx + 1].time_ms > frames[idx].time_ms
     ]
-    return median(deltas) if deltas else DEFAULT_MIN_NOTE_MS
+    return median(deltas) if deltas else 0.0
 
 
 def _windowed_median(values: list[float], center_idx: int, radius: int) -> float:
-    start = max(0, center_idx - radius)
-    end = min(len(values), center_idx + radius + 1)
-    window = [value for value in values[start:end] if value > 0.0]
+    window = [values[center_idx]] if values[center_idx] > 0.0 else []
+
+    left_idx = center_idx - 1
+    while left_idx >= 0 and center_idx - left_idx <= radius:
+        value = values[left_idx]
+        if value <= 0.0:
+            break
+        window.append(value)
+        left_idx -= 1
+
+    right_idx = center_idx + 1
+    while right_idx < len(values) and right_idx - center_idx <= radius:
+        value = values[right_idx]
+        if value <= 0.0:
+            break
+        window.append(value)
+        right_idx += 1
+
     return median(window) if window else 0.0
 
 
@@ -83,8 +93,6 @@ def _bridge_short_gaps(samples: list[_FrameSample], max_gap_frames: int, pitch_t
 
         previous = samples[gap_start - 1]
         following = samples[gap_end]
-        if not previous.voiced or not following.voiced:
-            continue
         if abs(previous.midi - following.midi) > pitch_tolerance:
             continue
 
@@ -101,25 +109,14 @@ def _find_change_run(
     start_idx: int,
     reference_pitch: float,
     boundary_semitones: float,
-    required_frames: int,
 ) -> _ChangeRun | None:
-    streak_start: int | None = None
-    streak_count = 0
-
     for idx in range(start_idx, len(samples)):
         sample = samples[idx]
         if not sample.voiced:
             return None
 
         if abs(sample.midi - reference_pitch) >= boundary_semitones:
-            streak_start = idx if streak_start is None else streak_start
-            streak_count += 1
-            if streak_count >= required_frames:
-                return _ChangeRun(start=streak_start, end=idx + 1)
-            continue
-
-        streak_start = None
-        streak_count = 0
+            return _ChangeRun(start=idx, end=idx + 1)
 
     return None
 
@@ -134,8 +131,9 @@ def segment_notes(
 
     cfg = config or NoteSegmentationConfig()
     frame_step_ms = _frame_step_ms(frames)
-    max_gap_frames = max(1, round(cfg.max_gap_ms / frame_step_ms))
-    required_change_frames = max(1, round(cfg.min_note_ms / frame_step_ms))
+    max_gap_frames = 0
+    if frame_step_ms > 0.0:
+        max_gap_frames = max(0, floor(cfg.max_gap_ms / frame_step_ms))
     smoothing_radius = max(0, cfg.smoothing_window // 2)
 
     raw_samples = [
@@ -182,16 +180,12 @@ def segment_notes(
                 note_end,
                 reference_pitch,
                 cfg.boundary_semitones,
-                required_change_frames,
             )
             if change_run is None:
                 note_end += 1
                 continue
             note_end = change_run.start
             break
-
-        if note_end <= note_start:
-            note_end = note_start + 1
 
         note_samples = samples[note_start:note_end]
         voiced_samples = [sample for sample in note_samples if sample.voiced]
