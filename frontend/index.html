@@ -298,6 +298,55 @@
       background: #122542;
     }
     .mixer-panel.hidden { display: none; }
+
+    #transcription-panel {
+      border: 1px solid #1a5276;
+      border-radius: 6px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: #122542;
+    }
+    .transcription-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      color: #dce7ff;
+    }
+    #transcription-status { color: #a8b7cf; }
+    #transcription-file-input {
+      width: 100%;
+      font-size: 0.78rem;
+      color: var(--color-text-muted);
+    }
+    .transcription-meta, .transcription-error, .transcription-empty, .transcription-segments {
+      font-size: 0.75rem;
+      color: #b9cceb;
+    }
+    .transcription-error { color: #ffb4c2; display: none; }
+    .transcription-error.visible { display: block; }
+    .transcription-actions { display: flex; gap: 8px; }
+    .transcription-result.hidden { display: none; }
+    .transcription-summary {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px 10px;
+      font-size: 0.76rem;
+      color: #dce7ff;
+      margin-bottom: 8px;
+    }
+    .transcription-detail-block { margin-top: 8px; }
+    .transcription-detail-block h4 { font-size: 0.76rem; margin-bottom: 6px; color: #dce7ff; }
+    .transcription-table { width: 100%; border-collapse: collapse; font-size: 0.74rem; }
+    .transcription-table th, .transcription-table td {
+      text-align: left;
+      border-bottom: 1px solid rgba(26, 82, 118, 0.7);
+      padding: 4px 2px;
+    }
+    #transcription-download.disabled { opacity: 0.45; pointer-events: none; }
     .mixer-panel label {
       display: flex;
       justify-content: space-between;
@@ -823,6 +872,7 @@
       <div id="slot-pitch-overlay" class="feature-slot"></div>
       <div id="slot-audio-preflight" class="feature-slot"></div>
       <div id="slot-progress-history" class="feature-slot"></div>
+      <div id="slot-transcription" class="feature-slot"></div>
     </div>
 
   </div>
