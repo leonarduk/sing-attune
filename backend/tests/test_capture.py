@@ -36,14 +36,14 @@ class TestRingBuffer:
     def test_no_window_before_full(self):
         """Callback must not fire until a full window is accumulated."""
         fired = []
-        buf = RingBuffer(on_window=lambda w: fired.append(w.copy()))
+        buf = RingBuffer(on_window=lambda w, _: fired.append(w.copy()))
         buf.push(np.zeros(WINDOW_SIZE - 1, dtype=np.float32))
         assert len(fired) == 0
 
     def test_window_fires_on_completion(self):
         """Exactly one window fires when we push the final sample."""
         fired = []
-        buf = RingBuffer(on_window=lambda w: fired.append(w.copy()))
+        buf = RingBuffer(on_window=lambda w, _: fired.append(w.copy()))
         buf.push(np.zeros(WINDOW_SIZE, dtype=np.float32))
         assert len(fired) == 1
         assert fired[0].shape == (WINDOW_SIZE,)
@@ -51,7 +51,7 @@ class TestRingBuffer:
     def test_window_content_is_correct(self):
         """The window should contain the samples we pushed."""
         received = []
-        buf = RingBuffer(on_window=lambda w: received.append(w.copy()))
+        buf = RingBuffer(on_window=lambda w, _: received.append(w.copy()))
         samples = np.arange(WINDOW_SIZE, dtype=np.float32)
         buf.push(samples)
         assert np.allclose(received[0], samples)
@@ -59,7 +59,7 @@ class TestRingBuffer:
     def test_overlap_second_window(self):
         """After the first window, pushing HOP_SIZE more samples triggers a second window."""
         fired = []
-        buf = RingBuffer(on_window=lambda w: fired.append(w.copy()))
+        buf = RingBuffer(on_window=lambda w, _: fired.append(w.copy()))
         buf.push(np.ones(WINDOW_SIZE, dtype=np.float32))
         buf.push(np.full(HOP_SIZE, 2.0, dtype=np.float32))
         assert len(fired) == 2
@@ -67,7 +67,7 @@ class TestRingBuffer:
     def test_overlap_content(self):
         """Second window should contain the last HOP_SIZE samples of the first block."""
         fired = []
-        buf = RingBuffer(on_window=lambda w: fired.append(w.copy()))
+        buf = RingBuffer(on_window=lambda w, _: fired.append(w.copy()))
 
         first = np.ones(WINDOW_SIZE, dtype=np.float32)
         second_hop = np.full(HOP_SIZE, 9.0, dtype=np.float32)
@@ -81,7 +81,7 @@ class TestRingBuffer:
     def test_small_chunks(self):
         """Pushing in small chunks should accumulate correctly."""
         fired = []
-        buf = RingBuffer(on_window=lambda w: fired.append(w.copy()))
+        buf = RingBuffer(on_window=lambda w, _: fired.append(w.copy()))
         chunk = np.ones(64, dtype=np.float32)
         for _ in range(WINDOW_SIZE // 64):
             buf.push(chunk)
@@ -90,7 +90,7 @@ class TestRingBuffer:
     def test_large_push_multiple_windows(self):
         """A push larger than WINDOW_SIZE should produce multiple windows."""
         fired = []
-        buf = RingBuffer(on_window=lambda w: fired.append(w.copy()))
+        buf = RingBuffer(on_window=lambda w, _: fired.append(w.copy()))
         buf.push(np.zeros(WINDOW_SIZE + HOP_SIZE * 2, dtype=np.float32))
         assert len(fired) >= 2
 
@@ -115,7 +115,7 @@ class TestRingBuffer:
         expected_windows = max(0, (total_samples - WINDOW_SIZE) // HOP_SIZE + 1)
 
         fired = []
-        buf = RingBuffer(on_window=lambda w: fired.append(1))
+        buf = RingBuffer(on_window=lambda w, _: fired.append(1))
 
         # Push in HOP_SIZE blocks — exactly how sounddevice delivers frames
         samples_pushed = 0
@@ -138,7 +138,7 @@ class TestRingBuffer:
         expected_windows = max(0, (total_samples - WINDOW_SIZE) // HOP_SIZE + 1)
 
         fired = []
-        buf = RingBuffer(on_window=lambda w: fired.append(1))
+        buf = RingBuffer(on_window=lambda w, _: fired.append(1))
 
         # Push all at once — worst case for any naive implementation
         buf.push(np.zeros(total_samples, dtype=np.float32))
