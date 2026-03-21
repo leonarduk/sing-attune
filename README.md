@@ -168,6 +168,18 @@ Open http://localhost:5173
 
 API docs: http://localhost:8000/docs
 
+### Backend environment
+
+Copy `.env.example` to `.env` (or set environment variables another way) to override local backend settings:
+
+```powershell
+cp .env.example .env
+```
+
+- `CORS_ORIGINS` — comma-separated list of allowed frontend origins for FastAPI CORS.
+  Defaults to `http://localhost:5173,http://127.0.0.1:5173`.
+  Add your packaged Electron origin or LAN frontend URL here when needed.
+
 ---
 
 ## Tech stack

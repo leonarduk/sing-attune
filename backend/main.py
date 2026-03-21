@@ -4,6 +4,7 @@ Day 6: Playback state machine + real WebSocket pitch stream.
 """
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,21 @@ from .audio.pipeline import PlaybackPipeline, _CLIENT_QUEUE_MAXSIZE
 from .session.store import list_sessions, read_session, save_session
 from .transcription_service import TranscriptionError, transcribe_audio_file
 
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+
+def _parse_cors_origins(raw_origins: str | None) -> list[str]:
+    """Parse a comma-separated CORS origin list from env."""
+    if raw_origins is None:
+        return list(_DEFAULT_CORS_ORIGINS)
+
+    origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+    return origins or list(_DEFAULT_CORS_ORIGINS)
+
+
 app = FastAPI(
     title="sing-attune",
     description="MusicXML pitch tracking backend",
@@ -27,10 +43,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=_parse_cors_origins(os.getenv("CORS_ORIGINS")),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
