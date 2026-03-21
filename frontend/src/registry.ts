@@ -15,6 +15,7 @@ import { partMixerFeature } from './features/part-mixer/index';
 import { pitchOverlayFeature } from './features/pitch-overlay/index';
 import { audioPreflightFeature } from './features/audio-preflight/index';
 import { progressHistoryFeature } from './features/progress-history/index';
+import { transcriptionFeature } from './features/transcription/index';
 
 export type { Feature } from './feature-types';
 
@@ -26,4 +27,5 @@ export const features: Feature[] = [
   pitchOverlayFeature,
   audioPreflightFeature,
   progressHistoryFeature,
+  transcriptionFeature,
 ];

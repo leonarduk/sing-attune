@@ -10,6 +10,7 @@ Acceptance criteria from issue #3:
 
 import time
 import threading
+import builtins
 
 import numpy as np
 import pytest
@@ -26,6 +27,7 @@ from backend.audio.pitch import (
     midi_to_hz,
     resolve_engine_runtime,
     select_engine,
+    _infer_torchcrepe,
     _infer_pyin,
 )
 
@@ -295,6 +297,76 @@ class TestPitchPipeline:
         pipeline.stop()
         assert not errors
 
+    def test_frame_time_ms_uses_push_timestamp_not_worker_completion_time(self):
+        received = []
+        pipeline = PitchPipeline(engine=Engine.PYIN, on_frame=received.append)
+        release_worker = threading.Event()
+        push_time_ms = 12_345.0
+
+        pipeline._warmup = lambda: None  # type: ignore[method-assign]
+
+        def fake_infer(_window, capture_time_ms):
+            release_worker.wait(timeout=1.0)
+            return PitchFrame(time_ms=capture_time_ms, midi=69.0, confidence=0.95)
+
+        pipeline._infer = fake_infer  # type: ignore[method-assign]
+        pipeline.start()
+        pipeline.push(np.zeros(2048, dtype=np.float32), capture_time_ms=push_time_ms)
+        time.sleep(0.05)
+        release_worker.set()
+        time.sleep(0.05)
+        pipeline.stop()
+
+        assert len(received) == 1
+        assert received[0].time_ms == push_time_ms
+
+
+class TestThinBuildFallback:
+    def test_resolve_engine_without_torch_uses_pyin(self, monkeypatch):
+        from backend.audio import pitch as pitch_module
+
+        monkeypatch.setattr(pitch_module, "torch", None)
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+
+        result = pitch_module.resolve_engine_runtime()
+
+        assert result.engine == Engine.PYIN
+        assert result.device == "CPU"
+
+    def test_pipeline_falls_back_when_torch_missing(self, monkeypatch):
+        from backend.audio import pitch as pitch_module
+
+        monkeypatch.setattr(pitch_module, "torch", None)
+
+        pipeline = pitch_module.PitchPipeline(engine=Engine.TORCHCREPE)
+
+        assert pipeline.engine == Engine.PYIN
+        assert pipeline.device == "cpu"
+
+    def test_infer_torchcrepe_errors_when_torch_missing(self, monkeypatch):
+        from backend.audio import pitch as pitch_module
+
+        monkeypatch.setattr(pitch_module, "torch", None)
+
+        with pytest.raises(RuntimeError, match="PyTorch is not installed"):
+            _infer_torchcrepe(np.zeros(2048, dtype=np.float32), "cpu", 0.0)
+
+    def test_infer_torchcrepe_errors_when_torchcrepe_missing(self, monkeypatch):
+        from backend.audio import pitch as pitch_module
+
+        original_import = builtins.__import__
+
+        def _fake_import(name, *args, **kwargs):
+            if name == "torchcrepe":
+                raise ImportError("mocked missing torchcrepe")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(pitch_module, "torch", torch)
+        monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+        with pytest.raises(RuntimeError, match="torchcrepe is not installed"):
+            _infer_torchcrepe(np.zeros(2048, dtype=np.float32), "cpu", 0.0)
+
 
 # ── GPU tests (skipped if no CUDA) ────────────────────────────────────────────────
 
@@ -336,6 +408,6 @@ class TestTorchcrepeGPU:
 
     def test_pipeline_uses_gpu(self):
         pipeline = PitchPipeline(engine=Engine.TORCHCREPE)
-        assert pipeline.device.type == "cuda"
+        assert pipeline.device == "cuda"
         pipeline.start()
         pipeline.stop()

@@ -5,18 +5,19 @@ Day 6: Playback state machine + real WebSocket pitch stream.
 
 import asyncio
 from pathlib import Path
-from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 import uvicorn
 
 from .score.parser import parse_musicxml
 from .score.upload import persist_upload_to_temp
 from .audio.capture import list_input_devices, default_input_device_id
 from .audio.pipeline import PlaybackPipeline, _CLIENT_QUEUE_MAXSIZE
+from .models.session import SessionSaveRequest
 from .session.store import list_sessions, read_session, save_session
+from .transcription_service import TranscriptionError, transcribe_audio_file
 
 app = FastAPI(
     title="sing-attune",
@@ -247,31 +248,10 @@ async def pitch_stream(websocket: WebSocket) -> None:
 
 
 @app.post("/session/save")
-async def session_save(payload: dict[str, Any]) -> JSONResponse:
-    frames = payload.get("frames")
-    if not isinstance(frames, list):
-        raise HTTPException(status_code=400, detail="frames must be a list")
-
-    normalized_payload = {
-        "title": str(payload.get("title") or "Untitled"),
-        "part": str(payload.get("part") or "Unknown"),
-        "created_at": str(payload.get("created_at") or ""),
-        "frames": [
-            {
-                "t": float(frame.get("t", 0.0)),
-                "beat": float(frame.get("beat", 0.0)),
-                "midi": None if frame.get("midi") is None else float(frame.get("midi")),
-                "conf": float(frame.get("conf", 0.0)),
-                "expected_midi": None if frame.get("expected_midi") is None else float(frame.get("expected_midi")),
-                "measure": None if frame.get("measure") is None else int(frame.get("measure")),
-            }
-            for frame in frames
-            if isinstance(frame, dict)
-        ],
-    }
-
-    session_id, _ = save_session(normalized_payload)
-    return JSONResponse({"id": session_id, "frame_count": len(normalized_payload["frames"])})
+async def session_save(request: SessionSaveRequest) -> JSONResponse:
+    payload = request.model_dump(mode="json")
+    session_id, _ = save_session(payload)
+    return JSONResponse({"id": session_id, "frame_count": len(payload["frames"])})
 
 
 @app.get("/session/list")
@@ -289,6 +269,33 @@ async def session_get(session_id: str) -> JSONResponse:
 
 
 # ── Score upload ───────────────────────────────────────────────────────────────
+
+
+@app.post("/transcribe/audio")
+async def transcribe_audio(file: UploadFile = File(...)) -> Response:
+    suffix = Path(file.filename or "audio.wav").suffix.lower()
+    if suffix not in {".wav", ".wave"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{suffix}'. Upload a .wav audio file.",
+        )
+
+    tmp_path = await persist_upload_to_temp(file, suffix)
+
+    try:
+        transcription = transcribe_audio_file(tmp_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TranscriptionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    return Response(
+        content=transcription.musicxml,
+        media_type="application/vnd.recordare.musicxml+xml",
+        headers={"Content-Disposition": 'inline; filename="transcription.musicxml"'},
+    )
 
 
 @app.post("/score")

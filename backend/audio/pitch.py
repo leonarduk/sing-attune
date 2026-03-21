@@ -23,8 +23,14 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Callable
 
+from backend.models.transcription import PitchFrame
+
 import numpy as np
-import torch
+
+try:
+    import torch
+except ImportError:  # pragma: no cover - exercised by thin installer runtime
+    torch = None  # type: ignore[assignment]
 
 log = logging.getLogger(__name__)
 
@@ -57,11 +63,17 @@ class EngineRuntimeInfo:
     mode: str
 
 
+@dataclass(frozen=True)
+class QueuedWindow:
+    window: np.ndarray
+    capture_time_ms: float
+
+
 def resolve_engine_runtime(force_cpu: bool = False) -> EngineRuntimeInfo:
     """Resolve active engine from env + runtime override + CUDA availability."""
     env_engine = os.getenv("PITCH_ENGINE", "").strip().lower()
     env_forces_cpu = env_engine in {"aubio", "pyin", "cpu"}
-    cuda_available = torch.cuda.is_available()
+    cuda_available = bool(torch and torch.cuda.is_available())
 
     if force_cpu or env_forces_cpu:
         reason = "runtime override" if force_cpu else "PITCH_ENGINE"
@@ -73,7 +85,7 @@ def resolve_engine_runtime(force_cpu: bool = False) -> EngineRuntimeInfo:
             mode="forced_cpu",
         )
 
-    if cuda_available:
+    if cuda_available and torch is not None:
         device_name = torch.cuda.get_device_name(0)
         log.info("CUDA available — using torchcrepe (GPU: %s)", device_name)
         return EngineRuntimeInfo(
@@ -100,29 +112,6 @@ def select_engine() -> Engine:
     return resolve_engine_runtime().engine
 
 
-# ── Data types ─────────────────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True)
-class PitchFrame:
-    """
-    Single pitch detection result.
-
-    midi: float MIDI note number preserving cent detail.
-          e.g. 60.3 = C4 + 30 cents, 60.0 = C4 exactly.
-    """
-    time_ms: float
-    midi: float
-    confidence: float
-
-    def to_dict(self) -> dict:
-        return {
-            "time_ms": self.time_ms,
-            "midi": self.midi,
-            "confidence": self.confidence,
-        }
-
-
 # ── Conversion helpers ─────────────────────────────────────────────────────────
 
 
@@ -143,7 +132,7 @@ def midi_to_hz(midi: float) -> float:
 
 def _infer_torchcrepe(
     window: np.ndarray,
-    device: torch.device,
+    device,
     capture_time_ms: float,
 ) -> PitchFrame | None:
     """
@@ -153,6 +142,9 @@ def _infer_torchcrepe(
     that Viterbi requires (blocked by Application Control on some machines).
     Returns None if confidence < threshold or no pitch detected.
     """
+    if torch is None:
+        raise RuntimeError("PyTorch is not installed. Install full-fat build for torchcrepe")
+
     try:
         import torchcrepe
     except ImportError:
@@ -259,13 +251,12 @@ class PitchPipeline:
         on_frame: Callable[[PitchFrame], None] | None = None,
     ) -> None:
         self._engine = engine or select_engine()
+        if self._engine == Engine.TORCHCREPE and torch is None:
+            log.warning("torchcrepe engine requested but PyTorch is unavailable; falling back to pYIN")
+            self._engine = Engine.PYIN
         self._on_frame = on_frame
-        self._device = (
-            torch.device("cuda")
-            if self._engine == Engine.TORCHCREPE
-            else torch.device("cpu")
-        )
-        self._queue: queue.Queue[np.ndarray | None] = queue.Queue(
+        self._device = "cuda" if self._engine == Engine.TORCHCREPE else "cpu"
+        self._queue: queue.Queue[QueuedWindow | None] = queue.Queue(
             maxsize=self._QUEUE_MAXSIZE
         )
         self._thread: threading.Thread | None = None
@@ -289,10 +280,16 @@ class PitchPipeline:
             self._thread.join(timeout=2.0)
         log.info("PitchPipeline stopped (dropped frames: %d)", self._dropped_frames)
 
-    def push(self, window: np.ndarray) -> None:
+    def push(self, window: np.ndarray, capture_time_ms: float | None = None) -> None:
         """Non-blocking: drops window if worker is falling behind."""
+        queued_window = QueuedWindow(
+            window=window,
+            capture_time_ms=(
+                time.monotonic() * 1000.0 if capture_time_ms is None else capture_time_ms
+            ),
+        )
         try:
-            self._queue.put_nowait(window)
+            self._queue.put_nowait(queued_window)
         except queue.Full:
             self._dropped_frames += 1
 
@@ -301,7 +298,7 @@ class PitchPipeline:
         return self._engine
 
     @property
-    def device(self) -> torch.device:
+    def device(self) -> str:
         return self._device
 
     @property
@@ -311,13 +308,15 @@ class PitchPipeline:
     def _worker(self) -> None:
         self._warmup()
         while True:
-            window = self._queue.get()
-            if window is None:
+            queued_window = self._queue.get()
+            if queued_window is None:
                 break
-            capture_time_ms = time.monotonic() * 1000.0
             try:
                 t0 = time.monotonic()
-                frame = self._infer(window, capture_time_ms)
+                frame = self._infer(
+                    queued_window.window,
+                    queued_window.capture_time_ms,
+                )
                 elapsed_ms = (time.monotonic() - t0) * 1000.0
                 if elapsed_ms > 80.0:
                     log.warning("Inference took %.1f ms (target <80ms)", elapsed_ms)
