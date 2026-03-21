@@ -297,6 +297,29 @@ class TestPitchPipeline:
         pipeline.stop()
         assert not errors
 
+    def test_frame_time_ms_uses_push_timestamp_not_worker_completion_time(self):
+        received = []
+        pipeline = PitchPipeline(engine=Engine.PYIN, on_frame=received.append)
+        release_worker = threading.Event()
+        push_time_ms = 12_345.0
+
+        pipeline._warmup = lambda: None  # type: ignore[method-assign]
+
+        def fake_infer(_window, capture_time_ms):
+            release_worker.wait(timeout=1.0)
+            return PitchFrame(time_ms=capture_time_ms, midi=69.0, confidence=0.95)
+
+        pipeline._infer = fake_infer  # type: ignore[method-assign]
+        pipeline.start()
+        pipeline.push(np.zeros(2048, dtype=np.float32), capture_time_ms=push_time_ms)
+        time.sleep(0.05)
+        release_worker.set()
+        time.sleep(0.05)
+        pipeline.stop()
+
+        assert len(received) == 1
+        assert received[0].time_ms == push_time_ms
+
 
 class TestThinBuildFallback:
     def test_resolve_engine_without_torch_uses_pyin(self, monkeypatch):
