@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -112,7 +113,7 @@ class RingBuffer:
         self,
         window_size: int = WINDOW_SIZE,
         hop_size: int = HOP_SIZE,
-        on_window: Callable[[np.ndarray], None] | None = None,
+        on_window: Callable[[np.ndarray, float], None] | None = None,
     ) -> None:
         self._window_size = window_size
         self._hop_size = hop_size
@@ -132,7 +133,7 @@ class RingBuffer:
 
             if self._fill == self._window_size:
                 if self._on_window:
-                    self._on_window(self._buf.copy())
+                    self._on_window(self._buf.copy(), time.monotonic() * 1000.0)
                 # Slide by hop_size (50% overlap)
                 self._buf[: self._window_size - self._hop_size] = self._buf[
                     self._hop_size :
@@ -158,7 +159,7 @@ class MicCapture:
         self,
         device_id: int | None = None,
         sample_rate: int = SAMPLE_RATE,
-        on_window: Callable[[np.ndarray], None] | None = None,
+        on_window: Callable[[np.ndarray, float], None] | None = None,
     ) -> None:
         self._device_id = device_id  # None → sounddevice default
         self._sample_rate = sample_rate
