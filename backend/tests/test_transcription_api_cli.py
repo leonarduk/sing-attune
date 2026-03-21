@@ -15,13 +15,13 @@ from fastapi.testclient import TestClient
 from music21 import converter
 
 from backend.cli import main as cli_main
-from backend.models.transcription import PitchFrame
+from backend.models.transcription import NoteEvent, PitchFrame
+from backend.music import quantize_note_events
 from backend.transcription_service import (
     HOP_SIZE,
     SAMPLE_RATE,
     TranscriptionError,
     TranscriptionResult,
-    _build_quantized_spans,
     _frames_to_note_events,
     _load_wav_mono,
     _midi_to_pitch_name,
@@ -316,16 +316,19 @@ def test_frames_to_note_events_splits_on_pitch_jumps_and_discards_short_segments
     assert events[1].end_time > events[1].start_time
 
 
-def test_build_quantized_spans_and_pitch_name_cover_rest_and_validation() -> None:
-    rest_events = _build_quantized_spans(0.0, 0.0, 0.0, seconds_per_beat=0.5, is_rest=True)
-    assert rest_events == []
+def test_quantize_note_events_and_pitch_name_cover_rest_and_validation() -> None:
+    assert quantize_note_events([], tempo_bpm=120.0, time_signature="4/4") == []
 
-    note_events = _build_quantized_spans(1.5, 2.0, 2.0, seconds_per_beat=0.5, is_rest=False, pitch_name="A4", confidence=0.75)
+    quantized_events = quantize_note_events(
+        [NoteEvent(start_time=1.0, end_time=1.75, pitch=440.0, confidence=0.75)],
+        tempo_bpm=120.0,
+        time_signature="4/4",
+    )
 
-    assert [event.event_type for event in note_events] == ["note", "note"]
-    assert sum(event.duration_beats for event in note_events) == pytest.approx(1.5)
-    assert all(event.pitch == "A4" for event in note_events)
-    assert all(event.confidence == pytest.approx(0.75) for event in note_events)
+    assert [event.event_type for event in quantized_events] == ["rest", "note"]
+    assert [event.duration_beats for event in quantized_events] == pytest.approx([2.0, 1.5])
+    assert [event.pitch for event in quantized_events] == [None, "A4"]
+    assert [event.confidence for event in quantized_events] == pytest.approx([1.0, 0.75])
     assert _midi_to_pitch_name(440.0) == "A4"
 
     with pytest.raises(TranscriptionError, match="pitch must be positive"):

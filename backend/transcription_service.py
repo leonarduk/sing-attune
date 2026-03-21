@@ -12,7 +12,6 @@ import numpy as np
 from backend.audio.music_analysis import estimate_key, estimate_tempo
 from backend.audio.pitch import _infer_pyin, midi_to_hz
 from backend.models.transcription import NoteEvent, PitchFrame
-from backend.music.score_model import QuantizedEvent
 from backend.music import (
     ScoreMetadata,
     quantize_note_events,
@@ -208,52 +207,6 @@ def _append_note_event(
             confidence=average_confidence,
         )
     )
-
-
-
-def _build_quantized_spans(
-    duration_beats: float,
-    beat_anchor: float,
-    source_end_time: float,
-    *,
-    seconds_per_beat: float,
-    is_rest: bool,
-    pitch_name: str | None = None,
-    confidence: float = 1.0,
-):
-    """Deprecated compatibility helper retained for unit tests.
-
-    This mirrors the previous greedy decomposition used by the transcription
-    service; the production quantizer now lives in ``backend.music.quantization``.
-    """
-
-    if duration_beats <= 0:
-        return []
-
-    remaining = duration_beats
-    allowed = sorted({3.0, *V1_NOTATION_POLICY.allowed_durations_beats}, reverse=True)
-    events = []
-    consumed = 0.0
-
-    while remaining > 1e-9:
-        duration = next(candidate for candidate in allowed if candidate <= remaining + 1e-9)
-        start_time = (beat_anchor + consumed) * seconds_per_beat
-        end_time = start_time + (duration * seconds_per_beat)
-        events.append(
-            QuantizedEvent(
-                event_type="rest" if is_rest else "note",
-                duration_beats=duration,
-                source_start_time=start_time,
-                source_end_time=min(source_end_time, end_time),
-                confidence=confidence,
-                pitch=None if is_rest else pitch_name,
-            )
-        )
-        consumed += duration
-        remaining -= duration
-
-    return events
-
 
 def _midi_to_pitch_name(pitch_hz: float) -> str:
     try:
