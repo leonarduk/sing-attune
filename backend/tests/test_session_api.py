@@ -47,6 +47,15 @@ def test_session_save_list_get(monkeypatch) -> None:
         assert len(detail.json()["frames"]) == 1
 
 
+def test_session_save_openapi_schema_uses_typed_request_model() -> None:
+    """OpenAPI must expose SessionSaveRequest as the /session/save request body schema."""
+    from backend.main import app
+
+    schema = app.openapi()
+    request_body = schema["paths"]["/session/save"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    assert request_body == {"$ref": "#/components/schemas/SessionSaveRequest"}
+
+
 def test_session_get_missing_returns_404() -> None:
     from backend.main import app
     client = TestClient(app)
@@ -54,13 +63,14 @@ def test_session_get_missing_returns_404() -> None:
     assert response.status_code == 404
 
 
-def test_session_save_non_list_frames_returns_400(monkeypatch) -> None:
-    """POST /session/save with frames that is not a list must return 400."""
+def test_session_save_missing_frames_returns_422(monkeypatch) -> None:
+    """POST /session/save must reject payloads missing the required frames list."""
     with tempfile.TemporaryDirectory() as tmp:
         client = _client_with_tmp(monkeypatch, tmp)
-        response = client.post("/session/save", json={"frames": "not-a-list"})
-        assert response.status_code == 400
-        assert "frames must be a list" in response.json()["detail"]
+        response = client.post("/session/save", json={"title": "Song", "part": "Tenor"})
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert any(error["loc"] == ["body", "frames"] for error in detail)
 
 
 def test_session_save_null_optional_frame_fields(monkeypatch) -> None:
@@ -87,22 +97,22 @@ def test_session_save_null_optional_frame_fields(monkeypatch) -> None:
         assert frame["measure"] is None
 
 
-def test_session_save_non_dict_frame_items_filtered(monkeypatch) -> None:
-    """Non-dict items in the frames list must be silently dropped."""
+def test_session_save_conf_out_of_range_returns_422(monkeypatch) -> None:
+    """Frame confidence outside 0.0-1.0 must be rejected by request validation."""
     with tempfile.TemporaryDirectory() as tmp:
         client = _client_with_tmp(monkeypatch, tmp)
         payload = {
             "title": "Song",
             "part": "Alto",
             "frames": [
-                "bad-item",
-                {"t": 1.0, "beat": 0.5, "midi": 62.0, "conf": 0.8,
+                {"t": 1.0, "beat": 0.5, "midi": 62.0, "conf": 1.5,
                  "expected_midi": 62, "measure": 2},
             ],
         }
-        save = client.post("/session/save", json=payload)
-        assert save.status_code == 200
-        assert save.json()["frame_count"] == 1
+        response = client.post("/session/save", json=payload)
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert any(error["loc"] == ["body", "frames", 0, "conf"] for error in detail)
 
 
 # ── store.py unit tests ────────────────────────────────────────────────────────

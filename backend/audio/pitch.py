@@ -63,6 +63,12 @@ class EngineRuntimeInfo:
     mode: str
 
 
+@dataclass(frozen=True)
+class QueuedWindow:
+    window: np.ndarray
+    capture_time_ms: float
+
+
 def resolve_engine_runtime(force_cpu: bool = False) -> EngineRuntimeInfo:
     """Resolve active engine from env + runtime override + CUDA availability."""
     env_engine = os.getenv("PITCH_ENGINE", "").strip().lower()
@@ -250,7 +256,7 @@ class PitchPipeline:
             self._engine = Engine.PYIN
         self._on_frame = on_frame
         self._device = "cuda" if self._engine == Engine.TORCHCREPE else "cpu"
-        self._queue: queue.Queue[np.ndarray | None] = queue.Queue(
+        self._queue: queue.Queue[QueuedWindow | None] = queue.Queue(
             maxsize=self._QUEUE_MAXSIZE
         )
         self._thread: threading.Thread | None = None
@@ -274,10 +280,16 @@ class PitchPipeline:
             self._thread.join(timeout=2.0)
         log.info("PitchPipeline stopped (dropped frames: %d)", self._dropped_frames)
 
-    def push(self, window: np.ndarray) -> None:
+    def push(self, window: np.ndarray, capture_time_ms: float | None = None) -> None:
         """Non-blocking: drops window if worker is falling behind."""
+        queued_window = QueuedWindow(
+            window=window,
+            capture_time_ms=(
+                time.monotonic() * 1000.0 if capture_time_ms is None else capture_time_ms
+            ),
+        )
         try:
-            self._queue.put_nowait(window)
+            self._queue.put_nowait(queued_window)
         except queue.Full:
             self._dropped_frames += 1
 
@@ -296,13 +308,15 @@ class PitchPipeline:
     def _worker(self) -> None:
         self._warmup()
         while True:
-            window = self._queue.get()
-            if window is None:
+            queued_window = self._queue.get()
+            if queued_window is None:
                 break
-            capture_time_ms = time.monotonic() * 1000.0
             try:
                 t0 = time.monotonic()
-                frame = self._infer(window, capture_time_ms)
+                frame = self._infer(
+                    queued_window.window,
+                    queued_window.capture_time_ms,
+                )
                 elapsed_ms = (time.monotonic() - t0) * 1000.0
                 if elapsed_ms > 80.0:
                     log.warning("Inference took %.1f ms (target <80ms)", elapsed_ms)
