@@ -8,15 +8,15 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 import uvicorn
 
+from .audio.capture import default_input_device_id, list_input_devices
+from .audio.pipeline import _CLIENT_QUEUE_MAXSIZE, PlaybackPipeline
 from .score.parser import parse_musicxml
 from .score.upload import persist_upload_to_temp
-from .audio.capture import list_input_devices, default_input_device_id
-from .audio.pipeline import PlaybackPipeline, _CLIENT_QUEUE_MAXSIZE
 from .session.store import list_sessions, read_session, save_session
 from .transcription_service import TranscriptionError, transcribe_audio_file
 
@@ -27,7 +27,14 @@ _DEFAULT_CORS_ORIGINS = [
 
 
 def _parse_cors_origins(raw_origins: str | None) -> list[str]:
-    """Parse a comma-separated CORS origin list from env."""
+    """Parse the backend CORS origin list from env configuration."""
+    electron_mode = os.getenv("ELECTRON_MODE", "").strip().lower()
+    if electron_mode in {"1", "true", "yes", "on"}:
+        # Electron renderers can use non-HTTP origins such as file:// or app://.
+        # Starlette's allow_origins list does exact matching, so a wildcard fallback
+        # is the safest way to ensure packaged desktop builds can reach the backend.
+        return ["*"]
+
     if raw_origins is None:
         return list(_DEFAULT_CORS_ORIGINS)
 

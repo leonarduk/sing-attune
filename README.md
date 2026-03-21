@@ -176,9 +176,32 @@ Copy `.env.example` to `.env` (or set environment variables another way) to over
 cp .env.example .env
 ```
 
-- `CORS_ORIGINS` — comma-separated list of allowed frontend origins for FastAPI CORS.
-  Defaults to `http://localhost:5173,http://127.0.0.1:5173`.
-  Add your packaged Electron origin or LAN frontend URL here when needed.
+- `CORS_ORIGINS` — comma-separated list of allowed frontend origins for FastAPI CORS when running in a normal browser deployment.
+  Defaults to `http://localhost:5173,http://127.0.0.1:5173` when unset or blank.
+- `ELECTRON_MODE` — set to `1`, `true`, `yes`, or `on` for packaged Electron deployments.
+  When enabled, the backend uses `allow_origins=["*"]` so `file://` and `app://` renderer origins can reach the API safely without exact-origin matching.
+
+#### CORS configuration examples
+
+**Browser / LAN frontend**
+
+Use `CORS_ORIGINS` to allow one or more HTTP(S) frontend URLs:
+
+```dotenv
+CORS_ORIGINS=http://localhost:5173,https://rehearsal.example.com
+ELECTRON_MODE=
+```
+
+**Packaged Electron app**
+
+Set `ELECTRON_MODE` and leave `CORS_ORIGINS` blank. Electron renderers may load from `file://` or `app://`, so the backend switches to permissive CORS with `allow_origins=["*"]` instead of trying to match those non-HTTP origins explicitly:
+
+```dotenv
+CORS_ORIGINS=
+ELECTRON_MODE=1
+```
+
+If both variables are set, `ELECTRON_MODE` takes precedence so packaged desktop builds keep working.
 
 ---
 
