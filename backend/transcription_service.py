@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import wave
 
-import audioop
+import librosa
 import numpy as np
 
 from backend.audio.music_analysis import estimate_key, estimate_tempo
@@ -107,25 +107,30 @@ def _load_wav_mono(path: Path) -> np.ndarray:
     if sample_width not in {1, 2, 3, 4}:
         raise TranscriptionError(f"Unsupported WAV sample width: {sample_width * 8} bits")
 
-    if channels > 1:
-        raw_frames = audioop.tomono(raw_frames, sample_width, 0.5, 0.5)
-
-    if sample_rate != SAMPLE_RATE:
-        raw_frames, _ = audioop.ratecv(raw_frames, sample_width, 1, sample_rate, SAMPLE_RATE, None)
-
-    if sample_width == 3:
-        samples = _pcm24le_to_float32(raw_frames)
-    elif sample_width == 1:
-        samples = (np.frombuffer(raw_frames, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
-    elif sample_width == 2:
-        samples = np.frombuffer(raw_frames, dtype="<i2").astype(np.float32) / 32768.0
-    else:
-        samples = np.frombuffer(raw_frames, dtype="<i4").astype(np.float32) / 2147483648.0
-
+    samples = _pcm_bytes_to_float32(raw_frames, sample_width=sample_width)
     if len(samples) == 0:
         raise TranscriptionError("Audio file is empty")
 
+    if channels > 1:
+        usable = len(samples) - (len(samples) % channels)
+        samples = samples[:usable].reshape(-1, channels).mean(axis=1)
+
+    if sample_rate != SAMPLE_RATE:
+        samples = librosa.resample(samples, orig_sr=sample_rate, target_sr=SAMPLE_RATE)
+
     return np.clip(samples.astype(np.float32, copy=False), -1.0, 1.0)
+
+
+def _pcm_bytes_to_float32(raw_frames: bytes, *, sample_width: int) -> np.ndarray:
+    if sample_width == 3:
+        return _pcm24le_to_float32(raw_frames)
+    if sample_width == 1:
+        return (np.frombuffer(raw_frames, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+    if sample_width == 2:
+        return np.frombuffer(raw_frames, dtype="<i2").astype(np.float32) / 32768.0
+    if sample_width == 4:
+        return np.frombuffer(raw_frames, dtype="<i4").astype(np.float32) / 2147483648.0
+    raise TranscriptionError(f"Unsupported WAV sample width: {sample_width * 8} bits")
 
 
 def _pcm24le_to_float32(raw_frames: bytes) -> np.ndarray:

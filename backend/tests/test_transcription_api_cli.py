@@ -25,6 +25,7 @@ from backend.transcription_service import (
     _frames_to_note_events,
     _load_wav_mono,
     _midi_to_pitch_name,
+    _pcm_bytes_to_float32,
     transcribe_audio_file,
 )
 
@@ -295,6 +296,26 @@ def test_load_wav_mono_supports_24bit_pcm(tmp_path: Path) -> None:
     samples = _load_wav_mono(audio_path)
 
     assert samples == pytest.approx(np.array([0.0, 0.5, -0.5], dtype=np.float32), abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("sample_width", "raw_frames", "expected"),
+    [
+        (1, bytes((0, 128, 255)), np.array([-1.0, 0.0, 127.0 / 128.0], dtype=np.float32)),
+        (2, np.array([-32768, 0, 32767], dtype="<i2").tobytes(), np.array([-1.0, 0.0, 32767.0 / 32768.0], dtype=np.float32)),
+        (3, bytes((0, 0, 128, 0, 0, 0, 255, 255, 127)), np.array([-1.0, 0.0, 8388607.0 / 8388608.0], dtype=np.float32)),
+        (4, np.array([-(1 << 31), 0, (1 << 31) - 1], dtype="<i4").tobytes(), np.array([-1.0, 0.0, ((2**31 - 1) / float(2**31))], dtype=np.float32)),
+    ],
+)
+def test_pcm_bytes_to_float32_supports_all_sample_widths(
+    sample_width: int,
+    raw_frames: bytes,
+    expected: np.ndarray,
+) -> None:
+    samples = _pcm_bytes_to_float32(raw_frames, sample_width=sample_width)
+
+    assert samples.dtype == np.float32
+    assert samples == pytest.approx(expected, abs=1e-6)
 
 
 def test_frames_to_note_events_splits_on_pitch_jumps_and_discards_short_segments() -> None:
