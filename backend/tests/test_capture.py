@@ -10,9 +10,12 @@ Hardware tests require real audio devices and are skipped in CI automatically.
 Run locally with: uv run pytest -m hardware
 """
 
+import logging
 import threading
+from unittest.mock import PropertyMock, patch
 
 import numpy as np
+import sounddevice as sd
 import pytest
 from fastapi.testclient import TestClient
 
@@ -25,6 +28,7 @@ from backend.audio.capture import (
     default_input_device_id,
     AudioDevice,
     AudioSession,
+    MicCapture,
 )
 from backend.main import app
 
@@ -315,6 +319,22 @@ class TestAudioSession:
         assert session.device_id in {0, 1, 2, 3}
 
 
+class TestMicCapture:
+    def test_nonzero_status_logs_warning_and_tracks_xruns(self, caplog):
+        capture = MicCapture(on_window=lambda _window: None)
+        indata = np.zeros((HOP_SIZE, 1), dtype=np.float32)
+        status = sd.CallbackFlags()
+        status.input_overflow = True
+
+        with caplog.at_level(logging.WARNING, logger="backend.audio.capture"):
+            capture._callback(indata, HOP_SIZE, None, status)
+
+        assert capture.xrun_count == 1
+        assert "sounddevice input overflow" in caplog.text
+
+
+
+
 class TestAudioEngineEndpoint:
     @pytest.fixture
     def client(self):
@@ -332,6 +352,15 @@ class TestAudioEngineEndpoint:
         assert "cuda" in data
         assert "device" in data
         assert "force_cpu" in data
+        assert data["xrun_count"] == 0
+
+    def test_capture_status_endpoint(self, client):
+        with patch("backend.audio.pipeline.PlaybackPipeline.xrun_count", new_callable=PropertyMock) as mock_xrun_count:
+            mock_xrun_count.return_value = 4
+            resp = client.get("/audio/capture/status")
+
+        assert resp.status_code == 200
+        assert resp.json() == {"xrun_count": 4}
 
     def test_force_cpu_toggle(self, client):
         enabled = client.post("/audio/engine/force-cpu", params={"force_cpu": True}).json()
