@@ -346,23 +346,35 @@ def _make_callback_flags(**kwargs) -> _FakeCallbackFlags:
         self.input_overflow = kwargs.get("input_overflow", False)
         self.output_underflow = kwargs.get("output_underflow", False)
         self.priming_output = kwargs.get("priming_output", False)
+class _CallbackFlagsDouble:
+    """Minimal stand-in for ``sounddevice.CallbackFlags`` used by callback tests."""
+
+    def __init__(self, **flag_values) -> None:
+        self._flag_values = {
+            "input_overflow": False,
+            "output_underflow": False,
+            "priming_output": False,
+            **flag_values,
+        }
+        for attr, value in self._flag_values.items():
+            setattr(self, attr, value)
 
     def __bool__(self) -> bool:
-        return self.input_overflow or self.output_underflow or self.priming_output
+        return any(bool(value) for value in self._flag_values.values())
 
     def __str__(self) -> str:
-        messages = []
-        if self.input_overflow:
-            messages.append("input overflow")
-        if self.output_underflow:
-            messages.append("output underflow")
-        if self.priming_output:
-            messages.append("priming output")
-        return ", ".join(messages) if messages else "no status"
+        active = [
+            name.replace("_", " ")
+            for name, value in self._flag_values.items()
+            if value
+        ]
+        return ", ".join(active) if active else "no status"
 
 
-def _make_callback_flags(**kwargs) -> _FakeCallbackFlags:
-    return _FakeCallbackFlags(**kwargs)
+def _make_callback_flags(**kwargs) -> _CallbackFlagsDouble:
+    """Build a truthy callback-status object with the requested flags."""
+
+    return _CallbackFlagsDouble(**kwargs)
 
 
 class TestMicCapture:
