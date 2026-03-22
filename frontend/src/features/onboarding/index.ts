@@ -1,11 +1,17 @@
 import { type Feature } from '../../feature-types';
 
 const STORAGE_KEY = 'sing-attune.onboarding.dismissed.v1';
+const STORAGE_WARNING = '[onboarding] localStorage unavailable; showing the welcome guide each time.';
+
+function warnStorageFailure(error: unknown): void {
+  console.warn(STORAGE_WARNING, error);
+}
 
 function hasDismissedWelcome(): boolean {
   try {
     return window.localStorage.getItem(STORAGE_KEY) === 'true';
-  } catch {
+  } catch (error) {
+    warnStorageFailure(error);
     return false;
   }
 }
@@ -13,8 +19,8 @@ function hasDismissedWelcome(): boolean {
 function setDismissedWelcome(): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, 'true');
-  } catch {
-    // Ignore storage failures; the banner will simply reappear next time.
+  } catch (error) {
+    warnStorageFailure(error);
   }
 }
 
@@ -24,18 +30,15 @@ function mount(slot: HTMLElement): void {
       <div class="welcome-banner__content">
         <div>
           <p class="welcome-banner__eyebrow">Welcome to sing-attune</p>
-          <h2>Get from score upload to rehearsal in a few steps.</h2>
+          <h2>Load a score, select a part, then press Play to begin rehearsal.</h2>
           <p class="welcome-banner__summary">
-            Upload a MusicXML score (.xml or .mxl), pick your part, set up your microphone,
-            warm up if you want, then press Play and sing along while the pitch graph and
-            phrase summary show how closely you match the written notes.
+            Upload a MusicXML score, pick the line you want to sing, and start playback when you are ready.
           </p>
         </div>
         <ol class="welcome-banner__steps">
-          <li><strong>Upload score:</strong> browse for a MusicXML <code>.xml</code> or <code>.mxl</code> file.</li>
-          <li><strong>Set rehearsal controls:</strong> choose your part, optionally show all parts, and adjust transpose or tempo.</li>
-          <li><strong>Check audio:</strong> use headphones, choose a mic in Settings, and warm up before rehearsal.</li>
-          <li><strong>Review feedback:</strong> watch the pitch graph live, then use Phrase summary and Audio transcription after practice.</li>
+          <li><strong>Load a score:</strong> drop or browse for a MusicXML file.</li>
+          <li><strong>Select a part:</strong> choose the voice or instrument line you want to rehearse.</li>
+          <li><strong>Press Play:</strong> start rehearsal, sing along, and watch the live pitch feedback.</li>
         </ol>
       </div>
       <div class="welcome-banner__actions">
@@ -65,9 +68,11 @@ function mount(slot: HTMLElement): void {
     hideBanner();
   });
 
-  helpBtn?.addEventListener('click', () => {
-    showBanner();
-  });
+  if (helpBtn) {
+    helpBtn.addEventListener('click', () => {
+      showBanner();
+    });
+  }
 }
 
 export const onboardingFeature: Feature = {
