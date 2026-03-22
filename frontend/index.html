@@ -301,6 +301,36 @@
     }
     #part-select:disabled, #transpose-select:disabled { opacity: 0.4; cursor: default; }
 
+    .playback-options {
+      width: 100%;
+      border: 1px solid #1a5276;
+      border-radius: 6px;
+      background: #122542;
+      overflow: hidden;
+    }
+    .playback-options summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 8px 10px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--color-text);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .playback-options summary::-webkit-details-marker { display: none; }
+    .playback-options summary::after {
+      content: '▸';
+      color: var(--color-text-muted);
+      font-size: 0.9rem;
+    }
+    .playback-options[open] summary::after { content: '▾'; }
+    .playback-options__content {
+      display: grid;
+      gap: 10px;
+      padding: 0 10px 10px;
+    }
     .tempo-group {
       display: flex;
       align-items: center;
@@ -335,18 +365,79 @@
     }
     #session-range-summary { color: #a8b7cf; font-size: 0.75rem; }
 
-    #warmup-panel {
+    .warmup-panel {
       border: 1px solid #1a5276;
       border-radius: 6px;
       padding: 8px;
+      background: #122542;
+    }
+    .warmup-panel summary {
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #c5d9ff;
+      list-style: none;
+    }
+    .warmup-panel summary::-webkit-details-marker { display: none; }
+    .warmup-panel summary::before {
+      content: '▸';
+      display: inline-block;
+      margin-right: 6px;
+      transition: transform 0.15s ease;
+    }
+    .warmup-panel[open] summary::before { transform: rotate(90deg); }
+    .warmup-panel__body {
+      margin-top: 8px;
       display: flex;
       flex-direction: column;
       gap: 6px;
-      background: #122542;
     }
-    #warmup-panel label { font-size: 0.75rem; }
+    .warmup-panel label { font-size: 0.75rem; }
     #warmup-status { font-size: 0.75rem; color: #b9cceb; min-height: 1em; }
     #btn-start-rehearsal.hidden { display: none; }
+
+    .session-panel {
+      border: 1px solid #1a5276;
+      border-radius: 6px;
+      background: #122542;
+      overflow: hidden;
+    }
+    .session-panel__toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      width: 100%;
+      padding: 8px 10px;
+      border: 0;
+      background: transparent;
+      color: var(--color-text);
+      cursor: pointer;
+      font-size: 0.82rem;
+      font-weight: 600;
+      text-align: left;
+    }
+    .session-panel__toggle:hover {
+      background: rgba(26, 82, 118, 0.35);
+    }
+    .session-panel__caret {
+      color: #c5d9ff;
+      font-size: 0.78rem;
+    }
+    .session-panel__body {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 0 8px 8px;
+    }
+    .session-panel__body.hidden { display: none; }
+    .session-panel__body .transport-btn {
+      font-size: 0.8rem;
+    }
+    .session-panel__body #session-range-readout,
+    .session-panel__body #session-range-summary {
+      min-width: 0;
+    }
 
     .mixer-panel {
       border: 1px solid #1a5276;
@@ -433,6 +524,27 @@
     #btn-diagnostics.active {
       background: #1f6f8b;
       border-color: #53b7d8;
+    }
+
+    .toolbar-details {
+      border: 1px solid #1a5276;
+      border-radius: 6px;
+      background: #122542;
+      overflow: hidden;
+    }
+    .toolbar-details summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 8px 10px;
+      font-size: 0.8rem;
+      color: #dce7ff;
+      user-select: none;
+    }
+    .toolbar-details summary::-webkit-details-marker { display: none; }
+    .toolbar-details__content {
+      display: grid;
+      gap: 8px;
+      padding: 0 8px 8px;
     }
 
     #btn-settings { margin-top: auto; }
@@ -804,49 +916,76 @@
 
       <div class="toolbar-divider"></div>
 
-      <label for="transpose-select" title="Transpose the score to fit your range">Transpose:</label>
-      <select id="transpose-select" title="Transpose the score to fit your range">
-        <option value="-12">-12</option>
-        <option value="-11">-11</option>
-        <option value="-10">-10</option>
-        <option value="-9">-9</option>
-        <option value="-8">-8</option>
-        <option value="-7">-7</option>
-        <option value="-6">-6</option>
-        <option value="-5">-5</option>
-        <option value="-4">-4</option>
-        <option value="-3">-3</option>
-        <option value="-2">-2</option>
-        <option value="-1">-1</option>
-        <option value="0" selected>0</option>
-        <option value="1">+1</option>
-        <option value="2">+2</option>
-        <option value="3">+3</option>
-        <option value="4">+4</option>
-        <option value="5">+5</option>
-        <option value="6">+6</option>
-        <option value="7">+7</option>
-        <option value="8">+8</option>
-        <option value="9">+9</option>
-        <option value="10">+10</option>
-        <option value="11">+11</option>
-        <option value="12">+12</option>
-      </select>
+      <details id="playback-options-panel" class="playback-options">
+        <summary title="Show or hide playback tuning controls">Playback options</summary>
+        <div class="playback-options__content">
+          <label for="transpose-select" title="Transpose the score to fit your range">Transpose:</label>
+          <select id="transpose-select" title="Transpose the score to fit your range">
+            <option value="-12">-12</option>
+            <option value="-11">-11</option>
+            <option value="-10">-10</option>
+            <option value="-9">-9</option>
+            <option value="-8">-8</option>
+            <option value="-7">-7</option>
+            <option value="-6">-6</option>
+            <option value="-5">-5</option>
+            <option value="-4">-4</option>
+            <option value="-3">-3</option>
+            <option value="-2">-2</option>
+            <option value="-1">-1</option>
+            <option value="0" selected>0</option>
+            <option value="1">+1</option>
+            <option value="2">+2</option>
+            <option value="3">+3</option>
+            <option value="4">+4</option>
+            <option value="5">+5</option>
+            <option value="6">+6</option>
+            <option value="7">+7</option>
+            <option value="8">+8</option>
+            <option value="9">+9</option>
+            <option value="10">+10</option>
+            <option value="11">+11</option>
+            <option value="12">+12</option>
+          </select>
 
-      <div class="tempo-group">
-        <label for="tempo-slider" title="Adjust rehearsal tempo without changing pitch">Tempo:</label>
-        <input id="tempo-slider" type="range" min="50" max="125" value="100" step="5" title="Adjust rehearsal tempo without changing pitch" />
-        <span id="tempo-label">100%</span>
-      </div>
+          <div class="tempo-group">
+            <label for="tempo-slider" title="Adjust rehearsal tempo without changing pitch">Tempo:</label>
+            <input id="tempo-slider" type="range" min="50" max="125" value="100" step="5" title="Adjust rehearsal tempo without changing pitch" />
+            <span id="tempo-label">100%</span>
+          </div>
+        </div>
+      </details>
 
       <div id="slot-part-mixer" class="feature-slot"></div>
 
       <button id="btn-browse"   class="transport-btn" title="Upload a MusicXML score">Browse…</button>
-      <button id="btn-load-test-score" class="transport-btn" style="display:none;" title="Load a sample score for quick rehearsal setup">Load test score</button>
-      <button id="btn-diagnostics" class="transport-btn" title="Open detailed pitch diagnostics">Pitch diagnostics</button>
-      <button id="btn-session-record" class="transport-btn" title="Record this rehearsal session">⏺ Record session</button>
-      <button id="btn-session-review" class="transport-btn" title="Review your latest rehearsal recording">Review latest session</button>
-      <button id="btn-session-csv" class="transport-btn" title="Export your latest rehearsal data">Export latest CSV</button>
+      <details id="toolbar-tools" class="toolbar-details">
+        <summary title="Show developer and diagnostic tools">Tools ▾</summary>
+        <div class="toolbar-details__content">
+          <button id="btn-load-test-score" class="transport-btn" style="display:none;" title="Load a sample score for quick rehearsal setup">Load test score</button>
+          <button id="btn-diagnostics" class="transport-btn" title="Open detailed pitch diagnostics">Pitch diagnostics</button>
+        </div>
+      </details>
+      <div class="session-panel">
+        <button
+          id="btn-session-panel-toggle"
+          class="session-panel__toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="session-panel-body"
+          title="Show or hide session actions"
+        >
+          <span>Session</span>
+          <span id="session-panel-caret" class="session-panel__caret" aria-hidden="true">▾</span>
+        </button>
+        <div id="session-panel-body" class="session-panel__body hidden">
+          <button id="btn-session-record" class="transport-btn" title="Record this rehearsal session">⏺ Record session</button>
+          <button id="btn-session-review" class="transport-btn" title="Review your latest rehearsal recording">Review latest session</button>
+          <button id="btn-session-csv" class="transport-btn" title="Export your latest rehearsal data">Export latest CSV</button>
+          <span id="session-range-readout" aria-live="polite">Session range: —</span>
+          <span id="session-range-summary" aria-live="polite">Last session range: —</span>
+        </div>
+      </div>
       <button
         id="btn-settings"
         class="transport-btn"
@@ -860,21 +999,22 @@
 
       <span id="pitch-readout" aria-live="polite">Detected: —</span>
 
-      <div id="warmup-panel">
-        <label for="warmup-duration" title="Choose how long the warm-up lasts">Warm-up duration:</label>
-        <select id="warmup-duration" title="Choose how long the warm-up lasts">
-          <option value="60">1 min</option>
-          <option value="120" selected>2 min</option>
-          <option value="180">3 min</option>
-        </select>
-        <button id="btn-start-warmup" class="transport-btn" title="Start a guided warm-up before rehearsal">🎵 Start warm-up</button>
-        <button id="btn-stop-warmup" class="transport-btn hidden" title="Stop the warm-up session">⏹ Stop warm-up</button>
-        <button id="btn-start-rehearsal" class="transport-btn hidden" title="Begin rehearsal after warm-up">Start rehearsal</button>
-        <span id="warmup-status" aria-live="polite">Warm-up idle.</span>
-      </div>
+      <details id="warmup-panel" class="warmup-panel">
+        <summary>Warm-up</summary>
+        <div class="warmup-panel__body">
+          <label for="warmup-duration" title="Choose how long the warm-up lasts">Warm-up duration:</label>
+          <select id="warmup-duration" title="Choose how long the warm-up lasts">
+            <option value="60">1 min</option>
+            <option value="120" selected>2 min</option>
+            <option value="180">3 min</option>
+          </select>
+          <button id="btn-start-warmup" class="transport-btn" title="Start a guided warm-up before rehearsal">🎵 Start warm-up</button>
+          <button id="btn-stop-warmup" class="transport-btn hidden" title="Stop the warm-up session">⏹ Stop warm-up</button>
+          <button id="btn-start-rehearsal" class="transport-btn hidden" title="Begin rehearsal after warm-up">Start rehearsal</button>
+          <span id="warmup-status" aria-live="polite">Warm-up idle.</span>
+        </div>
+      </details>
 
-      <span id="session-range-readout" aria-live="polite">Session range: —</span>
-      <span id="session-range-summary" aria-live="polite">Last session range: —</span>
       <span id="score-info"></span>
     </div>
 

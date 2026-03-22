@@ -252,6 +252,9 @@ function mount(_slot: HTMLElement): void {
   const summaryClose     = document.getElementById('btn-summary-close')  as HTMLButtonElement;
   const summaryRetry     = document.getElementById('btn-summary-retry')  as HTMLButtonElement;
   const summaryReplay    = document.getElementById('btn-summary-replay') as HTMLButtonElement;
+  const btnSessionPanelToggle = document.getElementById('btn-session-panel-toggle') as HTMLButtonElement | null;
+  const sessionPanelBody = document.getElementById('session-panel-body') as HTMLDivElement | null;
+  const sessionPanelCaret = document.getElementById('session-panel-caret') as HTMLSpanElement | null;
   const btnSessionRecord = document.getElementById('btn-session-record') as HTMLButtonElement | null;
   const btnSessionReview = document.getElementById('btn-session-review') as HTMLButtonElement | null;
   const btnSessionCsv    = document.getElementById('btn-session-csv')    as HTMLButtonElement | null;
@@ -259,6 +262,14 @@ function mount(_slot: HTMLElement): void {
   setTransportButtonTooltip(btnPlay, 'Play (Space)');
   setTransportButtonTooltip(btnStop, 'Stop');
   setTransportButtonTooltip(btnRewind, 'Rewind (R)');
+  function setSessionPanelExpanded(expanded: boolean): void {
+    if (!btnSessionPanelToggle || !sessionPanelBody) return;
+    btnSessionPanelToggle.setAttribute('aria-expanded', String(expanded));
+    sessionPanelBody.classList.toggle('hidden', !expanded);
+    if (sessionPanelCaret) {
+      sessionPanelCaret.textContent = expanded ? '▴' : '▾';
+    }
+  }
 
   function syncSessionRecordingButton(): void {
     if (!btnSessionRecord) return;
@@ -523,6 +534,10 @@ function mount(_slot: HTMLElement): void {
 
   warningDismiss.addEventListener('click', () => { headphoneWarning.classList.add('hidden'); });
   summaryClose.addEventListener('click', () => { hideSessionSummary(); });
+  btnSessionPanelToggle?.addEventListener('click', () => {
+    const expanded = btnSessionPanelToggle.getAttribute('aria-expanded') === 'true';
+    setSessionPanelExpanded(!expanded);
+  });
 
   btnSessionRecord?.addEventListener('click', () => {
     setSessionRecordingEnabled(!isSessionRecordingEnabled());
@@ -599,6 +614,7 @@ function mount(_slot: HTMLElement): void {
   syncPauseButton();
   syncTransportButtons();
   syncSessionRecordingButton();
+  setSessionPanelExpanded(false);
 
   const onKeydown = (e: KeyboardEvent): void => {
     if (e.repeat) return;
