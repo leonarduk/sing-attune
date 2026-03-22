@@ -53,6 +53,10 @@ describe('transcriptionFeature', () => {
     const slot = document.getElementById('slot-transcription') as HTMLDivElement;
     transcriptionFeature.mount(slot);
 
+    expect(document.getElementById('transcription-status')?.textContent).toBe('Upload an audio file to begin transcription');
+    expect(document.body.textContent).toContain('Accepted formats: WAV (.wav, .wave), MP3 (.mp3).');
+    expect(document.body.textContent).toContain('Download the generated MusicXML and then load it in the main score panel for practice.');
+
     const input = document.getElementById('transcription-file-input') as HTMLInputElement;
     const file = new File(['wave'], 'take.wav', { type: 'audio/wav' });
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
@@ -68,6 +72,19 @@ describe('transcriptionFeature', () => {
     expect(document.getElementById('transcription-summary')?.textContent).toContain('Notes: 1');
     expect(createObjectUrlMock).toHaveBeenCalledTimes(1);
     expect((document.getElementById('transcription-download') as HTMLAnchorElement).download).toBe('transcription.musicxml');
+  });
+
+  it('keeps retry and download disabled before any transcription attempt', () => {
+    const slot = document.getElementById('slot-transcription') as HTMLDivElement;
+    transcriptionFeature.mount(slot);
+
+    const retryBtn = document.getElementById('btn-transcription-retry') as HTMLButtonElement;
+    const downloadLink = document.getElementById('transcription-download') as HTMLAnchorElement;
+
+    expect(retryBtn.disabled).toBe(true);
+    expect(downloadLink.classList.contains('disabled')).toBe(true);
+    expect(downloadLink.getAttribute('aria-disabled')).toBe('true');
+    expect(downloadLink.hasAttribute('href')).toBe(false);
   });
 
   it('shows a validation error for unsupported files before calling the backend', () => {

@@ -15,13 +15,13 @@ from fastapi.testclient import TestClient
 from music21 import converter
 
 from backend.cli import main as cli_main
-from backend.models.transcription import PitchFrame
+from backend.models.transcription import NoteEvent, PitchFrame
+from backend.music import quantize_note_events
 from backend.transcription_service import (
     HOP_SIZE,
     SAMPLE_RATE,
     TranscriptionError,
     TranscriptionResult,
-    _build_quantized_spans,
     _frames_to_note_events,
     _load_wav_mono,
     _midi_to_pitch_name,
@@ -337,17 +337,74 @@ def test_frames_to_note_events_splits_on_pitch_jumps_and_discards_short_segments
     assert events[1].end_time > events[1].start_time
 
 
-def test_build_quantized_spans_and_pitch_name_cover_rest_and_validation() -> None:
-    rest_events = _build_quantized_spans(0.0, 0.0, 0.0, seconds_per_beat=0.5, is_rest=True)
-    assert rest_events == []
+A4_HZ = 440.0
+B4_HZ = 493.88
+C5_HZ = 523.25
+D5_HZ = 587.33
 
-    note_events = _build_quantized_spans(1.5, 2.0, 2.0, seconds_per_beat=0.5, is_rest=False, pitch_name="A4", confidence=0.75)
 
-    assert [event.event_type for event in note_events] == ["note", "note"]
-    assert sum(event.duration_beats for event in note_events) == pytest.approx(1.5)
-    assert all(event.pitch == "A4" for event in note_events)
-    assert all(event.confidence == pytest.approx(0.75) for event in note_events)
-    assert _midi_to_pitch_name(440.0) == "A4"
+def test_quantize_note_events_covers_canonical_rest_and_tie_behavior() -> None:
+    """Validate canonical quantizer behavior for rests, ties, gaps, and dropped tiny events."""
+
+    assert quantize_note_events([], tempo_bpm=120.0, time_signature="4/4") == []
+
+    quantized_events = quantize_note_events(
+        [
+            NoteEvent(start_time=1.0, end_time=1.75, pitch=A4_HZ, confidence=0.75),
+            NoteEvent(start_time=2.0, end_time=2.5, pitch=B4_HZ, confidence=0.6),
+            NoteEvent(start_time=2.75, end_time=3.375, pitch=C5_HZ, confidence=0.9),
+            NoteEvent(start_time=4.0, end_time=4.0001, pitch=D5_HZ, confidence=0.2),
+        ],
+        tempo_bpm=120.0,
+        time_signature="4/4",
+    )
+
+    # The quantizer emits explicit rests for every beat gap between quantized note spans,
+    # so a note that lands on beat 2 is preceded by a two-beat rest from the measure start.
+    assert [event.event_type for event in quantized_events] == [
+        "rest",
+        "note",
+        "rest",
+        "note",
+        "rest",
+        "note",
+        "note",
+    ]
+    assert [event.duration_beats for event in quantized_events] == pytest.approx(
+        [2.0, 1.5, 0.5, 1.0, 0.5, 1.0, 0.25]
+    )
+    assert [event.pitch for event in quantized_events] == [None, "A4", None, "B4", None, "C5", "C5"]
+    assert [event.confidence for event in quantized_events] == pytest.approx(
+        [1.0, 0.75, 1.0, 0.6, 1.0, 0.9, 0.9]
+    )
+    assert [event.tie_start for event in quantized_events] == [False, False, False, False, False, True, False]
+    assert [event.tie_stop for event in quantized_events] == [False, False, False, False, False, False, True]
+
+
+def test_quantize_note_events_handles_off_grid_alignment_and_sequential_notes() -> None:
+    quantized_events = quantize_note_events(
+        [
+            NoteEvent(start_time=0.12, end_time=0.66, pitch=A4_HZ, confidence=0.8),
+            NoteEvent(start_time=0.88, end_time=1.42, pitch=B4_HZ, confidence=0.65),
+            NoteEvent(start_time=1.42, end_time=1.89, pitch=C5_HZ, confidence=0.55),
+        ],
+        tempo_bpm=120.0,
+        time_signature="4/4",
+    )
+
+    assert [event.event_type for event in quantized_events] == ["rest", "note", "rest", "note", "note"]
+    assert [event.duration_beats for event in quantized_events] == pytest.approx([0.25, 1.0, 0.5, 1.0, 1.0])
+    assert [event.pitch for event in quantized_events] == [None, "A4", None, "B4", "C5"]
+    assert [event.confidence for event in quantized_events] == pytest.approx([1.0, 0.8, 1.0, 0.65, 0.55])
+    assert all(not event.tie_start for event in quantized_events)
+    assert all(not event.tie_stop for event in quantized_events)
+
+
+def test_midi_to_pitch_name_validates_frequency_inputs() -> None:
+    assert _midi_to_pitch_name(A4_HZ) == "A4"
+
+    with pytest.raises(TranscriptionError, match="pitch must be positive"):
+        _midi_to_pitch_name(-1.0)
 
     with pytest.raises(TranscriptionError, match="pitch must be positive"):
         _midi_to_pitch_name(0.0)

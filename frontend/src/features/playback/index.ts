@@ -357,7 +357,7 @@ function mount(_slot: HTMLElement): void {
     if (engine.state === 'playing') return;
     const preflightReady = await ensureAudioPreflightReady();
     if (!preflightReady) {
-      setAppStatus('Audio setup is required before starting playback.', 'error');
+      setAppStatus("Click Play when you're ready to rehearse.");
       return;
     }
     headphoneWarning.classList.remove('hidden');
