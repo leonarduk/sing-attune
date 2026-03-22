@@ -43,4 +43,9 @@ describe('settings panel shell', () => {
     expect(indexHtml).toContain('<details>');
     expect(indexHtml).toContain('<summary>Advanced / Developer settings</summary>');
   });
+
+  it('keeps warm-up controls inside a collapsed disclosure by default', () => {
+    expect(indexHtml).toContain('<details id="warmup-panel" class="warmup-panel">');
+    expect(indexHtml).toContain('<summary>Warm-up</summary>');
+  });
 });
