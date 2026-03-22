@@ -9,6 +9,8 @@ import {
 
 const ACCEPTED_EXTENSIONS = ['.wav', '.wave', '.mp3'];
 const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
+const IDLE_STATUS_MESSAGE = 'Upload an audio file to begin transcription';
+const ACCEPTED_FORMATS_LABEL = 'Accepted formats: WAV (.wav, .wave), MP3 (.mp3).';
 
 let retryLatest: (() => void) | null = null;
 let currentObjectUrl: string | null = null;
@@ -56,6 +58,7 @@ function updateDownloadLink(linkEl: HTMLAnchorElement, musicxml: string): void {
   linkEl.download = 'transcription.musicxml';
   linkEl.removeAttribute('aria-disabled');
   linkEl.classList.remove('disabled');
+  linkEl.tabIndex = 0;
 }
 
 function renderResult(summaryEl: HTMLDivElement, detailsEl: HTMLDivElement, result: ParsedTranscriptionSummary): void {
@@ -100,10 +103,16 @@ function mount(slot: HTMLElement): void {
     <section id="transcription-panel" aria-label="Audio transcription panel">
       <div class="transcription-header">
         <strong>Audio transcription</strong>
-        <span id="transcription-status">Idle</span>
+        <span id="transcription-status">${IDLE_STATUS_MESSAGE}</span>
       </div>
+      <p class="transcription-description">
+        Upload an audio recording to convert it into a MusicXML score. Download the generated MusicXML and then load it in the main score panel for practice.
+      </p>
       <input id="transcription-file-input" type="file" accept=".wav,.wave,.mp3,audio/wav,audio/mpeg" />
-      <div id="transcription-file-meta" class="transcription-meta">No audio selected.</div>
+      <div class="transcription-meta">
+        <div>${ACCEPTED_FORMATS_LABEL}</div>
+        <div id="transcription-file-meta">No audio selected.</div>
+      </div>
       <div class="transcription-actions">
         <button id="btn-transcription-run" class="transport-btn" disabled>Transcribe</button>
         <button id="btn-transcription-retry" class="transport-btn" disabled>Retry</button>
@@ -132,8 +141,10 @@ function mount(slot: HTMLElement): void {
 
   const resetDownload = (): void => {
     downloadEl.removeAttribute('href');
+    downloadEl.removeAttribute('download');
     downloadEl.classList.add('disabled');
     downloadEl.setAttribute('aria-disabled', 'true');
+    downloadEl.tabIndex = -1;
   };
 
   const setBusy = (busy: boolean, message: string): void => {
@@ -226,6 +237,7 @@ function mount(slot: HTMLElement): void {
 
   syncSelectedFileUi();
   resetDownload();
+  statusEl.textContent = IDLE_STATUS_MESSAGE;
 }
 
 export const transcriptionFeature: Feature = {
