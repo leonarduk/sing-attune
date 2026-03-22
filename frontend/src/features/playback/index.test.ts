@@ -77,15 +77,20 @@ import { playbackFeature } from './index';
 function installPlaybackDom(): void {
   document.body.innerHTML = `
     <div id="slot-playback"></div>
-    <button id="btn-play">Play</button>
-    <button id="btn-pause">Pause</button>
-    <button id="btn-stop">Stop</button>
-    <button id="btn-rewind">Rewind</button>
+    <div class="transport-row" role="group" aria-label="Playback transport controls">
+      <button id="btn-play">&#9654;</button>
+      <button id="btn-pause">&#10074;&#10074;</button>
+      <button id="btn-stop">&#9632;</button>
+      <button id="btn-rewind">&#9198;</button>
+    </div>
     <div id="headphone-warning" class="hidden"></div>
     <button id="warning-dismiss">Dismiss</button>
     <button id="btn-summary-close">Close</button>
     <button id="btn-summary-retry">Retry</button>
     <button id="btn-summary-replay">Replay</button>
+    <button id="btn-session-panel-toggle" aria-expanded="false">Session</button>
+    <span id="session-panel-caret">▾</span>
+    <div id="session-panel-body" class="hidden"></div>
     <button id="btn-session-record">Record session</button>
     <button id="btn-session-review">Review latest session</button>
     <button id="btn-session-csv">Export latest CSV</button>
@@ -125,8 +130,27 @@ describe('playbackFeature', () => {
 
     const btnPause = document.getElementById('btn-pause') as HTMLButtonElement;
     expect(btnPause.disabled).toBe(true);
-    expect(btnPause.innerHTML).toContain('Pause');
-    expect(btnPause.innerHTML).not.toContain('(Space)');
+    expect(btnPause.textContent).toBe('❚❚');
+    expect(btnPause.title).toBe('Pause');
+    expect(btnPause.getAttribute('aria-label')).toBe('Pause');
+
+    playbackFeature.unmount!();
+  });
+
+  it('sets transport tooltips and aria-labels for icon buttons on mount', () => {
+    const slot = document.getElementById('slot-playback') as HTMLDivElement;
+    playbackFeature.mount(slot);
+
+    const btnPlay = document.getElementById('btn-play') as HTMLButtonElement;
+    const btnStop = document.getElementById('btn-stop') as HTMLButtonElement;
+    const btnRewind = document.getElementById('btn-rewind') as HTMLButtonElement;
+
+    expect(btnPlay.title).toBe('Play (Space)');
+    expect(btnPlay.getAttribute('aria-label')).toBe('Play (Space)');
+    expect(btnStop.title).toBe('Stop');
+    expect(btnStop.getAttribute('aria-label')).toBe('Stop');
+    expect(btnRewind.title).toBe('Rewind (R)');
+    expect(btnRewind.getAttribute('aria-label')).toBe('Rewind (R)');
 
     playbackFeature.unmount!();
   });
@@ -160,6 +184,42 @@ describe('playbackFeature', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(setAppStatusMock).toHaveBeenCalledWith("Click Play when you're ready to rehearse.");
+
+    playbackFeature.unmount!();
+  });
+
+  it('keeps the session panel collapsed by default on mount', () => {
+    const slot = document.getElementById('slot-playback') as HTMLDivElement;
+    playbackFeature.mount(slot);
+
+    const toggle = document.getElementById('btn-session-panel-toggle') as HTMLButtonElement;
+    const body = document.getElementById('session-panel-body') as HTMLDivElement;
+    const caret = document.getElementById('session-panel-caret') as HTMLSpanElement;
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(body.classList.contains('hidden')).toBe(true);
+    expect(caret.textContent).toBe('▾');
+
+    playbackFeature.unmount!();
+  });
+
+  it('toggles the session panel open and closed', () => {
+    const slot = document.getElementById('slot-playback') as HTMLDivElement;
+    playbackFeature.mount(slot);
+
+    const toggle = document.getElementById('btn-session-panel-toggle') as HTMLButtonElement;
+    const body = document.getElementById('session-panel-body') as HTMLDivElement;
+    const caret = document.getElementById('session-panel-caret') as HTMLSpanElement;
+
+    toggle.click();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(body.classList.contains('hidden')).toBe(false);
+    expect(caret.textContent).toBe('▴');
+
+    toggle.click();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(body.classList.contains('hidden')).toBe(true);
+    expect(caret.textContent).toBe('▾');
 
     playbackFeature.unmount!();
   });

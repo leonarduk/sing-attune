@@ -175,11 +175,13 @@ test('load -> play -> pause with mocked backend and no console errors', async ({
   await expect(page.locator('#btn-start-rehearsal')).toBeHidden();
 
   await expect(page.locator('#btn-pause')).toBeEnabled({ timeout: 5000 });
-  await expect(page.locator('#btn-pause')).toContainText('Pause');
+  // Button is now icon-only (❚❚); verify accessible label instead of visible text.
+  await expect(page.locator('#btn-pause')).toHaveAttribute('aria-label', /Pause/);
 
   await page.locator('#btn-pause').click();
 
-  await expect(page.locator('#btn-pause')).toContainText('Resume');
+  // After pausing the button switches to Resume icon (▶); label reflects this.
+  await expect(page.locator('#btn-pause')).toHaveAttribute('aria-label', /Resume/);
   await expect(page.locator('#btn-play')).toBeEnabled();
 
   // Filter out known-benign errors (pitch WebSocket fails without a backend process).

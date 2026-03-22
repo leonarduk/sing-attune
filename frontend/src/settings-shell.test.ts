@@ -39,8 +39,29 @@ describe('settings panel shell', () => {
     }
   });
 
+
+  it('moves developer actions into a dedicated tools dropdown in the sidebar', () => {
+    expect(indexHtml).toContain('<details id="toolbar-tools" class="toolbar-details">');
+    expect(indexHtml).toContain('<summary title="Show developer and diagnostic tools">Tools ▾</summary>');
+
+    const toolsIndex = indexHtml.indexOf('id="toolbar-tools"');
+    const diagnosticsIndex = indexHtml.indexOf('id="btn-diagnostics"');
+    const loadTestIndex = indexHtml.indexOf('id="btn-load-test-score"');
+    const settingsIndex = indexHtml.indexOf('id="btn-settings"');
+
+    expect(toolsIndex).toBeGreaterThanOrEqual(0);
+    expect(diagnosticsIndex).toBeGreaterThan(toolsIndex);
+    expect(loadTestIndex).toBeGreaterThan(toolsIndex);
+    expect(settingsIndex).toBeGreaterThan(diagnosticsIndex);
+  });
+
   it('keeps advanced controls inside a collapsible details section', () => {
     expect(indexHtml).toContain('<details>');
     expect(indexHtml).toContain('<summary>Advanced / Developer settings</summary>');
+  });
+
+  it('keeps warm-up controls inside a collapsed disclosure by default', () => {
+    expect(indexHtml).toContain('<details id="warmup-panel" class="warmup-panel">');
+    expect(indexHtml).toContain('<summary>Warm-up</summary>');
   });
 });

@@ -144,6 +144,25 @@ just --version
 
 ## Quick start
 
+### First rehearsal in the app
+
+1. Open the app and click **Browse…** or drag a score into the drop zone. Supported score files are **MusicXML `.xml`** and **compressed MusicXML `.mxl`**.
+2. Choose your **Part**, optionally enable **Show all parts**, and adjust **Transpose** or **Tempo** if the piece needs to sit differently for your voice.
+3. Open **Settings** to confirm the microphone device, confidence threshold, pitch trail length, and stable-note detection parameters.
+4. Use **Warm-up** if you want a guided setup period, then press **Play** and sing along with headphones on.
+5. Watch the **Pitch graph** during rehearsal, then review **Phrase summary**, **Practice history**, and **Audio transcription** when you finish.
+
+### Panel guide
+
+- **Pitch graph**: rolling 10-second graph of your detected pitch against the expected notes.
+- **Part mixer**: balance your selected part against the accompaniment when a score includes multiple parts.
+- **Warm-up**: quick timer and transition into rehearsal mode.
+- **Phrase summary**: short feedback after each completed phrase showing note-level accuracy.
+- **Practice history**: stores recent session summaries locally for comparison over time.
+- **Audio transcription**: upload MP3/WAV audio and export a generated MusicXML transcription.
+
+### Developer setup
+
 ```powershell
 git clone https://github.com/leonarduk/sing-attune
 cd sing-attune
