@@ -330,6 +330,49 @@
     #warmup-status { font-size: 0.75rem; color: #b9cceb; min-height: 1em; }
     #btn-start-rehearsal.hidden { display: none; }
 
+    .session-panel {
+      border: 1px solid #1a5276;
+      border-radius: 6px;
+      background: #122542;
+      overflow: hidden;
+    }
+    .session-panel__toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      width: 100%;
+      padding: 8px 10px;
+      border: 0;
+      background: transparent;
+      color: var(--color-text);
+      cursor: pointer;
+      font-size: 0.82rem;
+      font-weight: 600;
+      text-align: left;
+    }
+    .session-panel__toggle:hover {
+      background: rgba(26, 82, 118, 0.35);
+    }
+    .session-panel__caret {
+      color: #c5d9ff;
+      font-size: 0.78rem;
+    }
+    .session-panel__body {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 0 8px 8px;
+    }
+    .session-panel__body.hidden { display: none; }
+    .session-panel__body .transport-btn {
+      font-size: 0.8rem;
+    }
+    .session-panel__body #session-range-readout,
+    .session-panel__body #session-range-summary {
+      min-width: 0;
+    }
+
     .mixer-panel {
       border: 1px solid #1a5276;
       border-radius: 6px;
@@ -801,9 +844,26 @@
       <button id="btn-browse"   class="transport-btn" title="Upload a MusicXML score">Browse…</button>
       <button id="btn-load-test-score" class="transport-btn" style="display:none;" title="Load a sample score for quick rehearsal setup">Load test score</button>
       <button id="btn-diagnostics" class="transport-btn" title="Open detailed pitch diagnostics">Pitch diagnostics</button>
-      <button id="btn-session-record" class="transport-btn" title="Record this rehearsal session">⏺ Record session</button>
-      <button id="btn-session-review" class="transport-btn" title="Review your latest rehearsal recording">Review latest session</button>
-      <button id="btn-session-csv" class="transport-btn" title="Export your latest rehearsal data">Export latest CSV</button>
+      <div class="session-panel">
+        <button
+          id="btn-session-panel-toggle"
+          class="session-panel__toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="session-panel-body"
+          title="Show or hide session actions"
+        >
+          <span>Session</span>
+          <span id="session-panel-caret" class="session-panel__caret" aria-hidden="true">▾</span>
+        </button>
+        <div id="session-panel-body" class="session-panel__body hidden">
+          <button id="btn-session-record" class="transport-btn" title="Record this rehearsal session">⏺ Record session</button>
+          <button id="btn-session-review" class="transport-btn" title="Review your latest rehearsal recording">Review latest session</button>
+          <button id="btn-session-csv" class="transport-btn" title="Export your latest rehearsal data">Export latest CSV</button>
+          <span id="session-range-readout" aria-live="polite">Session range: —</span>
+          <span id="session-range-summary" aria-live="polite">Last session range: —</span>
+        </div>
+      </div>
       <button
         id="btn-settings"
         class="transport-btn"
@@ -830,8 +890,6 @@
         <span id="warmup-status" aria-live="polite">Warm-up idle.</span>
       </div>
 
-      <span id="session-range-readout" aria-live="polite">Session range: —</span>
-      <span id="session-range-summary" aria-live="polite">Last session range: —</span>
       <span id="score-info"></span>
     </div>
 
