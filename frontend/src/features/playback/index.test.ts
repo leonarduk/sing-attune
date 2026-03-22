@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const setAppStatusMock = vi.fn();
-const getSessionMock = vi.fn(() => null);
-const ensureAudioPreflightReadyMock = vi.fn(async () => true);
+import type { ScoreSession } from '../../services/score-session';
+import type { StatusTone } from '../../services/status';
+
+const setAppStatusMock = vi.fn<[message: string, tone?: StatusTone], void>();
+const getSessionMock = vi.fn<[], ScoreSession | null>(() => null);
+const ensureAudioPreflightReadyMock = vi.fn<[], Promise<boolean>>(async () => true);
 
 vi.mock('../../services/score-session', () => ({
   getSession: () => getSessionMock(),
@@ -12,7 +15,13 @@ vi.mock('../../services/score-session', () => ({
 }));
 
 vi.mock('../../services/status', () => ({
-  setAppStatus: (...args: unknown[]) => setAppStatusMock(...args),
+  setAppStatus: (message: string, tone?: StatusTone) => {
+    if (tone === undefined) {
+      setAppStatusMock(message);
+      return;
+    }
+    setAppStatusMock(message, tone);
+  },
 }));
 
 vi.mock('../../services/cursor-projection', () => ({
@@ -47,7 +56,7 @@ vi.mock('../../practice/session-summary', () => ({
 }));
 
 vi.mock('../../services/audio-preflight', () => ({
-  ensureAudioPreflightReady: (...args: unknown[]) => ensureAudioPreflightReadyMock(...args),
+  ensureAudioPreflightReady: () => ensureAudioPreflightReadyMock(),
 }));
 
 vi.mock('../../services/loop-region', () => ({
@@ -140,7 +149,7 @@ describe('playbackFeature', () => {
     getSessionMock.mockReturnValue({
       engine: { state: 'idle' },
       cursor: {},
-    });
+    } as ScoreSession);
 
     const slot = document.getElementById('slot-playback') as HTMLDivElement;
     playbackFeature.mount(slot);
