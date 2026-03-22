@@ -16,8 +16,6 @@ from .audio.capture import default_input_device_id, list_input_devices
 from .audio.pipeline import _CLIENT_QUEUE_MAXSIZE, PlaybackPipeline
 from .score.parser import parse_musicxml
 from .score.upload import persist_upload_to_temp
-from .audio.capture import list_input_devices, default_input_device_id
-from .audio.pipeline import PlaybackPipeline, _CLIENT_QUEUE_MAXSIZE
 from .models.session import SessionSaveRequest
 from .session.store import list_sessions, read_session, save_session
 from .transcription_service import TranscriptionError, transcribe_audio_file
