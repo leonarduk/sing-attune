@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const setAppStatusMock = vi.fn();
 const getSessionMock = vi.fn(() => null);
+const ensureAudioPreflightReadyMock = vi.fn(async () => true);
 
 vi.mock('../../services/score-session', () => ({
   getSession: () => getSessionMock(),
@@ -46,7 +47,7 @@ vi.mock('../../practice/session-summary', () => ({
 }));
 
 vi.mock('../../services/audio-preflight', () => ({
-  ensureAudioPreflightReady: vi.fn(async () => true),
+  ensureAudioPreflightReady: (...args: unknown[]) => ensureAudioPreflightReadyMock(...args),
 }));
 
 vi.mock('../../services/loop-region', () => ({
@@ -91,6 +92,8 @@ describe('playbackFeature', () => {
   beforeEach(() => {
     setAppStatusMock.mockReset();
     getSessionMock.mockReset();
+    ensureAudioPreflightReadyMock.mockReset();
+    ensureAudioPreflightReadyMock.mockResolvedValue(true);
     getSessionMock.mockReturnValue(null);
     installPlaybackDom();
   });
@@ -128,6 +131,26 @@ describe('playbackFeature', () => {
     btnPlay.click();
 
     expect(setAppStatusMock).toHaveBeenCalledWith('Load a score first', 'warning');
+
+    playbackFeature.unmount!();
+  });
+
+  it('shows a neutral status message when audio setup is cancelled', async () => {
+    ensureAudioPreflightReadyMock.mockResolvedValueOnce(false);
+    getSessionMock.mockReturnValue({
+      engine: { state: 'idle' },
+      cursor: {},
+    });
+
+    const slot = document.getElementById('slot-playback') as HTMLDivElement;
+    playbackFeature.mount(slot);
+
+    const btnPlay = document.getElementById('btn-play') as HTMLButtonElement;
+    btnPlay.click();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(setAppStatusMock).toHaveBeenCalledWith("Click Play when you're ready to rehearse.");
 
     playbackFeature.unmount!();
   });

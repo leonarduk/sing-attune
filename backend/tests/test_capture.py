@@ -320,20 +320,28 @@ class TestAudioSession:
 
 
 def _make_callback_flags(**kwargs) -> sd.CallbackFlags:
-    """Build a CallbackFlags with the given boolean flags set.
+    """Build a truthy callback-status object with the requested flags.
 
-    ``priming_output`` has no setter on ``sd.CallbackFlags`` (it is a
-    read-only property backed by the C flag ``paPrimingOutput = 16``).
-    Construct the object directly from the raw integer bitmask instead.
-    All other writable flags are applied via their normal setters.
+    ``sounddevice.CallbackFlags`` constructor support varies by PortAudio build,
+    but ``MicCapture._callback()`` only relies on truthiness plus attribute
+    access for the individual flag names. A lightweight test double keeps these
+    assertions stable across environments.
     """
-    # paPrimingOutput = 16; the other writable flags map through their setters
-    _PA_PRIMING_OUTPUT = 16
-    priming = kwargs.pop("priming_output", False)
-    flags = sd.CallbackFlags(_PA_PRIMING_OUTPUT if priming else 0)
-    for attr, value in kwargs.items():
-        setattr(flags, attr, value)
-    return flags
+
+    class _CallbackFlagsDouble:
+        def __init__(self, **flag_values):
+            self._flag_values = flag_values
+            for attr, value in flag_values.items():
+                setattr(self, attr, value)
+
+        def __bool__(self):
+            return any(bool(value) for value in self._flag_values.values())
+
+        def __str__(self):
+            active = [name.replace("_", " ") for name, value in self._flag_values.items() if value]
+            return ", ".join(active) if active else "no status"
+
+    return _CallbackFlagsDouble(**kwargs)  # type: ignore[return-value]
 
 
 class TestMicCapture:
