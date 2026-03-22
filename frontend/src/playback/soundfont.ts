@@ -26,6 +26,26 @@ export const SOUNDFONT_URLS = [
 ] as const;
 
 const SOUNDFONT_ASSIGNMENT_RE = /MIDI\.Soundfont\.[A-Za-z0-9_]+\s*=/;
+const HTML_CONTENT_TYPE_RE = /text\/html|application\/xhtml\+xml/i;
+
+type MirrorFailureType = 'html' | 'http' | 'network' | 'parse';
+
+type MirrorFailure = {
+  url: string;
+  status: number | null;
+  type: MirrorFailureType;
+  detail: string;
+};
+
+export class SoundfontLoadError extends Error {
+  readonly failures: MirrorFailure[];
+
+  constructor(message: string, failures: MirrorFailure[]) {
+    super(message);
+    this.name = 'SoundfontLoadError';
+    this.failures = failures;
+  }
+}
 
 // Flat-notation names matching the gleitz soundfont key names exactly.
 // MIDI 0 = C-1, MIDI 60 = C4, MIDI 69 = A4.
@@ -50,6 +70,24 @@ function noteNameToMidi(name: string): number {
   const idx = (NOTE_NAMES as readonly string[]).indexOf(note);
   if (idx < 0) return -1;
   return (octave + 1) * 12 + idx;
+}
+
+function classifyMirrorError(err: unknown): { type: MirrorFailureType; detail: string } {
+  if (err instanceof SoundfontLoadError) {
+    return { type: 'parse', detail: err.message };
+  }
+  if (err instanceof TypeError) {
+    return { type: 'network', detail: err.message };
+  }
+  const detail = err instanceof Error ? err.message : String(err);
+  if (/received HTML/i.test(detail)) return { type: 'html', detail };
+  if (/HTTP \d+/i.test(detail)) return { type: 'http', detail };
+  return { type: 'parse', detail };
+}
+
+function formatMirrorFailure(failure: MirrorFailure): string {
+  const status = failure.status === null ? 'no-response' : String(failure.status);
+  return `${failure.type} [${status}] ${failure.url} — ${failure.detail}`;
 }
 
 export class SoundfontLoader {
@@ -139,24 +177,49 @@ export class SoundfontLoader {
   static noteNameToMidi = noteNameToMidi;
 
   private static async loadNoteMapFromMirror(): Promise<Record<string, string>> {
-    let lastError: unknown;
+    const failures: MirrorFailure[] = [];
+
     for (const url of SOUNDFONT_URLS) {
+      let status: number | null = null;
       try {
         // Avoid serving a previously cached corrupt/truncated payload.
         const resp = await fetch(url, { cache: 'no-store' });
+        status = resp.status;
         if (!resp.ok) {
-          throw new Error(`Soundfont fetch failed (HTTP ${resp.status}): ${url}`);
+          throw new Error(`Soundfont fetch failed (HTTP ${resp.status})`);
         }
+
+        const contentType = resp.headers.get('content-type');
+        if (contentType && HTML_CONTENT_TYPE_RE.test(contentType)) {
+          throw new Error(`Could not parse soundfont JS: received HTML content-type (${contentType})`);
+        }
+
         const js = await resp.text();
+        if (SoundfontLoader.looksLikeHtml(js)) {
+          throw new Error('Could not parse soundfont JS: received HTML instead of soundfont data');
+        }
+
         return SoundfontLoader.parseNoteMap(js);
       } catch (err) {
-        lastError = err;
+        const { type, detail } = classifyMirrorError(err);
+        const failure = { url, status, type, detail } satisfies MirrorFailure;
+        failures.push(failure);
+        console.warn(
+          `[SoundfontLoader] mirror failed (${failure.type}, ${failure.status ?? 'no-response'}): ${failure.url} — ${failure.detail}`,
+        );
       }
     }
-    throw lastError ?? new Error('Soundfont fetch failed from all mirrors');
+
+    const message = `Failed to load soundfont from all mirrors: ${failures.map(formatMirrorFailure).join(' | ')}`;
+    console.error(`[SoundfontLoader] ${message}`);
+    throw new SoundfontLoadError(message, failures);
   }
 
   static parseNoteMap(js: string): Record<string, string> {
+    if (SoundfontLoader.looksLikeHtml(js)) {
+      throw new Error('Could not parse soundfont JS: received HTML instead of soundfont data');
+    }
+
     const assignment = js.match(SOUNDFONT_ASSIGNMENT_RE);
     if (!assignment || assignment.index === undefined) {
       throw new Error('Could not parse soundfont JS: no JSON object found');
@@ -196,11 +259,24 @@ export class SoundfontLoader {
       if (ch === '}') {
         depth -= 1;
         if (depth === 0) {
-          return JSON.parse(js.slice(objStart, i + 1)) as Record<string, string>;
+          const rawObject = js.slice(objStart, i + 1);
+          const sanitizedObject = rawObject.replace(/,\s*}/g, '}');
+          try {
+            return JSON.parse(sanitizedObject) as Record<string, string>;
+          } catch (err) {
+            const detail = err instanceof Error ? err.message : String(err);
+            throw new Error(`Could not parse soundfont JS: invalid JSON (${detail})`);
+          }
         }
       }
     }
 
-    throw new Error('Could not parse soundfont JS: no JSON object found');
+    throw new Error('Could not parse soundfont JS: truncated JSON object');
+  }
+
+  private static looksLikeHtml(js: string): boolean {
+    const trimmed = js.trimStart();
+    const normalizedPrefix = trimmed.slice(0, 32).toLowerCase();
+    return normalizedPrefix.startsWith('<!doctype') || normalizedPrefix.startsWith('<html');
   }
 }

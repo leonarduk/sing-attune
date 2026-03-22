@@ -358,6 +358,23 @@ def _make_callback_flags(**kwargs) -> sd.CallbackFlags:
             return ", ".join(active_flags) or "no flags"
 
     return _CallbackFlagsDouble(**kwargs)  # type: ignore[return-value]
+def _make_callback_flags(**kwargs):
+    """Build a lightweight status object compatible with MicCapture._callback."""
+
+    class _CallbackStatus:
+        def __init__(self, **values):
+            self._values = {name: bool(value) for name, value in values.items()}
+            for name, value in self._values.items():
+                setattr(self, name, value)
+
+        def __bool__(self):
+            return any(self._values.values())
+
+        def __str__(self):
+            enabled = [name.replace('_', ' ') for name, value in self._values.items() if value]
+            return ', '.join(enabled) if enabled else ''
+
+    return _CallbackStatus(**kwargs)
 class _FakeCallbackFlags:
     """Minimal stand-in for sounddevice.CallbackFlags used by callback tests."""
 
