@@ -86,6 +86,9 @@ function installPlaybackDom(): void {
     <button id="btn-summary-close">Close</button>
     <button id="btn-summary-retry">Retry</button>
     <button id="btn-summary-replay">Replay</button>
+    <button id="btn-session-panel-toggle" aria-expanded="false">Session</button>
+    <span id="session-panel-caret">▾</span>
+    <div id="session-panel-body" class="hidden"></div>
     <button id="btn-session-record">Record session</button>
     <button id="btn-session-review">Review latest session</button>
     <button id="btn-session-csv">Export latest CSV</button>
@@ -160,6 +163,42 @@ describe('playbackFeature', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(setAppStatusMock).toHaveBeenCalledWith("Click Play when you're ready to rehearse.");
+
+    playbackFeature.unmount!();
+  });
+
+  it('keeps the session panel collapsed by default on mount', () => {
+    const slot = document.getElementById('slot-playback') as HTMLDivElement;
+    playbackFeature.mount(slot);
+
+    const toggle = document.getElementById('btn-session-panel-toggle') as HTMLButtonElement;
+    const body = document.getElementById('session-panel-body') as HTMLDivElement;
+    const caret = document.getElementById('session-panel-caret') as HTMLSpanElement;
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(body.classList.contains('hidden')).toBe(true);
+    expect(caret.textContent).toBe('▾');
+
+    playbackFeature.unmount!();
+  });
+
+  it('toggles the session panel open and closed', () => {
+    const slot = document.getElementById('slot-playback') as HTMLDivElement;
+    playbackFeature.mount(slot);
+
+    const toggle = document.getElementById('btn-session-panel-toggle') as HTMLButtonElement;
+    const body = document.getElementById('session-panel-body') as HTMLDivElement;
+    const caret = document.getElementById('session-panel-caret') as HTMLSpanElement;
+
+    toggle.click();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(body.classList.contains('hidden')).toBe(false);
+    expect(caret.textContent).toBe('▴');
+
+    toggle.click();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(body.classList.contains('hidden')).toBe(true);
+    expect(caret.textContent).toBe('▾');
 
     playbackFeature.unmount!();
   });
