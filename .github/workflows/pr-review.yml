@@ -142,8 +142,9 @@ jobs:
         run: |
           git fetch origin ${{ github.base_ref }}
           DIFF=$(git diff origin/${{ github.base_ref }}...HEAD \
-            -- '*.py' '*.ts' '*.tsx' '*.js' '*.json' '*.md' '*.yaml' '*.yml' \
-            | head -c 30000)
+            -- '*.py' '*.ts' '*.tsx' '*.js' '*.jsx' '*.html' '*.css' \
+               '*.json' '*.md' '*.yaml' '*.yml' \
+            | head -c 50000)
           echo "diff<<EOF" >> $GITHUB_OUTPUT
           echo "$DIFF" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
