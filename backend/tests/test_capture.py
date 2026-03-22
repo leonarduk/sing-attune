@@ -318,35 +318,31 @@ class TestAudioSession:
         assert session.device_id in {0, 1, 2, 3}
 
 
-class _CallbackFlagsDouble:
-    """Minimal stand-in for ``sounddevice.CallbackFlags`` used by callback tests."""
+class _FakeCallbackFlags:
+    """Minimal stand-in for sounddevice.CallbackFlags used by callback tests."""
 
-    def __init__(self, **flag_values) -> None:
-        self._flag_values = {
-            "input_overflow": False,
-            "output_underflow": False,
-            "priming_output": False,
-            **flag_values,
-        }
-        for attr, value in self._flag_values.items():
-            setattr(self, attr, value)
+    def __init__(self, **kwargs) -> None:
+        self.input_overflow = bool(kwargs.get("input_overflow", False))
+        self.output_underflow = bool(kwargs.get("output_underflow", False))
+        self.priming_output = bool(kwargs.get("priming_output", False))
 
     def __bool__(self) -> bool:
-        return any(bool(value) for value in self._flag_values.values())
+        return self.input_overflow or self.output_underflow or self.priming_output
 
     def __str__(self) -> str:
-        active = [
-            name.replace("_", " ")
-            for name, value in self._flag_values.items()
-            if value
-        ]
-        return ", ".join(active) if active else "no status"
+        active = []
+        if self.input_overflow:
+            active.append("input overflow")
+        if self.output_underflow:
+            active.append("output underflow")
+        if self.priming_output:
+            active.append("priming output")
+        return ", ".join(active) or "no status"
 
 
-def _make_callback_flags(**kwargs) -> _CallbackFlagsDouble:
-    """Build a truthy callback-status object with the requested flags."""
-
-    return _CallbackFlagsDouble(**kwargs)
+def _make_callback_flags(**kwargs) -> _FakeCallbackFlags:
+    """Build a lightweight status object compatible with MicCapture._callback."""
+    return _FakeCallbackFlags(**kwargs)
 
 
 class TestMicCapture:
