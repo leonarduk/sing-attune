@@ -4,6 +4,7 @@ Day 6: Playback state machine + real WebSocket pitch stream.
 """
 
 import asyncio
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
@@ -19,19 +20,45 @@ from .models.session import SessionSaveRequest
 from .session.store import list_sessions, read_session, save_session
 from .transcription_service import TranscriptionError, transcribe_audio_file
 
+DEFAULT_CORS_ORIGINS = (
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+)
+
+
+def _parse_cors_origins(raw_value: str | None) -> list[str]:
+    if raw_value is None:
+        return list(DEFAULT_CORS_ORIGINS)
+
+    origins = [origin.strip() for origin in raw_value.split(",") if origin.strip()]
+    return origins or list(DEFAULT_CORS_ORIGINS)
+
+
+def _cors_settings_from_env() -> dict[str, bool | list[str]]:
+    if os.getenv("ELECTRON_MODE", "").strip() == "1":
+        return {
+            "allow_origins": ["*"],
+            "allow_credentials": False,
+        }
+
+    return {
+        "allow_origins": _parse_cors_origins(os.getenv("CORS_ORIGINS")),
+        "allow_credentials": True,
+    }
+
+
 app = FastAPI(
     title="sing-attune",
     description="MusicXML pitch tracking backend",
     version="0.2.0",
 )
 
+_cors_settings = _cors_settings_from_env()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    allow_credentials=True,
+    allow_origins=_cors_settings["allow_origins"],
+    allow_credentials=_cors_settings["allow_credentials"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
