@@ -25,12 +25,10 @@ const IGNORED_ERRORS = [
   '/ws/pitch',
 ];
 
-test('load -> play -> pause with mocked backend and no console errors', async ({ page }) => {
-  const consoleLogs: string[] = [];
-  page.on('console', (message) => {
-    consoleLogs.push(`[${message.type()}] ${message.text()}`);
-  });
+const DEFAULT_VIEWPORT = { width: 1440, height: 900 } as const;
+const MIN_SCORE_PANEL_HEIGHT_PX = 200;
 
+async function mockBackendRoutes(page: import('@playwright/test').Page): Promise<void> {
   // Match only exact-path backend routes to avoid intercepting Vite JS module requests.
   await page.route((url) => url.pathname === '/health', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ version: 'e2e' }) });
@@ -82,6 +80,45 @@ test('load -> play -> pause with mocked backend and no console errors', async ({
       body: 'MIDI.Soundfont.acoustic_grand_piano = {};',
     });
   });
+}
+
+async function waitForScoreLayoutToStabilize(page: import('@playwright/test').Page): Promise<void> {
+  await expect(page.locator('#score-container svg')).toBeVisible({ timeout: 15000 });
+  await page.waitForFunction(() => {
+    const scoreContainer = document.getElementById('score-container');
+    const svg = scoreContainer?.querySelector('svg');
+    if (!scoreContainer || !svg) return false;
+
+    const containerHeight = Math.round(scoreContainer.getBoundingClientRect().height);
+    const svgHeight = Math.round(svg.getBoundingClientRect().height);
+    if (containerHeight <= 0 || svgHeight <= 0) return false;
+
+    const state = (window as Window & {
+      __scoreLayoutState?: { containerHeight: number; svgHeight: number; stableFrames: number };
+    });
+    const previous = state.__scoreLayoutState;
+    const stable = previous
+      && previous.containerHeight === containerHeight
+      && previous.svgHeight === svgHeight;
+
+    state.__scoreLayoutState = {
+      containerHeight,
+      svgHeight,
+      stableFrames: stable ? previous.stableFrames + 1 : 1,
+    };
+
+    return state.__scoreLayoutState.stableFrames >= 3;
+  }, { timeout: 15000 });
+}
+
+test('load -> play -> pause with mocked backend and no console errors', async ({ page }) => {
+  const consoleLogs: string[] = [];
+  page.on('console', (message) => {
+    consoleLogs.push(`[${message.type()}] ${message.text()}`);
+  });
+
+  await mockBackendRoutes(page);
+  await page.setViewportSize(DEFAULT_VIEWPORT);
 
   await page.goto('/');
   await page.waitForLoadState('networkidle');
@@ -101,6 +138,19 @@ test('load -> play -> pause with mocked backend and no console errors', async ({
     for (const log of consoleLogs) console.error(log);
     throw e;
   }
+
+  await waitForScoreLayoutToStabilize(page);
+  const scoreHeights = await page.locator('main').evaluate((mainEl) => {
+    const scoreContainer = document.getElementById('score-container');
+    return {
+      main: Math.round(mainEl.getBoundingClientRect().height),
+      scoreContainer: scoreContainer ? Math.round(scoreContainer.getBoundingClientRect().height) : 0,
+    };
+  });
+  // 200px leaves enough vertical space for a readable stave and click/seek overlay,
+  // while still catching the regression where the score area collapsed to ~28px.
+  expect(scoreHeights.main).toBeGreaterThan(MIN_SCORE_PANEL_HEIGHT_PX);
+  expect(scoreHeights.scoreContainer).toBeGreaterThan(MIN_SCORE_PANEL_HEIGHT_PX);
 
   await expect(page.locator('#btn-play')).toBeEnabled();
 
@@ -137,4 +187,26 @@ test('load -> play -> pause with mocked backend and no console errors', async ({
     .filter(l => l.startsWith('[error]'))
     .filter(l => !IGNORED_ERRORS.some(known => l.includes(known)));
   expect(unexpectedErrors).toEqual([]);
+});
+
+
+test('score container stays usable after viewport shrink', async ({ page }) => {
+  await mockBackendRoutes(page);
+  await page.setViewportSize(DEFAULT_VIEWPORT);
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+
+  const fixturePath = path.resolve(__dirname, 'fixtures', 'minimal.xml');
+  await page.locator('#file-input').setInputFiles(fixturePath);
+  await expect(page.locator('#score-info')).toContainText('E2E Mock Score', { timeout: 15000 });
+  await waitForScoreLayoutToStabilize(page);
+
+  await page.setViewportSize({ width: 1280, height: 560 });
+  await waitForScoreLayoutToStabilize(page);
+
+  const scoreHeight = await page.locator('#score-container').evaluate((element) => {
+    return Math.round(element.getBoundingClientRect().height);
+  });
+
+  expect(scoreHeight).toBeGreaterThan(MIN_SCORE_PANEL_HEIGHT_PX);
 });
