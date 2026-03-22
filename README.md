@@ -287,9 +287,10 @@ The repository now includes `electron-builder` wiring for a Windows NSIS install
 
 ### Prerequisites
 
+- Windows Developer Mode enabled (`Settings -> System -> For developers -> Developer Mode -> On`) so electron-builder can extract signing tool symlinks.
 - Frontend dependencies installed (`cd frontend && npm install`)
 - Frontend build succeeds (`npm run build`)
-- PyInstaller backend bundle present at `dist/backend/` (this folder is copied into the installer as an app resource)
+- PyInstaller backend bundle present at `dist/sing-attune-backend/` (build via `just build-backend` before packaging)
 
 ### Build installer
 
@@ -306,7 +307,7 @@ cd frontend
 npm run package:win
 ```
 
-Installer artifacts are written to `frontend/release/`.
+Installer artifacts are written to `frontend/release/` (for example `sing-attune-x.y.z-x64-setup.exe`).
 
 **Current installer-size expectation:** ~200 MB once bundled with backend runtime dependencies (Tensor/PyTorch stack dominates size).
 
