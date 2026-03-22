@@ -330,6 +330,41 @@ class _CallbackFlagsDouble:
         }
         for attr, value in self._flag_values.items():
             setattr(self, attr, value)
+def _make_callback_flags(**kwargs) -> sd.CallbackFlags:
+    """Build a lightweight CallbackFlags-compatible test double.
+
+    The upstream ``sounddevice.CallbackFlags`` constructor and writable
+    properties vary across releases, so tests use a small object exposing the
+    boolean flag attributes and string representation that ``MicCapture`` reads.
+    """
+
+    class _CallbackFlagsDouble:
+        def __init__(self, **flag_values):
+            self.input_overflow = bool(flag_values.get("input_overflow", False))
+            self.output_underflow = bool(flag_values.get("output_underflow", False))
+            self.priming_output = bool(flag_values.get("priming_output", False))
+
+        def __bool__(self):
+            return self.input_overflow or self.output_underflow or self.priming_output
+
+        def __str__(self):
+            active_flags = []
+            if self.input_overflow:
+                active_flags.append("input overflow")
+            if self.output_underflow:
+                active_flags.append("output underflow")
+            if self.priming_output:
+                active_flags.append("priming output")
+            return ", ".join(active_flags) or "no flags"
+
+    return _CallbackFlagsDouble(**kwargs)  # type: ignore[return-value]
+class _FakeCallbackFlags:
+    """Minimal stand-in for sounddevice.CallbackFlags used by callback tests."""
+
+    def __init__(self, **kwargs) -> None:
+        self.input_overflow = kwargs.get("input_overflow", False)
+        self.output_underflow = kwargs.get("output_underflow", False)
+        self.priming_output = kwargs.get("priming_output", False)
 
     def __bool__(self) -> bool:
         return any(bool(value) for value in self._flag_values.values())
