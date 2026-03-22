@@ -142,8 +142,9 @@ jobs:
         run: |
           git fetch origin ${{ github.base_ref }}
           DIFF=$(git diff origin/${{ github.base_ref }}...HEAD \
-            -- '*.py' '*.ts' '*.tsx' '*.js' '*.json' '*.md' '*.yaml' '*.yml' \
-            | head -c 30000)
+            -- '*.py' '*.ts' '*.tsx' '*.js' '*.jsx' '*.html' '*.css' \
+               '*.json' '*.md' '*.yaml' '*.yml' \
+            | head -c 50000)
           echo "diff<<EOF" >> $GITHUB_OUTPUT
           echo "$DIFF" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -153,9 +154,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ISSUE_NUM=$(gh pr view ${{ github.event.pull_request.number }} --json body,title \
-            | jq -r '[.title, .body] | join(" ")' \
-            | grep -oP '(?<=#)\d+' | head -1)
+          # Extract issue number only from closing keywords to avoid picking up
+          # incidental #N references in the PR body (e.g. "see also #123").
+          ISSUE_NUM=$(gh pr view ${{ github.event.pull_request.number }} --json body \
+            -q .body \
+            | grep -ioP '(?:closes?|fixes?|resolves?)\s+#\K\d+' | head -1)
           if [ -n "$ISSUE_NUM" ]; then
             ISSUE_BODY=$(gh issue view "$ISSUE_NUM" --json body -q .body 2>/dev/null || echo "Issue not found")
           else
