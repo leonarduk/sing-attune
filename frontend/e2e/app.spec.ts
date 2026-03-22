@@ -102,6 +102,17 @@ test('load -> play -> pause with mocked backend and no console errors', async ({
     throw e;
   }
 
+  await expect(page.locator('#score-container svg')).toBeVisible({ timeout: 15000 });
+  const scoreHeights = await page.locator('main').evaluate((mainEl) => {
+    const scoreContainer = document.getElementById('score-container');
+    return {
+      main: Math.round(mainEl.getBoundingClientRect().height),
+      scoreContainer: scoreContainer ? Math.round(scoreContainer.getBoundingClientRect().height) : 0,
+    };
+  });
+  expect(scoreHeights.main).toBeGreaterThan(200);
+  expect(scoreHeights.scoreContainer).toBeGreaterThan(200);
+
   await expect(page.locator('#btn-play')).toBeEnabled();
 
   await page.locator('#btn-play').click();
