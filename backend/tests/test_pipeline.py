@@ -199,6 +199,20 @@ class TestPlaybackStateMachine:
         assert p.state == PlaybackState.PLAYING
 
 
+    def test_xrun_count_is_zero_without_capture(self):
+        assert self._pipeline().xrun_count == 0
+
+    def test_xrun_count_reads_from_capture(self):
+        p = self._pipeline()
+
+        class _CaptureWithXruns:
+            xrun_count = 7
+
+        p._capture = _CaptureWithXruns()
+
+        assert p.xrun_count == 7
+
+
 # ── set_force_cpu ─────────────────────────────────────────────────────────────
 
 

@@ -96,8 +96,14 @@ async def audio_engine() -> JSONResponse:
             "cuda": runtime.cuda,
             "device": runtime.device,
             "force_cpu": _pipeline.force_cpu,
+            "xrun_count": _pipeline.xrun_count,
         }
     )
+
+
+@app.get("/audio/capture/status")
+async def audio_capture_status() -> JSONResponse:
+    return JSONResponse({"xrun_count": _pipeline.xrun_count})
 
 
 @app.post("/audio/engine/force-cpu")
@@ -113,6 +119,7 @@ async def set_engine_force_cpu(force_cpu: bool) -> JSONResponse:
             "cuda": runtime.cuda,
             "device": runtime.device,
             "force_cpu": _pipeline.force_cpu,
+            "xrun_count": _pipeline.xrun_count,
         }
     )
 
