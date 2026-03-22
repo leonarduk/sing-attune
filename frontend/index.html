@@ -591,7 +591,7 @@
     /* ── Main score area ── */
     main {
       flex: 1 1 auto;
-      min-height: 0;
+      min-height: 220px;
       display: flex;
       flex-direction: column;
       position: relative;
@@ -667,8 +667,9 @@
 
     /* ── Progress history panel ── */
     #progress-history-panel {
-      flex-shrink: 0;
+      /* flex-shrink: 1 (default) — allows main to keep its min-height */
       max-height: 260px;
+      min-height: 0;
       overflow: auto;
       border-top: 1px solid var(--color-border);
       background: #0f1b33;
