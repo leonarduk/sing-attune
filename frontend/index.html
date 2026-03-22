@@ -264,6 +264,24 @@
     .transport-btn.active { background: #7b1d2a; border-color: #e94560; }
     .transport-btn:disabled { opacity: 0.4; cursor: default; }
 
+    .transport-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      width: 100%;
+    }
+
+    .transport-icon-btn {
+      width: 100%;
+      min-width: 0;
+      padding: 8px 0;
+      font-size: 1rem;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
     .toolbar-divider {
       width: 100%;
       height: 1px;
@@ -853,14 +871,39 @@
     </div>
   </div>
 
-  <div id="app-layout">
+    <div id="app-layout">
 
     <!-- Left toolbar: transport + part/tempo/transpose controls -->
     <div id="toolbar">
-      <button id="btn-play"   class="transport-btn" title="Play the rehearsal track" aria-keyshortcuts="Space">&#9654; Play (Space)</button>
-      <button id="btn-pause"  class="transport-btn" title="Pause or resume rehearsal" aria-keyshortcuts="Space">&#9646;&#9646; Pause (Space)</button>
-      <button id="btn-stop"   class="transport-btn" title="Stop rehearsal and reset the score">&#9646; Stop</button>
-      <button id="btn-rewind" class="transport-btn" title="Return to the start of the score">&#9664;&#9664; Rewind</button>
+      <div class="transport-row" aria-label="Playback transport controls" role="group">
+        <button
+          id="btn-play"
+          class="transport-btn transport-icon-btn"
+          title="Play (Space)"
+          aria-label="Play (Space)"
+          aria-keyshortcuts="Space"
+        >&#9654;</button>
+        <button
+          id="btn-pause"
+          class="transport-btn transport-icon-btn"
+          title="Pause"
+          aria-label="Pause"
+          aria-keyshortcuts="Space"
+        >&#10074;&#10074;</button>
+        <button
+          id="btn-stop"
+          class="transport-btn transport-icon-btn"
+          title="Stop"
+          aria-label="Stop"
+        >&#9632;</button>
+        <button
+          id="btn-rewind"
+          class="transport-btn transport-icon-btn"
+          title="Rewind (R)"
+          aria-label="Rewind (R)"
+          aria-keyshortcuts="R"
+        >&#9198;</button>
+      </div>
 
       <div class="toolbar-divider"></div>
 
