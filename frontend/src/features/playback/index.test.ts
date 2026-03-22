@@ -77,10 +77,12 @@ import { playbackFeature } from './index';
 function installPlaybackDom(): void {
   document.body.innerHTML = `
     <div id="slot-playback"></div>
-    <button id="btn-play">Play</button>
-    <button id="btn-pause">Pause</button>
-    <button id="btn-stop">Stop</button>
-    <button id="btn-rewind">Rewind</button>
+    <div class="transport-row" role="group" aria-label="Playback transport controls">
+      <button id="btn-play">&#9654;</button>
+      <button id="btn-pause">&#10074;&#10074;</button>
+      <button id="btn-stop">&#9632;</button>
+      <button id="btn-rewind">&#9198;</button>
+    </div>
     <div id="headphone-warning" class="hidden"></div>
     <button id="warning-dismiss">Dismiss</button>
     <button id="btn-summary-close">Close</button>
@@ -125,8 +127,27 @@ describe('playbackFeature', () => {
 
     const btnPause = document.getElementById('btn-pause') as HTMLButtonElement;
     expect(btnPause.disabled).toBe(true);
-    expect(btnPause.innerHTML).toContain('Pause');
-    expect(btnPause.innerHTML).not.toContain('(Space)');
+    expect(btnPause.textContent).toBe('❚❚');
+    expect(btnPause.title).toBe('Pause');
+    expect(btnPause.getAttribute('aria-label')).toBe('Pause');
+
+    playbackFeature.unmount!();
+  });
+
+  it('sets transport tooltips and aria-labels for icon buttons on mount', () => {
+    const slot = document.getElementById('slot-playback') as HTMLDivElement;
+    playbackFeature.mount(slot);
+
+    const btnPlay = document.getElementById('btn-play') as HTMLButtonElement;
+    const btnStop = document.getElementById('btn-stop') as HTMLButtonElement;
+    const btnRewind = document.getElementById('btn-rewind') as HTMLButtonElement;
+
+    expect(btnPlay.title).toBe('Play (Space)');
+    expect(btnPlay.getAttribute('aria-label')).toBe('Play (Space)');
+    expect(btnStop.title).toBe('Stop');
+    expect(btnStop.getAttribute('aria-label')).toBe('Stop');
+    expect(btnRewind.title).toBe('Rewind (R)');
+    expect(btnRewind.getAttribute('aria-label')).toBe('Rewind (R)');
 
     playbackFeature.unmount!();
   });

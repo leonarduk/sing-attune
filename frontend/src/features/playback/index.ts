@@ -210,21 +210,29 @@ function hideSessionSummary(): void {
   modal?.classList.add('hidden');
 }
 
+function setTransportButtonTooltip(button: HTMLButtonElement, label: string): void {
+  button.title = label;
+  button.setAttribute('aria-label', label);
+}
+
 function setPauseButtonState(button: HTMLButtonElement, state: 'idle' | 'playing' | 'paused'): void {
   if (state === 'playing') {
     button.disabled = false;
-    button.innerHTML = '&#9646;&#9646; Pause (Space)';
+    button.innerHTML = '&#10074;&#10074;';
+    setTransportButtonTooltip(button, 'Pause (Space)');
     return;
   }
 
   if (state === 'paused') {
     button.disabled = false;
-    button.innerHTML = '&#9654; Resume (Space)';
+    button.innerHTML = '&#9654;';
+    setTransportButtonTooltip(button, 'Resume (Space)');
     return;
   }
 
   button.disabled = true;
-  button.innerHTML = '&#9646;&#9646; Pause';
+  button.innerHTML = '&#10074;&#10074;';
+  setTransportButtonTooltip(button, 'Pause');
 }
 
 function isSessionSummaryOpen(): boolean {
@@ -248,6 +256,9 @@ function mount(_slot: HTMLElement): void {
   const btnSessionReview = document.getElementById('btn-session-review') as HTMLButtonElement | null;
   const btnSessionCsv    = document.getElementById('btn-session-csv')    as HTMLButtonElement | null;
 
+  setTransportButtonTooltip(btnPlay, 'Play (Space)');
+  setTransportButtonTooltip(btnStop, 'Stop');
+  setTransportButtonTooltip(btnRewind, 'Rewind (R)');
 
   function syncSessionRecordingButton(): void {
     if (!btnSessionRecord) return;
