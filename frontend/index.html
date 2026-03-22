@@ -283,6 +283,36 @@
     }
     #part-select:disabled, #transpose-select:disabled { opacity: 0.4; cursor: default; }
 
+    .playback-options {
+      width: 100%;
+      border: 1px solid #1a5276;
+      border-radius: 6px;
+      background: #122542;
+      overflow: hidden;
+    }
+    .playback-options summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 8px 10px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--color-text);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .playback-options summary::-webkit-details-marker { display: none; }
+    .playback-options summary::after {
+      content: '▸';
+      color: var(--color-text-muted);
+      font-size: 0.9rem;
+    }
+    .playback-options[open] summary::after { content: '▾'; }
+    .playback-options__content {
+      display: grid;
+      gap: 10px;
+      padding: 0 10px 10px;
+    }
     .tempo-group {
       display: flex;
       align-items: center;
@@ -761,40 +791,45 @@
 
       <div class="toolbar-divider"></div>
 
-      <label for="transpose-select" title="Transpose the score to fit your range">Transpose:</label>
-      <select id="transpose-select" title="Transpose the score to fit your range">
-        <option value="-12">-12</option>
-        <option value="-11">-11</option>
-        <option value="-10">-10</option>
-        <option value="-9">-9</option>
-        <option value="-8">-8</option>
-        <option value="-7">-7</option>
-        <option value="-6">-6</option>
-        <option value="-5">-5</option>
-        <option value="-4">-4</option>
-        <option value="-3">-3</option>
-        <option value="-2">-2</option>
-        <option value="-1">-1</option>
-        <option value="0" selected>0</option>
-        <option value="1">+1</option>
-        <option value="2">+2</option>
-        <option value="3">+3</option>
-        <option value="4">+4</option>
-        <option value="5">+5</option>
-        <option value="6">+6</option>
-        <option value="7">+7</option>
-        <option value="8">+8</option>
-        <option value="9">+9</option>
-        <option value="10">+10</option>
-        <option value="11">+11</option>
-        <option value="12">+12</option>
-      </select>
+      <details id="playback-options-panel" class="playback-options">
+        <summary title="Show or hide playback tuning controls">Playback options</summary>
+        <div class="playback-options__content">
+          <label for="transpose-select" title="Transpose the score to fit your range">Transpose:</label>
+          <select id="transpose-select" title="Transpose the score to fit your range">
+            <option value="-12">-12</option>
+            <option value="-11">-11</option>
+            <option value="-10">-10</option>
+            <option value="-9">-9</option>
+            <option value="-8">-8</option>
+            <option value="-7">-7</option>
+            <option value="-6">-6</option>
+            <option value="-5">-5</option>
+            <option value="-4">-4</option>
+            <option value="-3">-3</option>
+            <option value="-2">-2</option>
+            <option value="-1">-1</option>
+            <option value="0" selected>0</option>
+            <option value="1">+1</option>
+            <option value="2">+2</option>
+            <option value="3">+3</option>
+            <option value="4">+4</option>
+            <option value="5">+5</option>
+            <option value="6">+6</option>
+            <option value="7">+7</option>
+            <option value="8">+8</option>
+            <option value="9">+9</option>
+            <option value="10">+10</option>
+            <option value="11">+11</option>
+            <option value="12">+12</option>
+          </select>
 
-      <div class="tempo-group">
-        <label for="tempo-slider" title="Adjust rehearsal tempo without changing pitch">Tempo:</label>
-        <input id="tempo-slider" type="range" min="50" max="125" value="100" step="5" title="Adjust rehearsal tempo without changing pitch" />
-        <span id="tempo-label">100%</span>
-      </div>
+          <div class="tempo-group">
+            <label for="tempo-slider" title="Adjust rehearsal tempo without changing pitch">Tempo:</label>
+            <input id="tempo-slider" type="range" min="50" max="125" value="100" step="5" title="Adjust rehearsal tempo without changing pitch" />
+            <span id="tempo-label">100%</span>
+          </div>
+        </div>
+      </details>
 
       <div id="slot-part-mixer" class="feature-slot"></div>
 
