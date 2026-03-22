@@ -29,6 +29,8 @@ let monitorSource: MediaStreamAudioSourceNode | null = null;
 let monitorGain: GainNode | null = null;
 
 let meterFillEl: HTMLDivElement | null = null;
+let meterPeakLabelEl: HTMLSpanElement | null = null;
+let testResultEl: HTMLDivElement | null = null;
 let permissionStatusEl: HTMLDivElement | null = null;
 let deviceSelectEl: HTMLSelectElement | null = null;
 let latencyValueEl: HTMLSpanElement | null = null;
@@ -40,11 +42,89 @@ let voiceTypeSelectEl: HTMLSelectElement | null = null;
 let voiceTypeSuggestionEl: HTMLDivElement | null = null;
 let octaveCompCheckboxEl: HTMLInputElement | null = null;
 const METER_GAIN_SCALE = 140;
+const NO_SIGNAL_THRESHOLD = 0.015;
+const TOO_QUIET_THRESHOLD = 0.08;
+const TOO_LOUD_THRESHOLD = 0.75;
+
+type MicTestClassification = 'idle' | 'no-signal' | 'too-quiet' | 'good' | 'too-loud';
+
+interface MicTestSummary {
+  peakAmplitude: number;
+  peakDbfs: number | null;
+  classification: MicTestClassification;
+  message: string;
+}
 let removeEscapeListener: (() => void) | null = null;
 
 let selectedDeviceId: string | null = loadPreflightDeviceId();
 let selectedVoiceTypeId: string | null = loadUserVoiceTypeId();
 let isMonitoring = false;
+
+
+let currentMicTestPeak = 0;
+
+function amplitudeToDbfs(amplitude: number): number | null {
+  if (amplitude <= 0) return null;
+  return 20 * Math.log10(amplitude);
+}
+
+function formatDbfs(dbfs: number | null): string {
+  return dbfs === null ? '—∞ dBFS' : `${dbfs.toFixed(1)} dBFS`;
+}
+
+function classifyMicTestPeak(peakAmplitude: number): MicTestSummary {
+  const peakDbfs = amplitudeToDbfs(peakAmplitude);
+
+  if (peakAmplitude < NO_SIGNAL_THRESHOLD) {
+    return {
+      peakAmplitude,
+      peakDbfs,
+      classification: 'no-signal',
+      message: '✗ No signal detected — check your microphone selection, mute switch, or permissions.',
+    };
+  }
+
+  if (peakAmplitude < TOO_QUIET_THRESHOLD) {
+    return {
+      peakAmplitude,
+      peakDbfs,
+      classification: 'too-quiet',
+      message: `⚠️ Signal too quiet — peak ${formatDbfs(peakDbfs)}. Try moving closer to the mic or increasing input gain.`,
+    };
+  }
+
+  if (peakAmplitude > TOO_LOUD_THRESHOLD) {
+    return {
+      peakAmplitude,
+      peakDbfs,
+      classification: 'too-loud',
+      message: `⚠️ Signal too loud — peak ${formatDbfs(peakDbfs)}. Reduce input gain or move back slightly to avoid clipping.`,
+    };
+  }
+
+  return {
+    peakAmplitude,
+    peakDbfs,
+    classification: 'good',
+    message: `✓ Microphone detected — peak ${formatDbfs(peakDbfs)}. Level looks good for rehearsal.`,
+  };
+}
+
+function updateMicTestUi(summary: MicTestSummary): void {
+  if (meterPeakLabelEl) meterPeakLabelEl.textContent = `Peak: ${formatDbfs(summary.peakDbfs)}`;
+  if (!testResultEl) return;
+  testResultEl.dataset.state = summary.classification;
+  testResultEl.textContent = summary.message;
+}
+
+function resetMicTestUi(): void {
+  currentMicTestPeak = 0;
+  if (meterPeakLabelEl) meterPeakLabelEl.textContent = 'Peak: —∞ dBFS';
+  if (!testResultEl) return;
+  testResultEl.dataset.state = 'idle';
+  testResultEl.textContent = 'Run “Test my mic” and speak to see a pass/fail result and level guidance.';
+}
+
 
 function applyVoiceTypeSuggestionFromEvent(event: Event): void {
   const custom = event as CustomEvent<{ suggestedVoiceTypeId: string; message: string }>;
@@ -168,6 +248,7 @@ function resolveSelectedDeviceId(
 }
 
 function startLevelMeter(): void {
+  currentMicTestPeak = 0;
   if (!analyser || !meterFillEl) return;
   const data = new Uint8Array(analyser.fftSize);
   const runToken = meterRunToken;
@@ -182,7 +263,9 @@ function startLevelMeter(): void {
       const mag = Math.abs(centered);
       if (mag > peak) peak = mag;
     }
+    currentMicTestPeak = Math.max(currentMicTestPeak, peak);
     meterFillEl.style.width = `${Math.min(100, Math.round(peak * METER_GAIN_SCALE))}%`;
+    if (meterPeakLabelEl) meterPeakLabelEl.textContent = `Peak: ${formatDbfs(amplitudeToDbfs(currentMicTestPeak))}`;
     meterRaf = requestAnimationFrame(tick);
   };
 
@@ -271,10 +354,26 @@ async function toggleMicTest(): Promise<void> {
     monitorGain.connect(monitorCtx.destination);
   }
 
-  isMonitoring = !isMonitoring;
+  const nextMonitoringState = !isMonitoring;
+  if (nextMonitoringState) {
+    currentMicTestPeak = 0;
+    updateMicTestUi({
+      peakAmplitude: 0,
+      peakDbfs: null,
+      classification: 'idle',
+      message: 'Listening… speak into your mic, then stop the test to see the result.',
+    });
+  }
+
+  isMonitoring = nextMonitoringState;
   monitorGain.gain.value = isMonitoring ? 0.7 : 0;
   if (testButtonEl) testButtonEl.textContent = isMonitoring ? 'Stop mic test' : 'Test my mic';
+
+  if (!isMonitoring) {
+    updateMicTestUi(classifyMicTestPeak(currentMicTestPeak));
+  }
 }
+
 
 function buildModal(): HTMLDivElement {
   const wrapper = document.createElement('div');
@@ -293,7 +392,10 @@ function buildModal(): HTMLDivElement {
       </div>
       <div class="audio-preflight-row">
         <label>Input level</label>
-        <div class="audio-meter"><div id="audio-preflight-meter-fill" class="audio-meter-fill"></div></div>
+        <div>
+          <div class="audio-meter"><div id="audio-preflight-meter-fill" class="audio-meter-fill"></div></div>
+          <div id="audio-preflight-meter-peak" class="audio-meter-peak">Peak: —∞ dBFS</div>
+        </div>
       </div>
       <div class="audio-preflight-row">
         <label for="audio-preflight-latency">Latency compensation</label>
@@ -311,6 +413,7 @@ function buildModal(): HTMLDivElement {
         <label for="audio-preflight-octave-comp">Octave compensation</label>
         <input id="audio-preflight-octave-comp" type="checkbox" />
       </div>
+      <div id="audio-preflight-test-result" class="audio-preflight-test-result" data-state="idle">Run “Test my mic” and speak to see a pass/fail result and level guidance.</div>
       <div class="audio-preflight-tip">🎧 Use headphones to avoid feedback and mic bleed.</div>
       <div id="audio-preflight-error" class="audio-preflight-error" role="alert"></div>
       <div class="audio-preflight-actions">
@@ -362,7 +465,11 @@ function ensureStyles(): void {
     .audio-preflight-row { display: grid; grid-template-columns: 170px 1fr; gap: 10px; align-items: center; margin: 10px 0; }
     .audio-meter { height: 12px; border-radius: 10px; border: 1px solid #1a5276; background: #111; overflow: hidden; }
     .audio-meter-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #2ecc71, #f1c40f, #e74c3c); transition: width 60ms linear; }
-    .audio-preflight-tip, .audio-preflight-status { background: #15293f; border: 1px solid #254f75; border-radius: 6px; padding: 8px; margin: 10px 0; }
+    .audio-meter-peak { margin-top: 6px; font-size: 0.9rem; color: #b9d8ef; }
+    .audio-preflight-tip, .audio-preflight-status, .audio-preflight-test-result { background: #15293f; border: 1px solid #254f75; border-radius: 6px; padding: 8px; margin: 10px 0; }
+    .audio-preflight-test-result[data-state="good"] { border-color: #2ecc71; color: #b8f7cc; }
+    .audio-preflight-test-result[data-state="too-quiet"], .audio-preflight-test-result[data-state="too-loud"] { border-color: #f1c40f; color: #ffe7a0; }
+    .audio-preflight-test-result[data-state="no-signal"] { border-color: #e74c3c; color: #ffb0a8; }
     .audio-preflight-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
     .audio-preflight-error { min-height: 1.2em; color: #ff8e8e; }
     @media (max-width: 640px) {
@@ -399,6 +506,7 @@ async function openModal(): Promise<boolean> {
 }
 
 function closeModal(completed: boolean): void {
+  if (!isMonitoring) resetMicTestUi();
   if (modalEl) modalEl.classList.add('hidden');
   removeEscapeListener?.();
   monitorGain && (monitorGain.gain.value = 0);
@@ -419,6 +527,8 @@ function mount(_slot: HTMLElement): void {
   permissionStatusEl = document.getElementById('audio-preflight-permission') as HTMLDivElement;
   deviceSelectEl = document.getElementById('audio-preflight-device') as HTMLSelectElement;
   meterFillEl = document.getElementById('audio-preflight-meter-fill') as HTMLDivElement;
+  meterPeakLabelEl = document.getElementById('audio-preflight-meter-peak') as HTMLSpanElement;
+  testResultEl = document.getElementById('audio-preflight-test-result') as HTMLDivElement;
   latencyValueEl = document.getElementById('audio-preflight-latency-value') as HTMLSpanElement;
   errorEl = document.getElementById('audio-preflight-error') as HTMLDivElement;
   testButtonEl = document.getElementById('audio-preflight-test') as HTMLButtonElement;
@@ -428,6 +538,7 @@ function mount(_slot: HTMLElement): void {
   octaveCompCheckboxEl = document.getElementById('audio-preflight-octave-comp') as HTMLInputElement;
 
   requestButtonEl = document.getElementById('audio-preflight-request') as HTMLButtonElement;
+  resetMicTestUi();
   const cancelButton = document.getElementById('audio-preflight-cancel') as HTMLButtonElement;
   const closeButton = document.getElementById('audio-preflight-close') as HTMLButtonElement;
   const backdrop = modalEl.querySelector('.audio-preflight-backdrop') as HTMLDivElement;
@@ -496,6 +607,7 @@ function mount(_slot: HTMLElement): void {
 
 function unmount(): void {
   cleanupMonitor();
+  resetMicTestUi();
   removeEscapeListener?.();
   if (resolver) {
     resolver(false);
@@ -508,6 +620,8 @@ function unmount(): void {
 }
 
 export const __audioPreflightInternals = {
+  amplitudeToDbfs,
+  classifyMicTestPeak,
   resolveSelectedDeviceId,
   isPreflightModalHidden,
   openModal,

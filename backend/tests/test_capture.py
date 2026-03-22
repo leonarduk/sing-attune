@@ -320,20 +320,33 @@ class TestAudioSession:
 
 
 def _make_callback_flags(**kwargs) -> sd.CallbackFlags:
-    """Build a CallbackFlags with the given boolean flags set.
+    """Build a lightweight CallbackFlags-compatible test double.
 
-    ``priming_output`` has no setter on ``sd.CallbackFlags`` (it is a
-    read-only property backed by the C flag ``paPrimingOutput = 16``).
-    Construct the object directly from the raw integer bitmask instead.
-    All other writable flags are applied via their normal setters.
+    The upstream ``sounddevice.CallbackFlags`` constructor and writable
+    properties vary across releases, so tests use a small object exposing the
+    boolean flag attributes and string representation that ``MicCapture`` reads.
     """
-    # paPrimingOutput = 16; the other writable flags map through their setters
-    _PA_PRIMING_OUTPUT = 16
-    priming = kwargs.pop("priming_output", False)
-    flags = sd.CallbackFlags(_PA_PRIMING_OUTPUT if priming else 0)
-    for attr, value in kwargs.items():
-        setattr(flags, attr, value)
-    return flags
+
+    class _CallbackFlagsDouble:
+        def __init__(self, **flag_values):
+            self.input_overflow = bool(flag_values.get("input_overflow", False))
+            self.output_underflow = bool(flag_values.get("output_underflow", False))
+            self.priming_output = bool(flag_values.get("priming_output", False))
+
+        def __bool__(self):
+            return self.input_overflow or self.output_underflow or self.priming_output
+
+        def __str__(self):
+            active_flags = []
+            if self.input_overflow:
+                active_flags.append("input overflow")
+            if self.output_underflow:
+                active_flags.append("output underflow")
+            if self.priming_output:
+                active_flags.append("priming output")
+            return ", ".join(active_flags) or "no flags"
+
+    return _CallbackFlagsDouble(**kwargs)  # type: ignore[return-value]
 
 
 class TestMicCapture:

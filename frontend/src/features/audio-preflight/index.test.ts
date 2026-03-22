@@ -256,3 +256,53 @@ describe('audio preflight permission request button visibility', () => {
     audioPreflightFeature.unmount?.();
   });
 });
+
+
+describe('audio preflight mic test feedback', () => {
+  it('classifies silence as no signal', () => {
+    const summary = __audioPreflightInternals.classifyMicTestPeak(0.001);
+
+    expect(summary.classification).toBe('no-signal');
+    expect(summary.message).toContain('No signal detected');
+    expect(summary.peakDbfs).not.toBeNull();
+  });
+
+  it('classifies low input as too quiet', () => {
+    const summary = __audioPreflightInternals.classifyMicTestPeak(0.05);
+
+    expect(summary.classification).toBe('too-quiet');
+    expect(summary.message).toContain('Signal too quiet');
+  });
+
+  it('classifies healthy input as good', () => {
+    const summary = __audioPreflightInternals.classifyMicTestPeak(0.2);
+
+    expect(summary.classification).toBe('good');
+    expect(summary.message).toContain('Microphone detected');
+    expect(summary.message).toContain('dBFS');
+  });
+
+  it('classifies high input as too loud', () => {
+    const summary = __audioPreflightInternals.classifyMicTestPeak(0.9);
+
+    expect(summary.classification).toBe('too-loud');
+    expect(summary.message).toContain('Signal too loud');
+  });
+
+  it('renders the mic feedback panel with an idle prompt and peak label', () => {
+    document.body.innerHTML = '<div id="slot-audio-preflight"></div>';
+    installMediaMocks();
+    const slot = document.getElementById('slot-audio-preflight') as HTMLDivElement;
+    audioPreflightFeature.mount(slot);
+
+    const result = document.getElementById('audio-preflight-test-result') as HTMLDivElement;
+    const peak = document.getElementById('audio-preflight-meter-peak') as HTMLDivElement;
+
+    expect(result.dataset.state).toBe('idle');
+    expect(result.textContent).toContain('Run “Test my mic”');
+    expect(peak.textContent).toBe('Peak: —∞ dBFS');
+
+    audioPreflightFeature.unmount?.();
+  });
+});
+
