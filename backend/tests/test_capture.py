@@ -319,12 +319,28 @@ class TestAudioSession:
         assert session.device_id in {0, 1, 2, 3}
 
 
+def _make_callback_flags(**kwargs) -> sd.CallbackFlags:
+    """Build a CallbackFlags with the given boolean flags set.
+
+    ``priming_output`` has no setter on ``sd.CallbackFlags`` (it is a
+    read-only property backed by the C flag ``paPrimingOutput = 16``).
+    Construct the object directly from the raw integer bitmask instead.
+    All other writable flags are applied via their normal setters.
+    """
+    # paPrimingOutput = 16; the other writable flags map through their setters
+    _PA_PRIMING_OUTPUT = 16
+    priming = kwargs.pop("priming_output", False)
+    flags = sd.CallbackFlags(_PA_PRIMING_OUTPUT if priming else 0)
+    for attr, value in kwargs.items():
+        setattr(flags, attr, value)
+    return flags
+
+
 class TestMicCapture:
     def test_nonzero_status_logs_warning_and_tracks_xruns(self, caplog):
         capture = MicCapture(on_window=lambda _window: None)
         indata = np.zeros((HOP_SIZE, 1), dtype=np.float32)
-        status = sd.CallbackFlags()
-        status.input_overflow = True
+        status = _make_callback_flags(input_overflow=True)
 
         with caplog.at_level(logging.WARNING, logger="backend.audio.capture"):
             capture._callback(indata, HOP_SIZE, None, status)
@@ -333,17 +349,18 @@ class TestMicCapture:
         assert "sounddevice input overflow" in caplog.text
 
     @pytest.mark.parametrize(
-        ("status_attr", "log_level", "expected_message"),
+        ("status_kwargs", "log_level", "expected_message"),
         [
-            ("output_underflow", logging.WARNING, "sounddevice output underflow"),
-            ("priming_output", logging.DEBUG, "sounddevice priming output"),
+            ({"output_underflow": True}, logging.WARNING, "sounddevice output underflow"),
+            ({"priming_output": True}, logging.DEBUG, "sounddevice priming output"),
         ],
     )
-    def test_known_status_flags_are_logged(self, caplog, status_attr, log_level, expected_message):
+    def test_known_status_flags_are_logged(
+        self, caplog, status_kwargs, log_level, expected_message
+    ):
         capture = MicCapture(on_window=lambda _window: None)
         indata = np.zeros((HOP_SIZE, 1), dtype=np.float32)
-        status = sd.CallbackFlags()
-        setattr(status, status_attr, True)
+        status = _make_callback_flags(**status_kwargs)
 
         with caplog.at_level(logging.DEBUG, logger="backend.audio.capture"):
             capture._callback(indata, HOP_SIZE, None, status)
