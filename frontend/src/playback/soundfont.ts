@@ -141,9 +141,11 @@ export class SoundfontLoader {
   private static async loadNoteMapFromMirror(): Promise<Record<string, string>> {
     let lastError: unknown;
     for (const url of SOUNDFONT_URLS) {
+      let status: number | null = null;
       try {
         // Avoid serving a previously cached corrupt/truncated payload.
         const resp = await fetch(url, { cache: 'no-store' });
+        status = resp.status;
         if (!resp.ok) {
           throw new Error(`Soundfont fetch failed (HTTP ${resp.status}): ${url}`);
         }
@@ -151,12 +153,20 @@ export class SoundfontLoader {
         return SoundfontLoader.parseNoteMap(js);
       } catch (err) {
         lastError = err;
+        const details = err instanceof Error ? err.message : String(err);
+        const statusText = status === null ? 'no HTTP response' : `HTTP ${status}`;
+        console.warn(`[SoundfontLoader] mirror failed (${statusText}): ${url} — ${details}`);
       }
     }
     throw lastError ?? new Error('Soundfont fetch failed from all mirrors');
   }
 
   static parseNoteMap(js: string): Record<string, string> {
+    const trimmed = js.trimStart();
+    const normalizedPrefix = trimmed.slice(0, 32).toLowerCase();
+    if (normalizedPrefix.startsWith('<!doctype') || normalizedPrefix.startsWith('<html')) {
+      throw new Error('Could not parse soundfont JS: received HTML instead of soundfont data');
+    }
     const assignment = js.match(SOUNDFONT_ASSIGNMENT_RE);
     if (!assignment || assignment.index === undefined) {
       throw new Error('Could not parse soundfont JS: no JSON object found');
@@ -196,7 +206,9 @@ export class SoundfontLoader {
       if (ch === '}') {
         depth -= 1;
         if (depth === 0) {
-          return JSON.parse(js.slice(objStart, i + 1)) as Record<string, string>;
+          const rawObject = js.slice(objStart, i + 1);
+          const sanitizedObject = rawObject.replace(/,\s*}/g, '}');
+          return JSON.parse(sanitizedObject) as Record<string, string>;
         }
       }
     }

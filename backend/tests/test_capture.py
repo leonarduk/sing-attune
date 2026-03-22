@@ -319,21 +319,23 @@ class TestAudioSession:
         assert session.device_id in {0, 1, 2, 3}
 
 
-def _make_callback_flags(**kwargs) -> sd.CallbackFlags:
-    """Build a CallbackFlags with the given boolean flags set.
+def _make_callback_flags(**kwargs):
+    """Build a lightweight status object compatible with MicCapture._callback."""
 
-    ``priming_output`` has no setter on ``sd.CallbackFlags`` (it is a
-    read-only property backed by the C flag ``paPrimingOutput = 16``).
-    Construct the object directly from the raw integer bitmask instead.
-    All other writable flags are applied via their normal setters.
-    """
-    # paPrimingOutput = 16; the other writable flags map through their setters
-    _PA_PRIMING_OUTPUT = 16
-    priming = kwargs.pop("priming_output", False)
-    flags = sd.CallbackFlags(_PA_PRIMING_OUTPUT if priming else 0)
-    for attr, value in kwargs.items():
-        setattr(flags, attr, value)
-    return flags
+    class _CallbackStatus:
+        def __init__(self, **values):
+            self._values = {name: bool(value) for name, value in values.items()}
+            for name, value in self._values.items():
+                setattr(self, name, value)
+
+        def __bool__(self):
+            return any(self._values.values())
+
+        def __str__(self):
+            enabled = [name.replace('_', ' ') for name, value in self._values.items() if value]
+            return ', '.join(enabled) if enabled else ''
+
+    return _CallbackStatus(**kwargs)
 
 
 class TestMicCapture:
