@@ -318,8 +318,8 @@ class TestAudioSession:
         assert session.device_id in {0, 1, 2, 3}
 
 
-class _FakeCallbackFlags:
-    """Minimal stand-in for sounddevice.CallbackFlags used by callback tests."""
+class _CallbackFlagsDouble:
+    """Minimal stand-in for ``sounddevice.CallbackFlags`` used by callback tests."""
 
     def __init__(self, **kwargs) -> None:
         self.input_overflow = bool(kwargs.get("input_overflow", False))
@@ -337,12 +337,12 @@ class _FakeCallbackFlags:
             active.append("output underflow")
         if self.priming_output:
             active.append("priming output")
-        return ", ".join(active) or "no status"
+        return ", ".join(active) if active else "no status"
 
 
-def _make_callback_flags(**kwargs) -> _FakeCallbackFlags:
-    """Build a lightweight status object compatible with MicCapture._callback."""
-    return _FakeCallbackFlags(**kwargs)
+def _make_callback_flags(**kwargs) -> _CallbackFlagsDouble:
+    """Build a truthy callback-status object with the requested flags."""
+    return _CallbackFlagsDouble(**kwargs)
 
 
 class TestMicCapture:
