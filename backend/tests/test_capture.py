@@ -332,7 +332,44 @@ class TestMicCapture:
         assert capture.xrun_count == 1
         assert "sounddevice input overflow" in caplog.text
 
+    @pytest.mark.parametrize(
+        ("status_attr", "log_level", "expected_message"),
+        [
+            ("output_underflow", logging.WARNING, "sounddevice output underflow"),
+            ("priming_output", logging.DEBUG, "sounddevice priming output"),
+        ],
+    )
+    def test_known_status_flags_are_logged(self, caplog, status_attr, log_level, expected_message):
+        capture = MicCapture(on_window=lambda _window: None)
+        indata = np.zeros((HOP_SIZE, 1), dtype=np.float32)
+        status = sd.CallbackFlags()
+        setattr(status, status_attr, True)
 
+        with caplog.at_level(logging.DEBUG, logger="backend.audio.capture"):
+            capture._callback(indata, HOP_SIZE, None, status)
+
+        assert capture.xrun_count == 1
+        assert any(
+            record.levelno == log_level and expected_message in record.message
+            for record in caplog.records
+        )
+
+    def test_unknown_status_falls_back_to_generic_warning(self, caplog):
+        capture = MicCapture(on_window=lambda _window: None)
+        indata = np.zeros((HOP_SIZE, 1), dtype=np.float32)
+
+        class _UnknownStatus:
+            def __bool__(self):
+                return True
+
+            def __str__(self):
+                return "unknown status"
+
+        with caplog.at_level(logging.WARNING, logger="backend.audio.capture"):
+            capture._callback(indata, HOP_SIZE, None, _UnknownStatus())
+
+        assert capture.xrun_count == 1
+        assert "sounddevice status: unknown status" in caplog.text
 
 
 class TestAudioEngineEndpoint:
