@@ -417,6 +417,27 @@
       border-color: #53b7d8;
     }
 
+    .toolbar-details {
+      border: 1px solid #1a5276;
+      border-radius: 6px;
+      background: #122542;
+      overflow: hidden;
+    }
+    .toolbar-details summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 8px 10px;
+      font-size: 0.8rem;
+      color: #dce7ff;
+      user-select: none;
+    }
+    .toolbar-details summary::-webkit-details-marker { display: none; }
+    .toolbar-details__content {
+      display: grid;
+      gap: 8px;
+      padding: 0 8px 8px;
+    }
+
     #btn-settings { margin-top: auto; }
 
     #toolbar label { font-size: 0.8rem; color: var(--color-text-muted); }
@@ -799,11 +820,18 @@
       <div id="slot-part-mixer" class="feature-slot"></div>
 
       <button id="btn-browse"   class="transport-btn" title="Upload a MusicXML score">Browse…</button>
-      <button id="btn-load-test-score" class="transport-btn" style="display:none;" title="Load a sample score for quick rehearsal setup">Load test score</button>
-      <button id="btn-diagnostics" class="transport-btn" title="Open detailed pitch diagnostics">Pitch diagnostics</button>
       <button id="btn-session-record" class="transport-btn" title="Record this rehearsal session">⏺ Record session</button>
       <button id="btn-session-review" class="transport-btn" title="Review your latest rehearsal recording">Review latest session</button>
       <button id="btn-session-csv" class="transport-btn" title="Export your latest rehearsal data">Export latest CSV</button>
+
+      <details id="toolbar-tools" class="toolbar-details">
+        <summary title="Show developer and diagnostic tools">Tools ▾</summary>
+        <div class="toolbar-details__content">
+          <button id="btn-load-test-score" class="transport-btn" style="display:none;" title="Load a sample score for quick rehearsal setup">Load test score</button>
+          <button id="btn-diagnostics" class="transport-btn" title="Open detailed pitch diagnostics">Pitch diagnostics</button>
+        </div>
+      </details>
+
       <button
         id="btn-settings"
         class="transport-btn"
