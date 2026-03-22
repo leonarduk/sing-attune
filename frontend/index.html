@@ -347,16 +347,34 @@
     }
     #session-range-summary { color: #a8b7cf; font-size: 0.75rem; }
 
-    #warmup-panel {
+    .warmup-panel {
       border: 1px solid #1a5276;
       border-radius: 6px;
       padding: 8px;
+      background: #122542;
+    }
+    .warmup-panel summary {
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #c5d9ff;
+      list-style: none;
+    }
+    .warmup-panel summary::-webkit-details-marker { display: none; }
+    .warmup-panel summary::before {
+      content: '▸';
+      display: inline-block;
+      margin-right: 6px;
+      transition: transform 0.15s ease;
+    }
+    .warmup-panel[open] summary::before { transform: rotate(90deg); }
+    .warmup-panel__body {
+      margin-top: 8px;
       display: flex;
       flex-direction: column;
       gap: 6px;
-      background: #122542;
     }
-    #warmup-panel label { font-size: 0.75rem; }
+    .warmup-panel label { font-size: 0.75rem; }
     #warmup-status { font-size: 0.75rem; color: #b9cceb; min-height: 1em; }
     #btn-start-rehearsal.hidden { display: none; }
 
@@ -938,18 +956,21 @@
 
       <span id="pitch-readout" aria-live="polite">Detected: —</span>
 
-      <div id="warmup-panel">
-        <label for="warmup-duration" title="Choose how long the warm-up lasts">Warm-up duration:</label>
-        <select id="warmup-duration" title="Choose how long the warm-up lasts">
-          <option value="60">1 min</option>
-          <option value="120" selected>2 min</option>
-          <option value="180">3 min</option>
-        </select>
-        <button id="btn-start-warmup" class="transport-btn" title="Start a guided warm-up before rehearsal">🎵 Start warm-up</button>
-        <button id="btn-stop-warmup" class="transport-btn hidden" title="Stop the warm-up session">⏹ Stop warm-up</button>
-        <button id="btn-start-rehearsal" class="transport-btn hidden" title="Begin rehearsal after warm-up">Start rehearsal</button>
-        <span id="warmup-status" aria-live="polite">Warm-up idle.</span>
-      </div>
+      <details id="warmup-panel" class="warmup-panel">
+        <summary>Warm-up</summary>
+        <div class="warmup-panel__body">
+          <label for="warmup-duration" title="Choose how long the warm-up lasts">Warm-up duration:</label>
+          <select id="warmup-duration" title="Choose how long the warm-up lasts">
+            <option value="60">1 min</option>
+            <option value="120" selected>2 min</option>
+            <option value="180">3 min</option>
+          </select>
+          <button id="btn-start-warmup" class="transport-btn" title="Start a guided warm-up before rehearsal">🎵 Start warm-up</button>
+          <button id="btn-stop-warmup" class="transport-btn hidden" title="Stop the warm-up session">⏹ Stop warm-up</button>
+          <button id="btn-start-rehearsal" class="transport-btn hidden" title="Begin rehearsal after warm-up">Start rehearsal</button>
+          <span id="warmup-status" aria-live="polite">Warm-up idle.</span>
+        </div>
+      </details>
 
       <span id="score-info"></span>
     </div>
