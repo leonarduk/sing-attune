@@ -5,6 +5,7 @@
  *   - #part-select, #show-accompaniment
  *   - #transpose-select
  *   - #tempo-slider / #tempo-label
+ *   - #playback-options-panel disclosure state
  *
  * Calls updateSelectedPart() on change so pitch-overlay can react without
  * a direct coupling between the two features.
@@ -20,12 +21,12 @@ let unsubscribeScoreLoaded: (() => void) | null = null;
 let unsubscribeScoreCleared: (() => void) | null = null;
 
 function mount(_slot: HTMLElement): void {
-  const partSelectEl      = document.getElementById('part-select')        as HTMLSelectElement;
-  const showAccompEl      = document.getElementById('show-accompaniment') as HTMLInputElement;
-  const transposeSelectEl = document.getElementById('transpose-select')   as HTMLSelectElement;
-  const tempoSliderEl     = document.getElementById('tempo-slider')       as HTMLInputElement;
-  const tempoLabelEl      = document.getElementById('tempo-label')        as HTMLSpanElement;
-
+  const partSelectEl = document.getElementById('part-select') as HTMLSelectElement;
+  const showAccompEl = document.getElementById('show-accompaniment') as HTMLInputElement;
+  const transposeSelectEl = document.getElementById('transpose-select') as HTMLSelectElement;
+  const tempoSliderEl = document.getElementById('tempo-slider') as HTMLInputElement;
+  const tempoLabelEl = document.getElementById('tempo-label') as HTMLSpanElement;
+  const playbackOptionsPanel = document.getElementById('playback-options-panel') as HTMLDetailsElement;
 
   function clampTempoPercent(percent: number): number {
     return Math.max(50, Math.min(125, percent));
@@ -57,7 +58,9 @@ function mount(_slot: HTMLElement): void {
       engine.selectPart(selectedPart);
     } else {
       engine.schedule(
-        model.notes, model.tempo_marks, selectedPart,
+        model.notes,
+        model.tempo_marks,
+        selectedPart,
         parseFloat(tempoSliderEl.value) / 100,
       );
       engine.setTransposeSemitones(getTransposeSemitones());
@@ -82,10 +85,18 @@ function mount(_slot: HTMLElement): void {
     if (session.selectedPart !== selectedPart) updateSelectedPart(selectedPart);
   }
 
+  playbackOptionsPanel.open = Boolean(getSession());
+
   unsubscribeScoreCleared?.();
   unsubscribeScoreLoaded?.();
-  unsubscribeScoreCleared = onScoreCleared(() => { partSelectEl.innerHTML = ''; });
-  unsubscribeScoreLoaded = onScoreLoaded(() => { refreshPartSelector(); });
+  unsubscribeScoreCleared = onScoreCleared(() => {
+    partSelectEl.innerHTML = '';
+    playbackOptionsPanel.open = false;
+  });
+  unsubscribeScoreLoaded = onScoreLoaded(() => {
+    playbackOptionsPanel.open = true;
+    refreshPartSelector();
+  });
 
   partSelectEl.addEventListener('change', () => {
     scheduleSelectedPart(partSelectEl.value);

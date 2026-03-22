@@ -1,0 +1,23 @@
+name: PR Lint
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  issue-reference:
+    name: PR body issue reference
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate issue reference in PR body
+        env:
+          PR_BODY: ${{ github.event.pull_request.body || '' }}
+        run: |
+          if printf '%s\n' "$PR_BODY" | grep -iPq '(closes|fixes|resolves|refs)\s+#\d+'; then
+            echo 'PR body contains a valid issue reference.'
+            exit 0
+          fi
+
+          echo 'PR body must include an issue reference such as Closes #123, Fixes #123, Resolves #123, or Refs #123.' >&2
+          exit 1

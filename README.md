@@ -119,6 +119,7 @@ This keeps the backend real-time pipeline simple while score-aware interpretatio
 - Node 18+
 - [uv](https://github.com/astral-sh/uv) — `winget install astral-sh.uv`
 - [just](https://github.com/casey/just)
+- Windows Developer Mode enabled (required for Windows packaging symlink creation checks)
 - NVIDIA GPU with CUDA 12.x recommended (for torchcrepe pitch detection; librosa pYIN works on CPU)
 - **Headphones** — essential during practice to prevent mic picking up the playback
 
@@ -142,6 +143,25 @@ just --version
 ---
 
 ## Quick start
+
+### First rehearsal in the app
+
+1. Open the app and click **Browse…** or drag a score into the drop zone. Supported score files are **MusicXML `.xml`** and **compressed MusicXML `.mxl`**.
+2. Choose your **Part**, optionally enable **Show all parts**, and adjust **Transpose** or **Tempo** if the piece needs to sit differently for your voice.
+3. Open **Settings** to confirm the microphone device, confidence threshold, pitch trail length, and stable-note detection parameters.
+4. Use **Warm-up** if you want a guided setup period, then press **Play** and sing along with headphones on.
+5. Watch the **Pitch graph** during rehearsal, then review **Phrase summary**, **Practice history**, and **Audio transcription** when you finish.
+
+### Panel guide
+
+- **Pitch graph**: rolling 10-second graph of your detected pitch against the expected notes.
+- **Part mixer**: balance your selected part against the accompaniment when a score includes multiple parts.
+- **Warm-up**: quick timer and transition into rehearsal mode.
+- **Phrase summary**: short feedback after each completed phrase showing note-level accuracy.
+- **Practice history**: stores recent session summaries locally for comparison over time.
+- **Audio transcription**: upload MP3/WAV audio and export a generated MusicXML transcription.
+
+### Developer setup
 
 ```powershell
 git clone https://github.com/leonarduk/sing-attune
@@ -197,6 +217,34 @@ just dev-backend
 
 ---
 
+## Windows installer packaging (Electron)
+
+Build the Windows installer with:
+
+```powershell
+just package
+```
+
+### Windows packaging prerequisites
+
+- Enable **Developer Mode** in Windows: **Settings → System → For developers → Developer Mode → On**.
+- Build the backend bundle first:
+
+```powershell
+just build-backend
+```
+
+`just package` runs a preflight script that:
+
+- Removes `frontend/node_modules/gl` if present (avoids Windows native rebuild failures)
+- Verifies `dist/sing-attune-backend` exists
+- Materializes `electron/assets/icon.ico` from committed `electron/assets/icon.ico.base64` placeholder data when needed
+- Verifies `electron/assets/icon.ico` is present and non-empty
+- On Windows, verifies symlink privileges required by the packaging pipeline
+
+If any prerequisite is missing, packaging stops with a clear error message.
+
+---
 ## Installer variants
 
 Two packaged variants are now produced for different hardware profiles:
