@@ -195,6 +195,13 @@ class PlaybackPipeline:
     def force_cpu(self) -> bool:
         return self._force_cpu
 
+    @property
+    def xrun_count(self) -> int:
+        with self._lock:
+            if self._capture is None:
+                return 0
+            return self._capture.xrun_count
+
     def set_force_cpu(self, enabled: bool) -> None:
         with self._lock:
             self._force_cpu = bool(enabled)

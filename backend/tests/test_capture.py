@@ -10,7 +10,9 @@ Hardware tests require real audio devices and are skipped in CI automatically.
 Run locally with: uv run pytest -m hardware
 """
 
+import logging
 import threading
+from unittest.mock import PropertyMock, patch
 
 import numpy as np
 import pytest
@@ -25,6 +27,7 @@ from backend.audio.capture import (
     default_input_device_id,
     AudioDevice,
     AudioSession,
+    MicCapture,
 )
 from backend.main import app
 
@@ -315,6 +318,125 @@ class TestAudioSession:
         assert session.device_id in {0, 1, 2, 3}
 
 
+class _CallbackFlagsDouble:
+    """Minimal stand-in for ``sounddevice.CallbackFlags`` used by callback tests."""
+
+    def __init__(self, **flag_values) -> None:
+        self._flag_values = {
+            "input_overflow": False,
+            "output_underflow": False,
+            "priming_output": False,
+            **flag_values,
+        }
+        for attr, value in self._flag_values.items():
+            setattr(self, attr, value)
+def _make_callback_flags(**kwargs) -> sd.CallbackFlags:
+    """Build a lightweight CallbackFlags-compatible test double.
+
+    The upstream ``sounddevice.CallbackFlags`` constructor and writable
+    properties vary across releases, so tests use a small object exposing the
+    boolean flag attributes and string representation that ``MicCapture`` reads.
+    """
+
+    class _CallbackFlagsDouble:
+        def __init__(self, **flag_values):
+            self.input_overflow = bool(flag_values.get("input_overflow", False))
+            self.output_underflow = bool(flag_values.get("output_underflow", False))
+            self.priming_output = bool(flag_values.get("priming_output", False))
+
+        def __bool__(self):
+            return self.input_overflow or self.output_underflow or self.priming_output
+
+        def __str__(self):
+            active_flags = []
+            if self.input_overflow:
+                active_flags.append("input overflow")
+            if self.output_underflow:
+                active_flags.append("output underflow")
+            if self.priming_output:
+                active_flags.append("priming output")
+            return ", ".join(active_flags) or "no flags"
+
+    return _CallbackFlagsDouble(**kwargs)  # type: ignore[return-value]
+class _FakeCallbackFlags:
+    """Minimal stand-in for sounddevice.CallbackFlags used by callback tests."""
+
+    def __init__(self, **kwargs) -> None:
+        self.input_overflow = kwargs.get("input_overflow", False)
+        self.output_underflow = kwargs.get("output_underflow", False)
+        self.priming_output = kwargs.get("priming_output", False)
+
+    def __bool__(self) -> bool:
+        return any(bool(value) for value in self._flag_values.values())
+
+    def __str__(self) -> str:
+        active = [
+            name.replace("_", " ")
+            for name, value in self._flag_values.items()
+            if value
+        ]
+        return ", ".join(active) if active else "no status"
+
+
+def _make_callback_flags(**kwargs) -> _CallbackFlagsDouble:
+    """Build a truthy callback-status object with the requested flags."""
+
+    return _CallbackFlagsDouble(**kwargs)
+
+
+class TestMicCapture:
+    def test_nonzero_status_logs_warning_and_tracks_xruns(self, caplog):
+        capture = MicCapture(on_window=lambda _window: None)
+        indata = np.zeros((HOP_SIZE, 1), dtype=np.float32)
+        status = _make_callback_flags(input_overflow=True)
+
+        with caplog.at_level(logging.WARNING, logger="backend.audio.capture"):
+            capture._callback(indata, HOP_SIZE, None, status)
+
+        assert capture.xrun_count == 1
+        assert "sounddevice input overflow" in caplog.text
+
+    @pytest.mark.parametrize(
+        ("status_kwargs", "log_level", "expected_message"),
+        [
+            ({"output_underflow": True}, logging.WARNING, "sounddevice output underflow"),
+            ({"priming_output": True}, logging.DEBUG, "sounddevice priming output"),
+        ],
+    )
+    def test_known_status_flags_are_logged(
+        self, caplog, status_kwargs, log_level, expected_message
+    ):
+        capture = MicCapture(on_window=lambda _window: None)
+        indata = np.zeros((HOP_SIZE, 1), dtype=np.float32)
+        status = _make_callback_flags(**status_kwargs)
+
+        with caplog.at_level(logging.DEBUG, logger="backend.audio.capture"):
+            capture._callback(indata, HOP_SIZE, None, status)
+
+        assert capture.xrun_count == 1
+        assert any(
+            record.levelno == log_level and expected_message in record.message
+            for record in caplog.records
+        )
+
+    def test_unknown_status_falls_back_to_generic_warning(self, caplog):
+        capture = MicCapture(on_window=lambda _window: None)
+        indata = np.zeros((HOP_SIZE, 1), dtype=np.float32)
+
+        class _UnknownStatus:
+            def __bool__(self):
+                return True
+
+            def __str__(self):
+                return "unknown status"
+
+        with caplog.at_level(logging.WARNING, logger="backend.audio.capture"):
+            capture._callback(indata, HOP_SIZE, None, _UnknownStatus())
+
+        assert capture.xrun_count == 1
+        assert "sounddevice status: unknown status" in caplog.text
+
+
 class TestAudioEngineEndpoint:
     @pytest.fixture
     def client(self):
@@ -332,6 +454,15 @@ class TestAudioEngineEndpoint:
         assert "cuda" in data
         assert "device" in data
         assert "force_cpu" in data
+        assert data["xrun_count"] == 0
+
+    def test_capture_status_endpoint(self, client):
+        with patch("backend.audio.pipeline.PlaybackPipeline.xrun_count", new_callable=PropertyMock) as mock_xrun_count:
+            mock_xrun_count.return_value = 4
+            resp = client.get("/audio/capture/status")
+
+        assert resp.status_code == 200
+        assert resp.json() == {"xrun_count": 4}
 
     def test_force_cpu_toggle(self, client):
         enabled = client.post("/audio/engine/force-cpu", params={"force_cpu": True}).json()

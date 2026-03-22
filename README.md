@@ -169,6 +169,18 @@ Open http://localhost:5173
 
 API docs: http://localhost:8000/docs
 
+### Backend environment variables
+
+- `CORS_ORIGINS` — comma-separated list of allowed browser origins for the FastAPI backend. Defaults to `http://localhost:5173,http://127.0.0.1:5173`. Override this when running Vite on a different port or when you need multiple frontend origins during development.
+- `ELECTRON_MODE` — set to `1` when the backend is launched by the packaged Electron app. In this mode the backend uses wildcard CORS with credentials disabled so `app://` and `file://` renderers can reach the API without rebuilding the backend.
+
+Example:
+
+```powershell
+$env:CORS_ORIGINS="http://localhost:5174,http://127.0.0.1:4173"
+just dev-backend
+```
+
 ---
 
 ## Tech stack

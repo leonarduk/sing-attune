@@ -7,6 +7,7 @@ Fills a ring buffer with overlapping 2048-sample windows at 22050 Hz.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ from typing import Callable
 
 import numpy as np
 import sounddevice as sd
+
+log = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -163,6 +166,7 @@ class MicCapture:
         self._ring = RingBuffer(on_window=on_window)
         self._stream: sd.InputStream | None = None
         self._lock = threading.Lock()
+        self._xrun_count = 0
 
     def start(self) -> None:
         with self._lock:
@@ -198,6 +202,10 @@ class MicCapture:
     def sample_rate(self) -> int:
         return self._sample_rate
 
+    @property
+    def xrun_count(self) -> int:
+        return self._xrun_count
+
     def _callback(
         self,
         indata: np.ndarray,
@@ -206,6 +214,18 @@ class MicCapture:
         status: sd.CallbackFlags,
     ) -> None:
         if status:
-            print(f"[capture] sounddevice status: {status}")
+            self._xrun_count += 1
+            input_overflow = bool(getattr(status, "input_overflow", False))
+            output_underflow = bool(getattr(status, "output_underflow", False))
+            priming_output = bool(getattr(status, "priming_output", False))
+
+            if input_overflow:
+                log.warning("sounddevice input overflow: %s", status)
+            if output_underflow:
+                log.warning("sounddevice output underflow: %s", status)
+            if priming_output:
+                log.debug("sounddevice priming output: %s", status)
+            if not (input_overflow or output_underflow or priming_output):
+                log.warning("sounddevice status: %s", status)
         mono = indata[:, 0]
         self._ring.push(mono)
