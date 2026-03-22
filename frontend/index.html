@@ -675,6 +675,17 @@
       padding: 8px 20px 12px;
       font-size: 0.78rem;
     }
+    #progress-history-panel.is-empty {
+      max-height: 108px;
+      padding-bottom: 8px;
+    }
+    #progress-history-panel.is-empty #progress-range-chart,
+    #progress-history-panel.is-empty #progress-history-list {
+      display: none;
+    }
+    #progress-history-panel.is-empty .progress-actions {
+      opacity: 0.6;
+    }
     #progress-history-header {
       display: flex;
       align-items: center;
