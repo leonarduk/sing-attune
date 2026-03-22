@@ -15,7 +15,6 @@ import threading
 from unittest.mock import PropertyMock, patch
 
 import numpy as np
-import sounddevice as sd
 import pytest
 from fastapi.testclient import TestClient
 
@@ -319,21 +318,29 @@ class TestAudioSession:
         assert session.device_id in {0, 1, 2, 3}
 
 
-def _make_callback_flags(**kwargs) -> sd.CallbackFlags:
-    """Build a CallbackFlags with the given boolean flags set.
+class _FakeCallbackFlags:
+    def __init__(self, **kwargs):
+        self.input_overflow = bool(kwargs.get("input_overflow", False))
+        self.output_underflow = bool(kwargs.get("output_underflow", False))
+        self.priming_output = bool(kwargs.get("priming_output", False))
 
-    ``priming_output`` has no setter on ``sd.CallbackFlags`` (it is a
-    read-only property backed by the C flag ``paPrimingOutput = 16``).
-    Construct the object directly from the raw integer bitmask instead.
-    All other writable flags are applied via their normal setters.
-    """
-    # paPrimingOutput = 16; the other writable flags map through their setters
-    _PA_PRIMING_OUTPUT = 16
-    priming = kwargs.pop("priming_output", False)
-    flags = sd.CallbackFlags(_PA_PRIMING_OUTPUT if priming else 0)
-    for attr, value in kwargs.items():
-        setattr(flags, attr, value)
-    return flags
+    def __bool__(self) -> bool:
+        return any((self.input_overflow, self.output_underflow, self.priming_output))
+
+    def __str__(self) -> str:
+        active = []
+        if self.input_overflow:
+            active.append("input overflow")
+        if self.output_underflow:
+            active.append("output underflow")
+        if self.priming_output:
+            active.append("priming output")
+        return ", ".join(active) or "no status"
+
+
+def _make_callback_flags(**kwargs) -> _FakeCallbackFlags:
+    """Build a lightweight status object compatible with MicCapture._callback."""
+    return _FakeCallbackFlags(**kwargs)
 
 
 class TestMicCapture:

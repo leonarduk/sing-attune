@@ -58,10 +58,50 @@
     }
     header h1 { font-size: 1.1rem; color: var(--color-accent); }
     #app-status { margin-left: auto; }
+    #btn-help { width: auto; padding: 4px 10px; }
     #app-status-text { font-size: 0.8rem; color: var(--color-text-muted); }
     #app-status-text[data-tone="success"] { color: #4caf50; }
     #app-status-text[data-tone="error"] { color: var(--color-accent); }
     #app-status-text[data-tone="warning"] { color: #ffa726; }
+
+    .welcome-banner {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 20px;
+      background: linear-gradient(90deg, rgba(15, 52, 96, 0.92), rgba(26, 33, 62, 0.92));
+      border-bottom: 1px solid #1a5276;
+      flex-shrink: 0;
+    }
+    .welcome-banner.hidden { display: none; }
+    .welcome-banner__content {
+      display: grid;
+      gap: 10px;
+      max-width: 980px;
+    }
+    .welcome-banner__eyebrow {
+      color: #ff9bb0;
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .welcome-banner h2 { font-size: 1.05rem; color: #fff; }
+    .welcome-banner__summary, .welcome-banner__steps {
+      color: #dce7ff;
+      font-size: 0.83rem;
+      line-height: 1.45;
+    }
+    .welcome-banner__steps {
+      margin-left: 18px;
+      display: grid;
+      gap: 4px;
+    }
+    .welcome-banner__actions {
+      display: flex;
+      align-items: flex-start;
+      flex-shrink: 0;
+    }
 
     /* ── Error banner ── */
     #error-banner {
@@ -632,6 +672,7 @@
 
   <header>
     <h1>sing-attune</h1>
+    <button id="btn-help" class="transport-btn" title="Show the getting-started guide">? Help</button>
     <div id="app-status" role="status" aria-live="polite" aria-atomic="true">
       <span id="app-status-text">checking backend…</span>
     </div>
@@ -667,22 +708,22 @@
     <div id="toolbar">
       <button id="btn-play"   class="transport-btn" title="Play (Space)" aria-keyshortcuts="Space">&#9654; Play (Space)</button>
       <button id="btn-pause"  class="transport-btn" title="Pause or resume (Space)" aria-keyshortcuts="Space">&#9646;&#9646; Pause (Space)</button>
-      <button id="btn-stop"   class="transport-btn">&#9646; Stop</button>
-      <button id="btn-rewind" class="transport-btn">&#9664;&#9664; Rewind</button>
+      <button id="btn-stop"   class="transport-btn" title="Stop playback and reset the rehearsal cursor">&#9646; Stop</button>
+      <button id="btn-rewind" class="transport-btn" title="Jump back to the start of the score">&#9664;&#9664; Rewind</button>
 
       <div class="toolbar-divider"></div>
 
-      <label for="part-select">Part:</label>
-      <select id="part-select"></select>
-      <label class="checkbox-label" for="show-accompaniment">
+      <label for="part-select" title="Choose which score part you want to rehearse">Part:</label>
+      <select id="part-select" title="Choose which score part you want to rehearse"></select>
+      <label class="checkbox-label" for="show-accompaniment" title="Show or hide the other parts in the score view">
         <input id="show-accompaniment" type="checkbox" />
         Show all parts
       </label>
 
       <div class="toolbar-divider"></div>
 
-      <label for="transpose-select">Transpose:</label>
-      <select id="transpose-select">
+      <label for="transpose-select" title="Shift playback up or down in semitones to fit your voice">Transpose:</label>
+      <select id="transpose-select" title="Shift playback up or down in semitones to fit your voice">
         <option value="-12">-12</option>
         <option value="-11">-11</option>
         <option value="-10">-10</option>
@@ -711,19 +752,19 @@
       </select>
 
       <div class="tempo-group">
-        <label for="tempo-slider">Tempo:</label>
-        <input id="tempo-slider" type="range" min="50" max="125" value="100" step="5" />
+        <label for="tempo-slider" title="Slow down or speed up playback without changing pitch">Tempo:</label>
+        <input id="tempo-slider" type="range" min="50" max="125" value="100" step="5" title="Slow down or speed up playback without changing pitch" />
         <span id="tempo-label">100%</span>
       </div>
 
       <div id="slot-part-mixer" class="feature-slot"></div>
 
-      <button id="btn-browse"   class="transport-btn">Browse…</button>
-      <button id="btn-load-test-score" class="transport-btn" style="display:none;">Load test score</button>
-      <button id="btn-diagnostics" class="transport-btn">Pitch diagnostics</button>
-      <button id="btn-session-record" class="transport-btn">⏺ Record session</button>
-      <button id="btn-session-review" class="transport-btn">Review latest session</button>
-      <button id="btn-session-csv" class="transport-btn">Export latest CSV</button>
+      <button id="btn-browse"   class="transport-btn" title="Upload a MusicXML score file (.xml or .mxl)">Browse…</button>
+      <button id="btn-load-test-score" class="transport-btn" style="display:none;" title="Load a bundled sample score for development testing">Load test score</button>
+      <button id="btn-diagnostics" class="transport-btn" title="Open detailed pitch stability and confidence diagnostics">Pitch diagnostics</button>
+      <button id="btn-session-record" class="transport-btn" title="Record the current rehearsal session for replay and review">⏺ Record session</button>
+      <button id="btn-session-review" class="transport-btn" title="Replay the most recently recorded practice session">Review latest session</button>
+      <button id="btn-session-csv" class="transport-btn" title="Export the latest recorded session as CSV data">Export latest CSV</button>
       <button
         id="btn-settings"
         class="transport-btn"
@@ -743,9 +784,9 @@
           <option value="120" selected>2 min</option>
           <option value="180">3 min</option>
         </select>
-        <button id="btn-start-warmup" class="transport-btn">🎵 Start warm-up</button>
-        <button id="btn-stop-warmup" class="transport-btn hidden">⏹ Stop warm-up</button>
-        <button id="btn-start-rehearsal" class="transport-btn hidden">Start rehearsal</button>
+        <button id="btn-start-warmup" class="transport-btn" title="Start the guided warm-up timer before rehearsal">🎵 Start warm-up</button>
+        <button id="btn-stop-warmup" class="transport-btn hidden" title="Stop the current warm-up session">⏹ Stop warm-up</button>
+        <button id="btn-start-rehearsal" class="transport-btn hidden" title="Jump straight from warm-up into rehearsal playback">Start rehearsal</button>
         <span id="warmup-status" aria-live="polite">Warm-up idle.</span>
       </div>
 
@@ -758,7 +799,7 @@
     <aside id="settings-panel" role="dialog" aria-modal="false" aria-labelledby="settings-panel-title">
       <div id="settings-panel-header">
         <h2 id="settings-panel-title">Settings</h2>
-        <button id="btn-settings-close" class="transport-btn" aria-label="Close settings">&times;</button>
+        <button id="btn-settings-close" class="transport-btn" aria-label="Close settings" title="Close the settings panel">&times;</button>
       </div>
       <div class="settings-row">
         <label for="settings-device">Mic device</label>
@@ -796,11 +837,11 @@
       <div class="settings-row">
         <label><input id="recording-enabled" type="checkbox" /> Enable session recording</label>
         <div class="recording-controls">
-          <button id="btn-record-start"   class="transport-btn" disabled>&#9210; Start</button>
-          <button id="btn-record-stop"    class="transport-btn" disabled>&#9646; Stop</button>
-          <button id="btn-record-play"    class="transport-btn" disabled>&#9654; Play take</button>
-          <button id="btn-record-save"    class="transport-btn" disabled>&#128190; Save take</button>
-          <button id="btn-record-discard" class="transport-btn" disabled>&#128465; Discard</button>
+          <button id="btn-record-start"   class="transport-btn" disabled title="Start recording your microphone input and pitch trace">&#9210; Start</button>
+          <button id="btn-record-stop"    class="transport-btn" disabled title="Stop the active session recording">&#9646; Stop</button>
+          <button id="btn-record-play"    class="transport-btn" disabled title="Listen back to the current recorded take">&#9654; Play take</button>
+          <button id="btn-record-save"    class="transport-btn" disabled title="Save the current take to disk">&#128190; Save take</button>
+          <button id="btn-record-discard" class="transport-btn" disabled title="Discard the current recorded take">&#128465; Discard</button>
         </div>
         <div id="recording-status" aria-live="polite"></div>
       </div>
@@ -809,6 +850,7 @@
     </aside>
 
     <div id="content-area">
+      <div id="slot-onboarding" class="feature-slot"></div>
 
       <!-- Pitch graph (always visible) -->
       <section id="pitch-graph-panel" aria-label="Pitch graph panel">
@@ -851,8 +893,8 @@
       <main>
         <div id="score-loading" aria-live="polite">No score loaded.</div>
         <div id="drop-zone">
-          <p>Drop a MusicXML file here</p>
-          <span>.xml or .mxl — or click to browse</span>
+          <p>Drop a MusicXML score here to start a practice session</p>
+          <span>Upload .xml or .mxl, choose your part, press Play, sing along, then review the pitch graph and phrase summary.</span>
         </div>
         <div id="score-container"></div>
       </main>

@@ -8,6 +8,7 @@
  */
 import { type Feature } from './feature-types';
 
+import { onboardingFeature } from './features/onboarding/index';
 import { scoreLoaderFeature  } from './features/score-loader/index';
 import { playbackFeature     } from './features/playback/index';
 import { partSelectorFeature } from './features/part-selector/index';
@@ -20,6 +21,7 @@ import { transcriptionFeature } from './features/transcription/index';
 export type { Feature } from './feature-types';
 
 export const features: Feature[] = [
+  onboardingFeature,
   scoreLoaderFeature,
   playbackFeature,
   partSelectorFeature,
