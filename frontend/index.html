@@ -405,6 +405,24 @@
       font-size: 0.95rem;
       color: var(--color-text);
     }
+    #settings-panel h3 {
+      margin: 14px 0 8px;
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--color-text-muted);
+    }
+    #settings-panel details {
+      margin-top: 12px;
+      border-top: 1px solid rgba(83, 183, 216, 0.25);
+      padding-top: 10px;
+    }
+    #settings-panel summary {
+      cursor: pointer;
+      font-size: 0.82rem;
+      color: #dce7ff;
+      margin-bottom: 10px;
+    }
     #btn-settings-close {
       width: auto;
       padding: 4px 10px;
@@ -760,52 +778,157 @@
         <h2 id="settings-panel-title">Settings</h2>
         <button id="btn-settings-close" class="transport-btn" aria-label="Close settings">&times;</button>
       </div>
-      <div class="settings-row">
-        <label for="settings-device">Mic device</label>
-        <select id="settings-device"></select>
-      </div>
-      <div class="settings-row">
-        <label for="settings-confidence">Confidence threshold: <span id="settings-confidence-label">0.60</span></label>
-        <input id="settings-confidence" type="range" min="0" max="0.95" step="0.05" value="0.6" />
-      </div>
-      <div class="settings-row">
-        <label for="settings-trail">Pitch trail length: <span id="settings-trail-label">2.0s</span></label>
-        <input id="settings-trail" type="range" min="0.5" max="5" step="0.5" value="2" />
-      </div>
-      <div class="settings-row">
-        <label for="settings-stable-confidence">Stable note min confidence: <span id="settings-stable-confidence-label">0.60</span></label>
-        <input id="settings-stable-confidence" type="range" min="0.4" max="0.95" step="0.05" value="0.6" />
-      </div>
-      <div class="settings-row">
-        <label for="settings-stable-cluster">Stable note cluster tolerance: <span id="settings-stable-cluster-label">35 cents</span></label>
-        <input id="settings-stable-cluster" type="range" min="10" max="120" step="5" value="35" />
-      </div>
-      <div class="settings-row">
-        <label for="settings-stable-hold">Stable note hold duration: <span id="settings-stable-hold-label">160 ms</span></label>
-        <input id="settings-stable-hold" type="range" min="40" max="800" step="20" value="160" />
-      </div>
-      <div class="settings-row">
-        <label for="settings-stable-window">Stable note window: <span id="settings-stable-window-label">320 ms</span></label>
-        <input id="settings-stable-window" type="range" min="80" max="1500" step="20" value="320" />
-      </div>
-      <div class="settings-row">
-        <label><input id="settings-show-note-names" type="checkbox" /> Show note names in pitch readout</label>
-        <label><input id="settings-synthetic-mode" type="checkbox" /> Synthetic pitch input (no WebSocket)</label>
-        <label><input id="settings-force-cpu" type="checkbox" /> Force CPU pitch engine (pYIN)</label>
-      </div>
-      <div class="settings-row">
-        <label><input id="recording-enabled" type="checkbox" /> Enable session recording</label>
-        <div class="recording-controls">
-          <button id="btn-record-start"   class="transport-btn" disabled>&#9210; Start</button>
-          <button id="btn-record-stop"    class="transport-btn" disabled>&#9646; Stop</button>
-          <button id="btn-record-play"    class="transport-btn" disabled>&#9654; Play take</button>
-          <button id="btn-record-save"    class="transport-btn" disabled>&#128190; Save take</button>
-          <button id="btn-record-discard" class="transport-btn" disabled>&#128465; Discard</button>
-        </div>
-        <div id="recording-status" aria-live="polite"></div>
-      </div>
       <div id="settings-engine">Pitch engine: loading…</div>
       <div id="settings-cpu-warning" role="status">Running on CPU — latency may be higher</div>
+      <section aria-labelledby="settings-user-title">
+        <h3 id="settings-user-title">User settings</h3>
+        <div class="settings-row">
+          <label for="settings-device">Mic device</label>
+          <select
+            id="settings-device"
+            title="Choose which microphone sing-attune listens to for live pitch tracking."
+          ></select>
+        </div>
+        <div class="settings-row">
+          <label title="Show note names such as C4 or F#3 beside the live detected pitch readout.">
+            <input
+              id="settings-show-note-names"
+              type="checkbox"
+              title="Show note names such as C4 or F#3 beside the live detected pitch readout."
+            />
+            Show note names in pitch readout
+          </label>
+        </div>
+        <div class="settings-row">
+          <label title="Stores your latest take locally so you can replay or save it after practice.">
+            <input
+              id="recording-enabled"
+              type="checkbox"
+              title="Stores your latest take locally so you can replay or save it after practice."
+            />
+            Enable session recording
+          </label>
+          <div class="recording-controls">
+            <button id="btn-record-start"   class="transport-btn" disabled>&#9210; Start</button>
+            <button id="btn-record-stop"    class="transport-btn" disabled>&#9646; Stop</button>
+            <button id="btn-record-play"    class="transport-btn" disabled>&#9654; Play take</button>
+            <button id="btn-record-save"    class="transport-btn" disabled>&#128190; Save take</button>
+            <button id="btn-record-discard" class="transport-btn" disabled>&#128465; Discard</button>
+          </div>
+          <div id="recording-status" aria-live="polite"></div>
+        </div>
+      </section>
+      <details>
+        <summary>Advanced / Developer settings</summary>
+        <div class="settings-row">
+          <label
+            for="settings-confidence"
+            title="Minimum pitch-confidence score before a frame is treated as reliable enough to show."
+          >Confidence threshold: <span id="settings-confidence-label">0.60</span></label>
+          <input
+            id="settings-confidence"
+            type="range"
+            min="0"
+            max="0.95"
+            step="0.05"
+            value="0.6"
+            title="Lower values show more frames but may include noisier detections; higher values hide uncertain pitch frames."
+          />
+        </div>
+        <div class="settings-row">
+          <label
+            for="settings-trail"
+            title="How long the recent pitch trace remains visible behind the current live dot."
+          >Pitch trail length: <span id="settings-trail-label">2.0s</span></label>
+          <input
+            id="settings-trail"
+            type="range"
+            min="0.5"
+            max="5"
+            step="0.5"
+            value="2"
+            title="Shorter trails reduce clutter; longer trails make it easier to see your recent pitch shape."
+          />
+        </div>
+        <div class="settings-row">
+          <label
+            for="settings-stable-confidence"
+            title="Minimum confidence required before a detected pitch can count toward stable-note analysis."
+          >Stable note min confidence: <span id="settings-stable-confidence-label">0.60</span></label>
+          <input
+            id="settings-stable-confidence"
+            type="range"
+            min="0.4"
+            max="0.95"
+            step="0.05"
+            value="0.6"
+            title="Use this when tuning note-stability logic; higher values make stable notes harder to accept."
+          />
+        </div>
+        <div class="settings-row">
+          <label
+            for="settings-stable-cluster"
+            title="How tightly nearby pitch samples must group together, measured in cents, to count as one stable note."
+          >Stable note cluster tolerance: <span id="settings-stable-cluster-label">35 cents</span></label>
+          <input
+            id="settings-stable-cluster"
+            type="range"
+            min="10"
+            max="120"
+            step="5"
+            value="35"
+            title="100 cents equals one semitone; smaller tolerances demand steadier tuning within each detected note cluster."
+          />
+        </div>
+        <div class="settings-row">
+          <label
+            for="settings-stable-hold"
+            title="How long a pitch must stay steady before the app treats it as a held note."
+          >Stable note hold duration: <span id="settings-stable-hold-label">160 ms</span></label>
+          <input
+            id="settings-stable-hold"
+            type="range"
+            min="40"
+            max="800"
+            step="20"
+            value="160"
+            title="Increase this to ignore brief wobble or noise; decrease it to react faster to short held notes."
+          />
+        </div>
+        <div class="settings-row">
+          <label
+            for="settings-stable-window"
+            title="The rolling analysis window used when deciding whether recent pitch frames are stable."
+          >Stable note window: <span id="settings-stable-window-label">320 ms</span></label>
+          <input
+            id="settings-stable-window"
+            type="range"
+            min="80"
+            max="1500"
+            step="20"
+            value="320"
+            title="Larger windows smooth more history but respond more slowly; smaller windows react faster but can flicker."
+          />
+        </div>
+        <div class="settings-row">
+          <label title="Developer mode: generates fake pitch data locally instead of listening to the backend WebSocket stream.">
+            <input
+              id="settings-synthetic-mode"
+              type="checkbox"
+              title="Developer mode: generates fake pitch data locally instead of listening to the backend WebSocket stream."
+            />
+            Synthetic pitch input (no WebSocket)
+          </label>
+          <label title="Forces the CPU-only pYIN detector instead of the default CREPE engine, which is useful for compatibility testing.">
+            <input
+              id="settings-force-cpu"
+              type="checkbox"
+              title="Forces the CPU-only pYIN detector instead of the default CREPE engine, which is useful for compatibility testing."
+            />
+            Force CPU pitch engine (pYIN)
+          </label>
+        </div>
+      </details>
     </aside>
 
     <div id="content-area">
