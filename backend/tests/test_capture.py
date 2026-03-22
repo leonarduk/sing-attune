@@ -15,7 +15,6 @@ import threading
 from unittest.mock import PropertyMock, patch
 
 import numpy as np
-import sounddevice as sd
 import pytest
 from fastapi.testclient import TestClient
 
@@ -347,6 +346,30 @@ def _make_callback_flags(**kwargs) -> sd.CallbackFlags:
             return ", ".join(active_flags) or "no flags"
 
     return _CallbackFlagsDouble(**kwargs)  # type: ignore[return-value]
+class _FakeCallbackFlags:
+    """Minimal stand-in for sounddevice.CallbackFlags used by callback tests."""
+
+    def __init__(self, **kwargs) -> None:
+        self.input_overflow = kwargs.get("input_overflow", False)
+        self.output_underflow = kwargs.get("output_underflow", False)
+        self.priming_output = kwargs.get("priming_output", False)
+
+    def __bool__(self) -> bool:
+        return self.input_overflow or self.output_underflow or self.priming_output
+
+    def __str__(self) -> str:
+        messages = []
+        if self.input_overflow:
+            messages.append("input overflow")
+        if self.output_underflow:
+            messages.append("output underflow")
+        if self.priming_output:
+            messages.append("priming output")
+        return ", ".join(messages) if messages else "no status"
+
+
+def _make_callback_flags(**kwargs) -> _FakeCallbackFlags:
+    return _FakeCallbackFlags(**kwargs)
 
 
 class TestMicCapture:
