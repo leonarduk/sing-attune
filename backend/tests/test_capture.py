@@ -318,87 +318,31 @@ class TestAudioSession:
         assert session.device_id in {0, 1, 2, 3}
 
 
-class _CallbackFlagsDouble:
-    """Minimal stand-in for ``sounddevice.CallbackFlags`` used by callback tests."""
-
-    def __init__(self, **flag_values) -> None:
-        self._flag_values = {
-            "input_overflow": False,
-            "output_underflow": False,
-            "priming_output": False,
-            **flag_values,
-        }
-        for attr, value in self._flag_values.items():
-            setattr(self, attr, value)
-def _make_callback_flags(**kwargs) -> sd.CallbackFlags:
-    """Build a lightweight CallbackFlags-compatible test double.
-
-    The upstream ``sounddevice.CallbackFlags`` constructor and writable
-    properties vary across releases, so tests use a small object exposing the
-    boolean flag attributes and string representation that ``MicCapture`` reads.
-    """
-
-    class _CallbackFlagsDouble:
-        def __init__(self, **flag_values):
-            self.input_overflow = bool(flag_values.get("input_overflow", False))
-            self.output_underflow = bool(flag_values.get("output_underflow", False))
-            self.priming_output = bool(flag_values.get("priming_output", False))
-
-        def __bool__(self):
-            return self.input_overflow or self.output_underflow or self.priming_output
-
-        def __str__(self):
-            active_flags = []
-            if self.input_overflow:
-                active_flags.append("input overflow")
-            if self.output_underflow:
-                active_flags.append("output underflow")
-            if self.priming_output:
-                active_flags.append("priming output")
-            return ", ".join(active_flags) or "no flags"
-
-    return _CallbackFlagsDouble(**kwargs)  # type: ignore[return-value]
-def _make_callback_flags(**kwargs):
-    """Build a lightweight status object compatible with MicCapture._callback."""
-
-    class _CallbackStatus:
-        def __init__(self, **values):
-            self._values = {name: bool(value) for name, value in values.items()}
-            for name, value in self._values.items():
-                setattr(self, name, value)
-
-        def __bool__(self):
-            return any(self._values.values())
-
-        def __str__(self):
-            enabled = [name.replace('_', ' ') for name, value in self._values.items() if value]
-            return ', '.join(enabled) if enabled else ''
-
-    return _CallbackStatus(**kwargs)
 class _FakeCallbackFlags:
     """Minimal stand-in for sounddevice.CallbackFlags used by callback tests."""
 
     def __init__(self, **kwargs) -> None:
-        self.input_overflow = kwargs.get("input_overflow", False)
-        self.output_underflow = kwargs.get("output_underflow", False)
-        self.priming_output = kwargs.get("priming_output", False)
+        self.input_overflow = bool(kwargs.get("input_overflow", False))
+        self.output_underflow = bool(kwargs.get("output_underflow", False))
+        self.priming_output = bool(kwargs.get("priming_output", False))
 
     def __bool__(self) -> bool:
-        return any(bool(value) for value in self._flag_values.values())
+        return self.input_overflow or self.output_underflow or self.priming_output
 
     def __str__(self) -> str:
-        active = [
-            name.replace("_", " ")
-            for name, value in self._flag_values.items()
-            if value
-        ]
-        return ", ".join(active) if active else "no status"
+        active = []
+        if self.input_overflow:
+            active.append("input overflow")
+        if self.output_underflow:
+            active.append("output underflow")
+        if self.priming_output:
+            active.append("priming output")
+        return ", ".join(active) or "no status"
 
 
-def _make_callback_flags(**kwargs) -> _CallbackFlagsDouble:
-    """Build a truthy callback-status object with the requested flags."""
-
-    return _CallbackFlagsDouble(**kwargs)
+def _make_callback_flags(**kwargs) -> _FakeCallbackFlags:
+    """Build a lightweight status object compatible with MicCapture._callback."""
+    return _FakeCallbackFlags(**kwargs)
 
 
 class TestMicCapture:

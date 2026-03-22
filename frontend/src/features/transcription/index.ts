@@ -105,6 +105,8 @@ function mount(slot: HTMLElement): void {
         <strong>Audio transcription</strong>
         <span id="transcription-status">${IDLE_STATUS_MESSAGE}</span>
       </div>
+      <input id="transcription-file-input" type="file" accept=".wav,.wave,.mp3,audio/wav,audio/mpeg" title="Upload an MP3 or WAV file to generate a MusicXML transcription" />
+      <div id="transcription-file-meta" class="transcription-meta">No audio selected.</div>
       <p class="transcription-description">
         Upload an audio recording to convert it into a MusicXML score. Download the generated MusicXML and then load it in the main score panel for practice.
       </p>
@@ -114,14 +116,14 @@ function mount(slot: HTMLElement): void {
         <div id="transcription-file-meta">No audio selected.</div>
       </div>
       <div class="transcription-actions">
-        <button id="btn-transcription-run" class="transport-btn" disabled>Transcribe</button>
-        <button id="btn-transcription-retry" class="transport-btn" disabled>Retry</button>
+        <button id="btn-transcription-run" class="transport-btn" disabled title="Send the selected audio file for transcription">Transcribe</button>
+        <button id="btn-transcription-retry" class="transport-btn" disabled title="Retry the most recent audio transcription request">Retry</button>
       </div>
       <div id="transcription-inline-error" class="transcription-error" aria-live="polite"></div>
       <div id="transcription-result" class="transcription-result hidden">
         <div id="transcription-summary" class="transcription-summary"></div>
         <div id="transcription-details"></div>
-        <a id="transcription-download" class="transport-btn disabled" aria-disabled="true">Download MusicXML</a>
+        <a id="transcription-download" class="transport-btn disabled" aria-disabled="true" title="Download the generated MusicXML transcription">Download MusicXML</a>
       </div>
     </section>
   `;

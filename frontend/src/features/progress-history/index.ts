@@ -63,10 +63,16 @@ function mount(slot: HTMLElement): void {
 
   const render = (sessions: PracticeSessionSummary[]): void => {
     latestSessions = sessions;
-    if (sessions.length === 0) {
-      summaryEl.textContent = 'No saved sessions yet. Start singing to build your history.';
+    const panelEl = document.getElementById('progress-history-panel') as HTMLElement | null;
+    const isEmpty = sessions.length === 0;
+    panelEl?.classList.toggle('is-empty', isEmpty);
+    exportJsonBtn.disabled = isEmpty;
+    exportCsvBtn.disabled = isEmpty;
+
+    if (isEmpty) {
+      summaryEl.textContent = 'No saved sessions yet. Your score stays front and center until you finish a rehearsal.';
       rangeChartEl.innerHTML = '';
-      listEl.innerHTML = '<div class="progress-empty">No sessions saved.</div>';
+      listEl.innerHTML = '<div class="progress-empty">Finish one take to unlock practice history and exports.</div>';
       return;
     }
 
