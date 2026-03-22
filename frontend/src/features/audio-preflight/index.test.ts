@@ -1,6 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { audioPreflightFeature, __audioPreflightInternals } from './index';
+
+let nextAnalyserPeak = 0;
+
+function setAnalyserPeak(amplitude: number): void {
+  nextAnalyserPeak = amplitude;
+}
 
 class MockAudioContext {
   state: AudioContextState = 'running';
@@ -16,7 +22,10 @@ class MockAudioContext {
 
   createAnalyser = vi.fn(() => ({
     fftSize: 1024,
-    getByteTimeDomainData: vi.fn(),
+    getByteTimeDomainData: vi.fn((data: Uint8Array) => {
+      data.fill(128);
+      data[0] = Math.max(0, Math.min(255, Math.round(128 + nextAnalyserPeak * 128)));
+    }),
   }) as unknown as AnalyserNode);
 
   createGain = vi.fn(() => ({
@@ -71,6 +80,35 @@ function installMediaMocks(options: { permissionState?: PermissionState; getUser
 function openModalAndWaitUntilReady(): Promise<boolean> {
   return __audioPreflightInternals.openModal();
 }
+
+
+const rafQueue: FrameRequestCallback[] = [];
+
+function flushAnimationFrames(count = 1): void {
+  for (let i = 0; i < count; i += 1) {
+    const callback = rafQueue.shift();
+    if (!callback) return;
+    callback(performance.now());
+  }
+}
+
+beforeEach(() => {
+  nextAnalyserPeak = 0;
+  rafQueue.length = 0;
+  vi.stubGlobal('requestAnimationFrame', ((callback: FrameRequestCallback) => {
+    rafQueue.push(callback);
+    return rafQueue.length;
+  }) as typeof requestAnimationFrame);
+  vi.stubGlobal('cancelAnimationFrame', vi.fn((handle: number) => {
+    const index = handle - 1;
+    if (index >= 0 && index < rafQueue.length) rafQueue.splice(index, 1);
+  }) as typeof cancelAnimationFrame);
+});
+
+afterEach(() => {
+  audioPreflightFeature.unmount?.();
+  vi.unstubAllGlobals();
+});
 describe('audio preflight device selection', () => {
   it('returns null when no devices are available', () => {
     expect(__audioPreflightInternals.resolveSelectedDeviceId([], 'dev-1')).toBeNull();
@@ -114,7 +152,6 @@ describe('audio preflight Escape handling', () => {
     expect(__audioPreflightInternals.isPreflightModalHidden()).toBe(true);
     expect(event.defaultPrevented).toBe(true);
 
-    audioPreflightFeature.unmount?.();
   });
 
   it('openModal called twice does not register duplicate Escape listeners', async () => {
@@ -135,7 +172,6 @@ describe('audio preflight Escape handling', () => {
     __audioPreflightInternals.closeModal(false);
     await expect(openPromiseOne).resolves.toBe(false);
 
-    audioPreflightFeature.unmount?.();
   });
 
   it('Escape listener is removed after closeModal', async () => {
@@ -148,7 +184,6 @@ describe('audio preflight Escape handling', () => {
     window.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
 
-    audioPreflightFeature.unmount?.();
   });
 
   it('Escape listener is removed after unmount', async () => {
@@ -212,11 +247,9 @@ describe('audio preflight permission request button visibility', () => {
     __audioPreflightInternals.closeModal(false);
     await expect(openPromise).resolves.toBe(false);
 
-    audioPreflightFeature.unmount?.();
   });
 
   it('hides the request button on mount when browser permission is already granted', async () => {
-    audioPreflightFeature.unmount?.();
 
     document.body.innerHTML = '<div id="slot-audio-preflight"></div>';
     installMediaMocks({ permissionState: 'granted' });
@@ -233,11 +266,9 @@ describe('audio preflight permission request button visibility', () => {
     expect(status.textContent).toBe('Microphone permission granted.');
     expect(continueButton.disabled).toBe(false);
 
-    audioPreflightFeature.unmount?.();
   });
 
   it('keeps the "Allow microphone" button visible when permission request fails', async () => {
-    audioPreflightFeature.unmount?.();
 
     document.body.innerHTML = '<div id="slot-audio-preflight"></div>';
     installMediaMocks({ getUserMediaError: new Error('permission denied') });
@@ -253,7 +284,6 @@ describe('audio preflight permission request button visibility', () => {
     __audioPreflightInternals.closeModal(false);
     await expect(openPromise).resolves.toBe(false);
 
-    audioPreflightFeature.unmount?.();
   });
 });
 
@@ -301,8 +331,111 @@ describe('audio preflight mic test feedback', () => {
     expect(result.dataset.state).toBe('idle');
     expect(result.textContent).toContain('Run “Test my mic”');
     expect(peak.textContent).toBe('Peak: —∞ dBFS');
+  });
 
-    audioPreflightFeature.unmount?.();
+  it('maps zero amplitude to null dBFS for consistent silent UI output', () => {
+    expect(__audioPreflightInternals.amplitudeToDbfs(0)).toBeNull();
+    expect(__audioPreflightInternals.amplitudeToDbfs(-0.1)).toBeNull();
+  });
+
+  it('treats a full silent mic test session as no signal', async () => {
+    document.body.innerHTML = '<div id="slot-audio-preflight"></div>';
+    installMediaMocks();
+    const slot = document.getElementById('slot-audio-preflight') as HTMLDivElement;
+    audioPreflightFeature.mount(slot);
+
+    const openPromise = openModalAndWaitUntilReady();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const testButton = document.getElementById('audio-preflight-test') as HTMLButtonElement;
+    const result = document.getElementById('audio-preflight-test-result') as HTMLDivElement;
+    const peak = document.getElementById('audio-preflight-meter-peak') as HTMLDivElement;
+
+    setAnalyserPeak(0);
+    testButton.click();
+    flushAnimationFrames(3);
+    testButton.click();
+
+    expect(result.dataset.state).toBe('no-signal');
+    expect(result.textContent).toContain('No signal detected');
+    expect(peak.textContent).toBe('Peak: —∞ dBFS');
+
+    __audioPreflightInternals.closeModal(false);
+    await expect(openPromise).resolves.toBe(false);
+  });
+
+  it('does not reuse a previous run peak when the next run is silent', async () => {
+    document.body.innerHTML = '<div id="slot-audio-preflight"></div>';
+    installMediaMocks();
+    const slot = document.getElementById('slot-audio-preflight') as HTMLDivElement;
+    audioPreflightFeature.mount(slot);
+
+    const openPromise = openModalAndWaitUntilReady();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const testButton = document.getElementById('audio-preflight-test') as HTMLButtonElement;
+    const result = document.getElementById('audio-preflight-test-result') as HTMLDivElement;
+    const peak = document.getElementById('audio-preflight-meter-peak') as HTMLDivElement;
+
+    setAnalyserPeak(0.2);
+    testButton.click();
+    flushAnimationFrames(3);
+    testButton.click();
+
+    expect(result.dataset.state).toBe('good');
+    expect(peak.textContent).not.toBe('Peak: —∞ dBFS');
+
+    setAnalyserPeak(0);
+    testButton.click();
+    expect(result.textContent).toContain('Listening…');
+    expect(peak.textContent).toBe('Peak: —∞ dBFS');
+
+    flushAnimationFrames(3);
+    testButton.click();
+
+    expect(result.dataset.state).toBe('no-signal');
+    expect(result.textContent).toContain('No signal detected');
+    expect(peak.textContent).toBe('Peak: —∞ dBFS');
+
+    __audioPreflightInternals.closeModal(false);
+    await expect(openPromise).resolves.toBe(false);
+  });
+
+  it('resets the mic test UI when the modal closes and reopens', async () => {
+    document.body.innerHTML = '<div id="slot-audio-preflight"></div>';
+    installMediaMocks();
+    const slot = document.getElementById('slot-audio-preflight') as HTMLDivElement;
+    audioPreflightFeature.mount(slot);
+
+    const firstOpenPromise = openModalAndWaitUntilReady();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const testButton = document.getElementById('audio-preflight-test') as HTMLButtonElement;
+    const result = document.getElementById('audio-preflight-test-result') as HTMLDivElement;
+    const peak = document.getElementById('audio-preflight-meter-peak') as HTMLDivElement;
+
+    setAnalyserPeak(0.2);
+    testButton.click();
+    flushAnimationFrames(3);
+    testButton.click();
+
+    expect(result.dataset.state).toBe('good');
+
+    __audioPreflightInternals.closeModal(false);
+    await expect(firstOpenPromise).resolves.toBe(false);
+    expect(result.dataset.state).toBe('idle');
+    expect(result.textContent).toContain('Run “Test my mic”');
+    expect(peak.textContent).toBe('Peak: —∞ dBFS');
+
+    const secondOpenPromise = openModalAndWaitUntilReady();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(result.dataset.state).toBe('idle');
+    expect(result.textContent).toContain('Run “Test my mic”');
+    expect(peak.textContent).toBe('Peak: —∞ dBFS');
+
+    __audioPreflightInternals.closeModal(false);
+    await expect(secondOpenPromise).resolves.toBe(false);
   });
 });
 

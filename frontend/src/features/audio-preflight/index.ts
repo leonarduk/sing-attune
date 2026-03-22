@@ -42,8 +42,11 @@ let voiceTypeSelectEl: HTMLSelectElement | null = null;
 let voiceTypeSuggestionEl: HTMLDivElement | null = null;
 let octaveCompCheckboxEl: HTMLInputElement | null = null;
 const METER_GAIN_SCALE = 140;
+// Below ~1.5% peak amplitude we treat the run as silence / no usable mic signal.
 const NO_SIGNAL_THRESHOLD = 0.015;
+// Between ~1.5% and 8% there is signal, but it is likely too quiet for reliable tracking.
 const TOO_QUIET_THRESHOLD = 0.08;
+// Above ~75% peak amplitude the input is likely too hot and close to clipping.
 const TOO_LOUD_THRESHOLD = 0.75;
 
 type MicTestClassification = 'idle' | 'no-signal' | 'too-quiet' | 'good' | 'too-loud';
@@ -61,7 +64,7 @@ let selectedVoiceTypeId: string | null = loadUserVoiceTypeId();
 let isMonitoring = false;
 
 
-let currentMicTestPeak = 0;
+let activeMicTestPeakAmplitude: number | null = null;
 
 function amplitudeToDbfs(amplitude: number): number | null {
   if (amplitude <= 0) return null;
@@ -117,8 +120,24 @@ function updateMicTestUi(summary: MicTestSummary): void {
   testResultEl.textContent = summary.message;
 }
 
+function beginMicTestSession(): void {
+  activeMicTestPeakAmplitude = 0;
+  updateMicTestUi({
+    peakAmplitude: 0,
+    peakDbfs: null,
+    classification: 'idle',
+    message: 'Listening… speak into your mic, then stop the test to see the result.',
+  });
+}
+
+function finishMicTestSession(): void {
+  const summary = classifyMicTestPeak(activeMicTestPeakAmplitude ?? 0);
+  activeMicTestPeakAmplitude = null;
+  updateMicTestUi(summary);
+}
+
 function resetMicTestUi(): void {
-  currentMicTestPeak = 0;
+  activeMicTestPeakAmplitude = null;
   if (meterPeakLabelEl) meterPeakLabelEl.textContent = 'Peak: —∞ dBFS';
   if (!testResultEl) return;
   testResultEl.dataset.state = 'idle';
@@ -248,7 +267,6 @@ function resolveSelectedDeviceId(
 }
 
 function startLevelMeter(): void {
-  currentMicTestPeak = 0;
   if (!analyser || !meterFillEl) return;
   const data = new Uint8Array(analyser.fftSize);
   const runToken = meterRunToken;
@@ -263,9 +281,13 @@ function startLevelMeter(): void {
       const mag = Math.abs(centered);
       if (mag > peak) peak = mag;
     }
-    currentMicTestPeak = Math.max(currentMicTestPeak, peak);
+    if (isMonitoring && activeMicTestPeakAmplitude !== null) {
+      activeMicTestPeakAmplitude = Math.max(activeMicTestPeakAmplitude, peak);
+      if (meterPeakLabelEl) {
+        meterPeakLabelEl.textContent = `Peak: ${formatDbfs(amplitudeToDbfs(activeMicTestPeakAmplitude))}`;
+      }
+    }
     meterFillEl.style.width = `${Math.min(100, Math.round(peak * METER_GAIN_SCALE))}%`;
-    if (meterPeakLabelEl) meterPeakLabelEl.textContent = `Peak: ${formatDbfs(amplitudeToDbfs(currentMicTestPeak))}`;
     meterRaf = requestAnimationFrame(tick);
   };
 
@@ -356,13 +378,7 @@ async function toggleMicTest(): Promise<void> {
 
   const nextMonitoringState = !isMonitoring;
   if (nextMonitoringState) {
-    currentMicTestPeak = 0;
-    updateMicTestUi({
-      peakAmplitude: 0,
-      peakDbfs: null,
-      classification: 'idle',
-      message: 'Listening… speak into your mic, then stop the test to see the result.',
-    });
+    beginMicTestSession();
   }
 
   isMonitoring = nextMonitoringState;
@@ -370,7 +386,7 @@ async function toggleMicTest(): Promise<void> {
   if (testButtonEl) testButtonEl.textContent = isMonitoring ? 'Stop mic test' : 'Test my mic';
 
   if (!isMonitoring) {
-    updateMicTestUi(classifyMicTestPeak(currentMicTestPeak));
+    finishMicTestSession();
   }
 }
 
@@ -486,6 +502,7 @@ async function openModal(): Promise<boolean> {
     resolver(false);
     resolver = null;
   }
+  resetMicTestUi();
   modalEl.classList.remove('hidden');
   removeEscapeListener?.();
   const onEscape = (event: KeyboardEvent): void => {
@@ -506,7 +523,7 @@ async function openModal(): Promise<boolean> {
 }
 
 function closeModal(completed: boolean): void {
-  if (!isMonitoring) resetMicTestUi();
+  resetMicTestUi();
   if (modalEl) modalEl.classList.add('hidden');
   removeEscapeListener?.();
   monitorGain && (monitorGain.gain.value = 0);
@@ -629,6 +646,10 @@ export const __audioPreflightInternals = {
   setRequestButtonVisibility,
   getMicrophonePermissionState,
   syncPermissionUiFromBrowserState,
+  beginMicTestSession,
+  finishMicTestSession,
+  resetMicTestUi,
+  updateMicTestUi,
 };
 
 function isPreflightModalHidden(): boolean {
