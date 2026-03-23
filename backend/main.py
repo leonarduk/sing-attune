@@ -308,10 +308,10 @@ async def session_get(session_id: str) -> JSONResponse:
 @app.post("/transcribe/audio")
 async def transcribe_audio(file: UploadFile = File(...)) -> Response:
     suffix = Path(file.filename or "audio.wav").suffix.lower()
-    if suffix not in {".wav", ".wave"}:
+    if suffix not in {".wav", ".wave", ".mp3"}:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type '{suffix}'. Upload a .wav audio file.",
+            detail=f"Unsupported file type '{suffix}'. Upload a .wav or .mp3 audio file.",
         )
 
     tmp_path = await persist_upload_to_temp(file, suffix)
