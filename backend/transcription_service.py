@@ -21,7 +21,7 @@ from backend.music import (
 from backend.music.quantization import _midi_to_pitch_name as _quantization_pitch_name
 from backend.music.notation_policy import V1_NOTATION_POLICY
 
-SUPPORTED_AUDIO_SUFFIXES = {".wav", ".wave"}
+SUPPORTED_AUDIO_SUFFIXES = {".wav", ".wave", ".mp3"}
 SAMPLE_RATE = 22050
 WINDOW_SIZE = 2048
 HOP_SIZE = WINDOW_SIZE // 2
@@ -48,10 +48,10 @@ def transcribe_audio_file(path: str | Path) -> TranscriptionResult:
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
     if audio_path.suffix.lower() not in SUPPORTED_AUDIO_SUFFIXES:
         raise TranscriptionError(
-            f"Unsupported audio file type '{audio_path.suffix}'. Upload a .wav audio file."
+            f"Unsupported audio file type '{audio_path.suffix}'. Upload a .wav or .mp3 audio file."
         )
 
-    samples = _load_wav_mono(audio_path)
+    samples = _load_audio_mono(audio_path)
     if len(samples) < WINDOW_SIZE:
         raise TranscriptionError(
             "Audio file is too short to transcribe. Provide at least 2048 samples of audio."
@@ -89,6 +89,19 @@ def transcribe_audio_file(path: str | Path) -> TranscriptionResult:
         key_signature=key_signature,
         note_count=len(note_events),
     )
+
+
+def _load_audio_mono(path: Path) -> np.ndarray:
+    """Load any supported audio file (WAV or MP3) as mono float32 at SAMPLE_RATE."""
+    suffix = path.suffix.lower()
+    if suffix in {".wav", ".wave"}:
+        return _load_wav_mono(path)
+    # For MP3 and other formats supported by librosa/soundfile
+    try:
+        samples, _ = librosa.load(str(path), sr=SAMPLE_RATE, mono=True)
+    except Exception as exc:
+        raise TranscriptionError(f"Failed to decode audio file '{path.name}': {exc}") from exc
+    return np.clip(samples.astype(np.float32, copy=False), -1.0, 1.0)
 
 
 def _load_wav_mono(path: Path) -> np.ndarray:
