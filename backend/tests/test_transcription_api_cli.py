@@ -277,6 +277,23 @@ def test_classify_audio_load_error_distinguishes_decode_from_operational_errors(
     assert classify_audio_load_error(operational_error) is TranscriptionErrorType.GENERIC
 
 
+def test_classify_audio_load_error_handles_backend_specific_signals() -> None:
+    class NoBackendError(Exception):
+        pass
+
+    class SyntheticSoundfileError(Exception):
+        pass
+
+    SyntheticSoundfileError.__module__ = "soundfile.synthetic"
+
+    assert classify_audio_load_error(NoBackendError("backend unavailable")) is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    assert classify_audio_load_error(EOFError("unexpected eof")) is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    assert (
+        classify_audio_load_error(SyntheticSoundfileError("load failed"))
+        is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    )
+
+
 def test_transcribe_audio_file_preserves_non_format_load_failures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
