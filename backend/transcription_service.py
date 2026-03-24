@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 import wave
 
@@ -32,6 +33,20 @@ MAX_MIDI_JUMP_FOR_SAME_NOTE = 0.75
 
 class TranscriptionError(ValueError):
     """Raised when an audio file cannot be transcribed."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_type: "TranscriptionErrorType | None" = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_type = error_type or TranscriptionErrorType.GENERIC
+
+
+class TranscriptionErrorType(str, Enum):
+    UNSUPPORTED_AUDIO_TYPE = "unsupported_audio_type"
+    GENERIC = "generic"
 
 
 @dataclass(frozen=True)
@@ -100,10 +115,45 @@ def _load_audio_mono(path: Path) -> np.ndarray:
     try:
         samples, _ = librosa.load(str(path), sr=SAMPLE_RATE, mono=True)
     except Exception as exc:
+        if classify_audio_load_error(exc) is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE:
+            raise TranscriptionError(
+                f"Unsupported audio file type '{path.suffix.lower()}'. Upload a .wav or .mp3 audio file.",
+                error_type=TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE,
+            ) from exc
         raise TranscriptionError(
-            f"Unsupported audio file type '{path.suffix.lower()}'. Upload a .wav or .mp3 audio file."
+            f"Failed to load audio file '{path.name}': {exc}"
         ) from exc
     return np.clip(samples.astype(np.float32, copy=False), -1.0, 1.0)
+
+
+def classify_audio_load_error(exc: Exception) -> TranscriptionErrorType:
+    """Classify librosa/audio backend failures into user-facing vs operational types."""
+    decode_error_modules = ("audioread", "soundfile")
+    decode_error_names = ("NoBackendError", "DecodeError", "LibsndfileError")
+    decode_error_tokens = (
+        "unknown format",
+        "format not recognised",
+        "format not recognized",
+        "unsupported",
+        "decode",
+        "decoder",
+        "corrupt",
+        "invalid data",
+        "file contains data in an unknown format",
+    )
+
+    exc_module = type(exc).__module__.lower()
+    exc_name = type(exc).__name__
+    detail = str(exc).lower()
+    if exc_name in decode_error_names:
+        return TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    if isinstance(exc, EOFError):
+        return TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    if any(token in exc_module for token in decode_error_modules):
+        return TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    if any(token in detail for token in decode_error_tokens):
+        return TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    return TranscriptionErrorType.GENERIC
 
 
 def _load_wav_mono(path: Path) -> np.ndarray:
