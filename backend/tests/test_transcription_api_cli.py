@@ -273,7 +273,7 @@ def test_transcribe_audio_file_rejects_invalid_mp3(tmp_path: Path) -> None:
     invalid_mp3_path = tmp_path / "input.mp3"
     invalid_mp3_path.write_bytes(b"not-a-valid-mp3")
 
-    with pytest.raises(TranscriptionError, match="Failed to decode audio file"):
+    with pytest.raises(TranscriptionError, match="Unsupported audio file type"):
         transcribe_audio_file(invalid_mp3_path)
 
 
