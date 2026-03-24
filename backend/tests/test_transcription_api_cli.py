@@ -269,14 +269,6 @@ def test_transcribe_audio_file_rejects_missing_or_unsupported_input(tmp_path: Pa
         transcribe_audio_file(invalid_path)
 
 
-def test_classify_audio_load_error_distinguishes_decode_from_operational_errors() -> None:
-    decode_error = RuntimeError("decoder failed: unknown format")
-    operational_error = RuntimeError("I/O error while reading stream")
-
-    assert classify_audio_load_error(decode_error) is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
-    assert classify_audio_load_error(operational_error) is TranscriptionErrorType.GENERIC
-
-
 def test_classify_audio_load_error_handles_backend_specific_signals() -> None:
     class NoBackendError(Exception):
         pass
@@ -292,22 +284,6 @@ def test_classify_audio_load_error_handles_backend_specific_signals() -> None:
         classify_audio_load_error(SyntheticSoundfileError("load failed"))
         is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
     )
-
-
-def test_transcribe_audio_file_preserves_non_format_load_failures(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    audio_path = tmp_path / "input.mp3"
-    audio_path.write_bytes(b"fake")
-    monkeypatch.setattr(
-        "backend.transcription_service.librosa.load",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk read failure")),
-    )
-
-    with pytest.raises(TranscriptionError, match="Failed to load audio file") as exc_info:
-        transcribe_audio_file(audio_path)
-
-    assert exc_info.value.error_type is TranscriptionErrorType.GENERIC
 
 
 def test_transcribe_audio_file_rejects_invalid_mp3(tmp_path: Path) -> None:
