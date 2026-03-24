@@ -23,6 +23,7 @@ from backend.transcription_service import (
     UNSUPPORTED_AUDIO_ERROR_CATEGORY,
     TranscriptionError,
     TranscriptionResult,
+    WINDOW_SIZE,
     _frames_to_note_events,
     _load_audio_mono,
     _load_wav_mono,
@@ -156,10 +157,34 @@ def test_transcribe_audio_endpoint_returns_musicxml(
     assert "score-partwise" in response.text
 
 
+def test_transcribe_audio_endpoint_accepts_mp3_upload(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "backend.main.transcribe_audio_file",
+        lambda _path: TranscriptionResult(
+            musicxml="<?xml version='1.0' encoding='utf-8'?><score-partwise version='4.0'></score-partwise>",
+            tempo_bpm=120.0,
+            key_signature=None,
+            note_count=1,
+        ),
+    )
+
+    response = client.post(
+        "/transcribe/audio",
+        files={"file": ("take.mp3", io.BytesIO(b"ID3"), "audio/mpeg")},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/vnd.recordare.musicxml+xml")
+    assert "score-partwise" in response.text
+
+
 def test_transcribe_audio_endpoint_rejects_unsupported_type(client: TestClient) -> None:
     response = client.post(
         "/transcribe/audio",
-        files={"file": ("take.mp3", io.BytesIO(b"not-wav"), "audio/mpeg")},
+        files={"file": ("take.ogg", io.BytesIO(b"not-audio"), "audio/ogg")},
     )
 
     assert response.status_code == 400
@@ -233,10 +258,43 @@ def test_transcribe_audio_file_rejects_missing_or_unsupported_input(tmp_path: Pa
     with pytest.raises(FileNotFoundError, match="Audio file not found"):
         transcribe_audio_file(missing_path)
 
-    invalid_path = tmp_path / "input.mp3"
-    invalid_path.write_bytes(b"not-a-wav")
+    invalid_path = tmp_path / "input.ogg"
+    invalid_path.write_bytes(b"not-audio")
     with pytest.raises(TranscriptionError, match="Unsupported audio file type"):
         transcribe_audio_file(invalid_path)
+
+
+def test_transcribe_audio_file_rejects_invalid_mp3(tmp_path: Path) -> None:
+    invalid_mp3_path = tmp_path / "input.mp3"
+    invalid_mp3_path.write_bytes(b"not-a-valid-mp3")
+
+    with pytest.raises(TranscriptionError, match="Failed to decode audio file"):
+        transcribe_audio_file(invalid_mp3_path)
+
+
+def test_transcribe_audio_file_accepts_valid_mp3_suffix_and_decodes_via_loader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mp3_path = tmp_path / "input.mp3"
+    mp3_path.write_bytes(b"fake-mp3-data")
+    synthetic_samples = np.ones(WINDOW_SIZE * 2, dtype=np.float32) * 0.1
+
+    monkeypatch.setattr(
+        "backend.transcription_service.librosa.load",
+        lambda *_args, **_kwargs: (synthetic_samples, SAMPLE_RATE),
+    )
+
+    def fake_infer(_window, capture_time_ms: float):
+        midi = 60.0 if capture_time_ms < 70.0 else 64.0
+        return PitchFrame(time_ms=capture_time_ms, midi=midi, confidence=0.95)
+
+    monkeypatch.setattr("backend.transcription_service._infer_pyin", fake_infer)
+
+    result = transcribe_audio_file(mp3_path)
+
+    assert result.note_count >= 1
+    assert "<score-partwise" in result.musicxml
 
 
 def test_transcribe_audio_file_rejects_short_audio(tmp_path: Path) -> None:
@@ -318,6 +376,22 @@ def test_load_wav_mono_supports_24bit_pcm(tmp_path: Path) -> None:
     samples = _load_wav_mono(audio_path)
 
     assert samples == pytest.approx(np.array([0.0, 0.5, -0.5], dtype=np.float32), abs=1e-6)
+
+
+def test_load_audio_mono_decodes_mp3_with_librosa(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    mp3_path = tmp_path / "sample.mp3"
+    mp3_path.write_bytes(b"fake-mp3")
+    source = np.array([-1.5, -0.5, 0.5, 1.5], dtype=np.float64)
+
+    monkeypatch.setattr(
+        "backend.transcription_service.librosa.load",
+        lambda *_args, **_kwargs: (source, SAMPLE_RATE),
+    )
+
+    samples = _load_audio_mono(mp3_path)
+
+    assert samples.dtype == np.float32
+    assert samples == pytest.approx(np.array([-1.0, -0.5, 0.5, 1.0], dtype=np.float32))
 
 
 @pytest.mark.parametrize(
