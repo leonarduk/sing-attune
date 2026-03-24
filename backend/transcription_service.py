@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 import logging
 from pathlib import Path
 import wave
@@ -35,12 +36,38 @@ logger = logging.getLogger(__name__)
 class TranscriptionError(ValueError):
     """Raised when an audio file cannot be transcribed."""
 
-    def __init__(self, message: str, *, category: str = "processing") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        category: str | None = None,
+        error_type: "TranscriptionErrorType | None" = None,
+    ) -> None:
         super().__init__(message)
-        self.category = category
+        resolved_error_type = error_type
+        if resolved_error_type is None and category is not None:
+            resolved_error_type = ERROR_TYPE_BY_CATEGORY.get(category, TranscriptionErrorType.GENERIC)
+        if resolved_error_type is None:
+            resolved_error_type = TranscriptionErrorType.GENERIC
+        self.error_type = resolved_error_type
+        self.category = category or CATEGORY_BY_ERROR_TYPE[self.error_type]
+
+
+class TranscriptionErrorType(str, Enum):
+    UNSUPPORTED_AUDIO_TYPE = "unsupported_audio_type"
+    GENERIC = "generic"
 
 
 UNSUPPORTED_AUDIO_ERROR_CATEGORY = "unsupported_audio"
+GENERIC_ERROR_CATEGORY = "processing"
+CATEGORY_BY_ERROR_TYPE = {
+    TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE: UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+    TranscriptionErrorType.GENERIC: GENERIC_ERROR_CATEGORY,
+}
+ERROR_TYPE_BY_CATEGORY = {
+    UNSUPPORTED_AUDIO_ERROR_CATEGORY: TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE,
+    GENERIC_ERROR_CATEGORY: TranscriptionErrorType.GENERIC,
+}
 
 
 @dataclass(frozen=True)
@@ -61,7 +88,7 @@ def transcribe_audio_file(path: str | Path) -> TranscriptionResult:
         logger.warning("Unsupported transcription audio suffix=%s", audio_path.suffix.lower())
         raise TranscriptionError(
             f"Unsupported audio file type '{audio_path.suffix}'. Upload a .wav or .mp3 audio file.",
-            category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+            error_type=TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE,
         )
 
     samples = _load_audio_mono(audio_path)
@@ -126,11 +153,46 @@ def _load_audio_mono(path: Path) -> np.ndarray:
     try:
         samples, _ = librosa.load(str(path), sr=SAMPLE_RATE, mono=True)
     except Exception as exc:
+        if classify_audio_load_error(exc) is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE:
+            raise TranscriptionError(
+                f"Unsupported audio file type '{path.suffix.lower()}'. Upload a .wav or .mp3 audio file.",
+                error_type=TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE,
+            ) from exc
         raise TranscriptionError(
-            f"Unsupported audio file type '{path.suffix}'. Upload a .wav or .mp3 audio file.",
-            category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+            f"Failed to load audio file '{path.name}': {exc}",
+            error_type=TranscriptionErrorType.GENERIC,
         ) from exc
     return np.clip(samples.astype(np.float32, copy=False), -1.0, 1.0)
+
+
+def classify_audio_load_error(exc: Exception) -> TranscriptionErrorType:
+    """Classify librosa/audio backend failures into user-facing vs operational types."""
+    decode_error_modules = ("audioread", "soundfile")
+    decode_error_names = ("NoBackendError", "DecodeError", "LibsndfileError")
+    decode_error_tokens = (
+        "unknown format",
+        "format not recognised",
+        "format not recognized",
+        "unsupported format",
+        "decode",
+        "decoder",
+        "corrupt",
+        "invalid data",
+        "file contains data in an unknown format",
+    )
+
+    exc_module = (getattr(type(exc), "__module__", "") or "").lower()
+    exc_name = type(exc).__name__
+    detail = str(exc).lower()
+    if exc_name in decode_error_names:
+        return TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    if isinstance(exc, EOFError):
+        return TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    if any(token in exc_module for token in decode_error_modules):
+        return TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    if any(token in detail for token in decode_error_tokens):
+        return TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    return TranscriptionErrorType.GENERIC
 
 
 def _load_wav_mono(path: Path) -> np.ndarray:
@@ -144,23 +206,26 @@ def _load_wav_mono(path: Path) -> np.ndarray:
     except (wave.Error, EOFError) as exc:
         raise TranscriptionError(
             f"Invalid WAV file: {exc}",
-            category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+            error_type=TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE,
         ) from exc
 
     if channels <= 0:
         raise TranscriptionError(
             "Invalid WAV file: channel count must be positive",
-            category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+            error_type=TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE,
         )
     if sample_width not in {1, 2, 3, 4}:
         raise TranscriptionError(
             f"Unsupported WAV sample width: {sample_width * 8} bits",
-            category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+            error_type=TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE,
         )
 
     samples = _pcm_bytes_to_float32(raw_frames, sample_width=sample_width)
     if len(samples) == 0:
-        raise TranscriptionError("Audio file is empty", category=UNSUPPORTED_AUDIO_ERROR_CATEGORY)
+        raise TranscriptionError(
+            "Audio file is empty",
+            error_type=TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE,
+        )
 
     if channels > 1:
         usable = len(samples) - (len(samples) % channels)
@@ -183,7 +248,7 @@ def _pcm_bytes_to_float32(raw_frames: bytes, *, sample_width: int) -> np.ndarray
         return np.frombuffer(raw_frames, dtype="<i4").astype(np.float32) / 2147483648.0
     raise TranscriptionError(
         f"Unsupported WAV sample width: {sample_width * 8} bits",
-        category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+        error_type=TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE,
     )
 
 
