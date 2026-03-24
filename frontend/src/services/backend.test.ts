@@ -56,4 +56,40 @@ describe('backend error banner', () => {
     action.click();
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
+
+  it('marks backend as healthy when /health returns a version', async () => {
+    const setAppStatusMock = vi.fn();
+    vi.doMock('./status', () => ({
+      setAppStatus: (...args: unknown[]) => setAppStatusMock(...args),
+    }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ok', version: '0.2.0' }),
+    }));
+
+    const backend = await import('./backend');
+    await backend.checkBackend();
+
+    expect(setAppStatusMock).toHaveBeenCalledWith('backend ok (v0.2.0)', 'success');
+    expect(document.getElementById('error-banner')?.classList.contains('visible')).toBe(false);
+  });
+
+  it('shows a clear startup message when /health is not sing-attune', async () => {
+    const setAppStatusMock = vi.fn();
+    vi.doMock('./status', () => ({
+      setAppStatus: (...args: unknown[]) => setAppStatusMock(...args),
+    }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ok', env: 'local' }),
+    }));
+
+    const backend = await import('./backend');
+    await backend.checkBackend();
+
+    expect(setAppStatusMock).toHaveBeenCalledWith('backend unreachable', 'error');
+    expect(document.getElementById('error-banner-message')?.textContent).toContain(
+      'Backend not available — please start the sing-attune backend on port 8000 and refresh.',
+    );
+  });
 });

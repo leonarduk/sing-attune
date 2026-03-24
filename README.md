@@ -188,6 +188,15 @@ Open http://localhost:5173
 
 API docs: http://localhost:8000/docs
 
+If transcription shows HTTP 404, verify the sing-attune backend is the process listening on port `8000`:
+
+```powershell
+# Expected: {"status":"ok","version":"0.2.0",...}
+curl http://127.0.0.1:8000/health
+```
+
+If `/health` does not include a `version` field from sing-attune, stop the conflicting process on `8000`, then restart `just dev-backend`.
+
 ### Backend environment variables
 
 - `CORS_ORIGINS` — comma-separated list of allowed browser origins for the FastAPI backend. Defaults to `http://localhost:5173,http://127.0.0.1:5173`. Override this when running Vite on a different port or when you need multiple frontend origins during development.

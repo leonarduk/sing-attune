@@ -273,8 +273,10 @@ def test_transcribe_audio_file_rejects_invalid_mp3(tmp_path: Path) -> None:
     invalid_mp3_path = tmp_path / "input.mp3"
     invalid_mp3_path.write_bytes(b"not-a-valid-mp3")
 
-    with pytest.raises(TranscriptionError, match="Unsupported audio file type"):
+    with pytest.raises(TranscriptionError, match="Unsupported audio file type") as exc_info:
         transcribe_audio_file(invalid_mp3_path)
+
+    assert exc_info.value.error_type is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
 
 
 def test_transcribe_audio_file_accepts_valid_mp3_suffix_and_decodes_via_loader(
@@ -446,63 +448,6 @@ def test_load_audio_mono_decodes_mp3_with_librosa(tmp_path: Path, monkeypatch: p
     assert samples == pytest.approx(np.array([-1.0, -0.5, 0.5, 1.0], dtype=np.float32))
 
 
-def test_load_audio_mono_normalizes_loader_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    path = tmp_path / "bad.mp3"
-    path.write_bytes(b"not-an-mp3")
-    monkeypatch.setattr("backend.transcription_service.librosa.load", lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("decode fail")))
-
-    with pytest.raises(TranscriptionError, match="Unsupported audio file type") as exc_info:
-        _load_audio_mono(path)
-
-    assert exc_info.value.error_type is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
-    assert exc_info.value.category == UNSUPPORTED_AUDIO_ERROR_CATEGORY
-
-
-def test_transcribe_audio_endpoint_maps_unsupported_audio_to_bad_request(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        "backend.main.transcribe_audio_file",
-        lambda _path: (_ for _ in ()).throw(
-            TranscriptionError(
-                "Unsupported audio file type '.mp3'. Upload a .wav or .mp3 audio file.",
-                error_type=TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE,
-            )
-        ),
-    )
-
-    response = client.post(
-        "/transcribe/audio",
-        files={"file": ("take.mp3", io.BytesIO(b"not-audio"), "audio/mpeg")},
-    )
-
-    assert response.status_code == 400
-    assert response.json()["detail"] == "Unsupported audio file type '.mp3'. Upload a .wav or .mp3 audio file."
-
-
-def test_transcribe_audio_endpoint_keeps_generic_load_failures_unprocessable(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        "backend.main.transcribe_audio_file",
-        lambda _path: (_ for _ in ()).throw(
-            TranscriptionError(
-                "Failed to load audio file 'take.mp3': disk read failure",
-                error_type=TranscriptionErrorType.GENERIC,
-            )
-        ),
-    )
-
-    response = client.post(
-        "/transcribe/audio",
-        files={"file": ("take.mp3", io.BytesIO(b"not-audio"), "audio/mpeg")},
-    )
-
-    assert response.status_code == 422
-    assert "Failed to load audio file" in response.json()["detail"]
-    assert "Unsupported file type" not in response.json()["detail"]
-
-
 @pytest.mark.parametrize(
     ("sample_width", "raw_frames", "expected"),
     [
@@ -631,6 +576,49 @@ def test_transcribe_audio_endpoint_maps_service_errors(client: TestClient, monke
     assert response.json()["detail"] == "bad wav"
 
 
+def test_transcribe_audio_endpoint_maps_unsupported_audio_to_bad_request(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "backend.main.transcribe_audio_file",
+        lambda _path: (_ for _ in ()).throw(
+            TranscriptionError(
+                "Unsupported audio file type '.mp3'. Upload a .wav or .mp3 audio file.",
+                error_type=TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE,
+            )
+        ),
+    )
+
+    response = client.post(
+        "/transcribe/audio",
+        files={"file": ("take.mp3", io.BytesIO(b"not-audio"), "audio/mpeg")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Unsupported audio file type '.mp3'. Upload a .wav or .mp3 audio file."
+
+
+def test_transcribe_audio_endpoint_keeps_generic_load_failures_unprocessable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "backend.main.transcribe_audio_file",
+        lambda _path: (_ for _ in ()).throw(
+            TranscriptionError(
+                "Failed to load audio file 'take.mp3': disk read failure",
+                error_type=TranscriptionErrorType.GENERIC,
+            )
+        ),
+    )
+
+    response = client.post(
+        "/transcribe/audio",
+        files={"file": ("take.mp3", io.BytesIO(b"not-audio"), "audio/mpeg")},
+    )
+
+    assert response.status_code == 422
+    assert "Failed to load audio file" in response.json()["detail"]
+    assert "Unsupported file type" not in response.json()["detail"]
 def test_transcribe_audio_endpoint_logs_request_and_success(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -690,6 +678,18 @@ def test_transcribe_audio_endpoint_maps_missing_file_errors(client: TestClient, 
 
     assert response.status_code == 404
     assert response.json()["detail"] == "gone"
+
+
+def test_load_audio_mono_normalizes_loader_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    path = tmp_path / "bad.mp3"
+    path.write_bytes(b"not-an-mp3")
+    monkeypatch.setattr("backend.transcription_service.librosa.load", lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("decode fail")))
+
+    with pytest.raises(TranscriptionError, match="Unsupported audio file type") as exc_info:
+        _load_audio_mono(path)
+
+    assert exc_info.value.error_type is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    assert exc_info.value.category == UNSUPPORTED_AUDIO_ERROR_CATEGORY
 
 
 def test_cli_transcribe_uses_default_output_suffix(
