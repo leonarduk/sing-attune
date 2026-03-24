@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { parseMusicXmlSummary } from './transcription-api';
+import { parseMusicXmlSummary, requestTranscription } from './transcription-api';
 
 const SAMPLE_MUSICXML = `<?xml version="1.0" encoding="UTF-8"?>
 <score-partwise version="4.0">
@@ -53,5 +53,20 @@ describe('parseMusicXmlSummary', () => {
       { startSeconds: 0, endSeconds: 2, noteCount: 2 },
       { startSeconds: 3, endSeconds: 5, noteCount: 1 },
     ]);
+  });
+});
+
+describe('requestTranscription', () => {
+  it('returns a clear startup message when transcription endpoint returns 404', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      headers: new Headers(),
+      text: async () => 'Not found',
+    }));
+
+    await expect(
+      requestTranscription(new File(['audio'], 'demo.wav', { type: 'audio/wav' })),
+    ).rejects.toThrow('Backend not available for transcription. Start the sing-attune backend on port 8000 and retry.');
   });
 });

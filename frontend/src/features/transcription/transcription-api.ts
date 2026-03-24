@@ -49,6 +49,9 @@ function inferContentType(filename: string): string {
 }
 
 async function extractError(response: Response): Promise<string> {
+  if (response.status === 404) {
+    return 'Backend not available for transcription. Start the sing-attune backend on port 8000 and retry.';
+  }
   const contentType = response.headers.get('content-type') ?? '';
   if (contentType.includes('application/json')) {
     const payload = await response.json() as { detail?: string };

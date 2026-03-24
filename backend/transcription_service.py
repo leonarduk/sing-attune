@@ -100,7 +100,9 @@ def _load_audio_mono(path: Path) -> np.ndarray:
     try:
         samples, _ = librosa.load(str(path), sr=SAMPLE_RATE, mono=True)
     except Exception as exc:
-        raise TranscriptionError(f"Failed to decode audio file '{path.name}': {exc}") from exc
+        raise TranscriptionError(
+            f"Unsupported audio file type '{path.suffix.lower()}'. Upload a .wav or .mp3 audio file."
+        ) from exc
     return np.clip(samples.astype(np.float32, copy=False), -1.0, 1.0)
 
 

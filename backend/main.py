@@ -321,6 +321,11 @@ async def transcribe_audio(file: UploadFile = File(...)) -> Response:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except TranscriptionError as exc:
+        if str(exc).startswith("Unsupported audio file type"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type '{suffix}'. Upload a .wav or .mp3 audio file.",
+            ) from exc
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally:
         tmp_path.unlink(missing_ok=True)

@@ -82,11 +82,15 @@ export async function checkBackend(): Promise<void> {
   try {
     const res = await fetch('/health');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = (await res.json()) as { version: string };
+    const data = (await res.json()) as { version?: unknown };
+    const version = typeof data.version === 'string' ? data.version : null;
+    if (!version) {
+      throw new Error('Unexpected /health response (missing version).');
+    }
     clearErrorBanner();
-    setAppStatus(`backend ok (v${data.version})`, 'success');
+    setAppStatus(`backend ok (v${version})`, 'success');
   } catch (err) {
-    showErrorBanner('Cannot reach backend. Start backend and refresh the page.');
+    showErrorBanner('Backend not available — please start the sing-attune backend on port 8000 and refresh.');
     setAppStatus('backend unreachable', 'error');
     console.error('Backend health check failed:', err);
   }
