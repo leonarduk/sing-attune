@@ -269,6 +269,23 @@ def test_transcribe_audio_file_rejects_missing_or_unsupported_input(tmp_path: Pa
         transcribe_audio_file(invalid_path)
 
 
+def test_classify_audio_load_error_handles_backend_specific_signals() -> None:
+    class NoBackendError(Exception):
+        pass
+
+    class SyntheticSoundfileError(Exception):
+        pass
+
+    SyntheticSoundfileError.__module__ = "soundfile.synthetic"
+
+    assert classify_audio_load_error(NoBackendError("backend unavailable")) is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    assert classify_audio_load_error(EOFError("unexpected eof")) is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    assert (
+        classify_audio_load_error(SyntheticSoundfileError("load failed"))
+        is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    )
+
+
 def test_transcribe_audio_file_rejects_invalid_mp3(tmp_path: Path) -> None:
     invalid_mp3_path = tmp_path / "input.mp3"
     invalid_mp3_path.write_bytes(b"not-a-valid-mp3")
