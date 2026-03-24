@@ -22,7 +22,6 @@ from .session.store import list_sessions, read_session, save_session
 from .transcription_service import (
     TranscriptionError,
     TranscriptionErrorType,
-    UNSUPPORTED_AUDIO_ERROR_CATEGORY,
     transcribe_audio_file,
 )
 
@@ -347,13 +346,8 @@ async def transcribe_audio(file: UploadFile = File(...)) -> Response:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except TranscriptionError as exc:
         if exc.error_type is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type '{suffix}'. Upload a .wav or .mp3 audio file.",
-            ) from exc
-        logger.error("Transcription failed path=%s error=%s", tmp_path, exc)
-        if exc.category == UNSUPPORTED_AUDIO_ERROR_CATEGORY:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.error("Transcription failed path=%s error=%s", tmp_path, exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally:
         tmp_path.unlink(missing_ok=True)
