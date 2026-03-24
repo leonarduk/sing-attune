@@ -4,6 +4,7 @@ Day 6: Playback state machine + real WebSocket pitch stream.
 """
 
 import asyncio
+import logging
 import os
 from pathlib import Path
 
@@ -21,8 +22,15 @@ from .session.store import list_sessions, read_session, save_session
 from .transcription_service import (
     TranscriptionError,
     TranscriptionErrorType,
+    UNSUPPORTED_AUDIO_ERROR_CATEGORY,
     transcribe_audio_file,
 )
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173",
@@ -275,9 +283,9 @@ async def pitch_stream(websocket: WebSocket) -> None:
                 # No frames for _WS_KEEPALIVE_S seconds (e.g. paused) — send ping
                 await websocket.send_json({"ping": True})
     except WebSocketDisconnect:
-        pass
+        logger.info("WebSocket pitch stream disconnected by client")
     except Exception:
-        pass
+        logger.exception("WebSocket pitch stream error")
     finally:
         _pipeline.remove_client(q)
 
@@ -311,8 +319,14 @@ async def session_get(session_id: str) -> JSONResponse:
 
 @app.post("/transcribe/audio")
 async def transcribe_audio(file: UploadFile = File(...)) -> Response:
+    logger.info(
+        "Transcription request received filename=%s size=%s",
+        file.filename,
+        getattr(file, "size", None),
+    )
     suffix = Path(file.filename or "audio.wav").suffix.lower()
     if suffix not in {".wav", ".wave", ".mp3"}:
+        logger.warning("Rejected unsupported transcription file type suffix=%s", suffix)
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported file type '{suffix}'. Upload a .wav or .mp3 audio file.",
@@ -322,7 +336,14 @@ async def transcribe_audio(file: UploadFile = File(...)) -> Response:
 
     try:
         transcription = transcribe_audio_file(tmp_path)
+        logger.info(
+            "Transcription success notes=%d tempo_bpm=%.1f key_signature=%s",
+            transcription.note_count,
+            transcription.tempo_bpm,
+            transcription.key_signature,
+        )
     except FileNotFoundError as exc:
+        logger.error("Transcription temp file missing path=%s error=%s", tmp_path, exc)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except TranscriptionError as exc:
         if exc.error_type is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE:
@@ -330,6 +351,9 @@ async def transcribe_audio(file: UploadFile = File(...)) -> Response:
                 status_code=400,
                 detail=f"Unsupported file type '{suffix}'. Upload a .wav or .mp3 audio file.",
             ) from exc
+        logger.error("Transcription failed path=%s error=%s", tmp_path, exc)
+        if exc.category == UNSUPPORTED_AUDIO_ERROR_CATEGORY:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally:
         tmp_path.unlink(missing_ok=True)
