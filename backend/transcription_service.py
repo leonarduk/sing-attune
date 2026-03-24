@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 import wave
 
@@ -28,6 +29,7 @@ HOP_SIZE = WINDOW_SIZE // 2
 DEFAULT_TEMPO_BPM = 120.0
 MIN_NOTE_DURATION_SECONDS = 0.08
 MAX_MIDI_JUMP_FOR_SAME_NOTE = 0.75
+logger = logging.getLogger(__name__)
 
 
 class TranscriptionError(ValueError):
@@ -44,9 +46,12 @@ class TranscriptionResult:
 
 def transcribe_audio_file(path: str | Path) -> TranscriptionResult:
     audio_path = Path(path)
+    logger.info("Loading transcription audio path=%s", audio_path)
     if not audio_path.exists():
+        logger.error("Transcription audio file missing path=%s", audio_path)
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
     if audio_path.suffix.lower() not in SUPPORTED_AUDIO_SUFFIXES:
+        logger.warning("Unsupported transcription audio suffix=%s", audio_path.suffix.lower())
         raise TranscriptionError(
             f"Unsupported audio file type '{audio_path.suffix}'. Upload a .wav or .mp3 audio file."
         )
@@ -58,7 +63,14 @@ def transcribe_audio_file(path: str | Path) -> TranscriptionResult:
         )
 
     frames = _detect_pitch_frames(samples)
+    logger.info("Detected pitch frames count=%d path=%s", len(frames), audio_path)
     note_events = _frames_to_note_events(frames, len(samples) / SAMPLE_RATE)
+    logger.info(
+        "Extracted note events count=%d duration_seconds=%.2f path=%s",
+        len(note_events),
+        len(samples) / SAMPLE_RATE,
+        audio_path,
+    )
     if not note_events:
         raise TranscriptionError(
             "No pitched notes were detected. Check that the audio contains a clear monophonic vocal line."
@@ -75,6 +87,12 @@ def transcribe_audio_file(path: str | Path) -> TranscriptionResult:
         )
     except ValueError as exc:
         raise TranscriptionError(str(exc)) from exc
+    logger.info(
+        "Quantized transcription summary tempo_bpm=%.1f key_signature=%s quantized_events=%d",
+        tempo_bpm,
+        key_signature,
+        len(quantized_events),
+    )
     score_model = score_model_from_quantized_events(
         quantized_events,
         metadata=ScoreMetadata(
@@ -100,7 +118,9 @@ def _load_audio_mono(path: Path) -> np.ndarray:
     try:
         samples, _ = librosa.load(str(path), sr=SAMPLE_RATE, mono=True)
     except Exception as exc:
-        raise TranscriptionError(f"Failed to decode audio file '{path.name}': {exc}") from exc
+        raise TranscriptionError(
+            f"Unsupported audio file type '{path.suffix}'. Upload a .wav or .mp3 audio file."
+        ) from exc
     return np.clip(samples.astype(np.float32, copy=False), -1.0, 1.0)
 
 
@@ -225,6 +245,7 @@ def _append_note_event(
             confidence=average_confidence,
         )
     )
+
 
 def _midi_to_pitch_name(pitch_hz: float) -> str:
     try:
