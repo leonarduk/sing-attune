@@ -310,6 +310,29 @@ def test_classify_audio_load_error_distinguishes_decode_from_operational_errors(
     assert classify_audio_load_error(operational_error) is TranscriptionErrorType.GENERIC
 
 
+def test_classify_audio_load_error_detects_known_decode_exception_names() -> None:
+    no_backend_exc = type("NoBackendError", (Exception,), {})("no backend available")
+    decode_exc = type("DecodeError", (Exception,), {})("unable to decode")
+
+    assert classify_audio_load_error(no_backend_exc) is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    assert classify_audio_load_error(decode_exc) is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+
+
+def test_classify_audio_load_error_treats_eof_and_decoder_modules_as_unsupported() -> None:
+    decoder_module_exc = type(
+        "BackendFailure",
+        (Exception,),
+        {"__module__": "audioread.ffdec"},
+    )("backend decoder failure")
+
+    assert classify_audio_load_error(EOFError("unexpected eof")) is (
+        TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    )
+    assert classify_audio_load_error(decoder_module_exc) is (
+        TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
+    )
+
+
 def test_transcribe_audio_file_preserves_non_format_load_failures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
