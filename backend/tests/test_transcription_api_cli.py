@@ -157,7 +157,7 @@ def test_transcribe_audio_endpoint_returns_musicxml(
 def test_transcribe_audio_endpoint_rejects_unsupported_type(client: TestClient) -> None:
     response = client.post(
         "/transcribe/audio",
-        files={"file": ("take.mp3", io.BytesIO(b"not-wav"), "audio/mpeg")},
+        files={"file": ("take.ogg", io.BytesIO(b"not-audio"), "audio/ogg")},
     )
 
     assert response.status_code == 400
@@ -211,10 +211,18 @@ def test_transcribe_audio_file_rejects_missing_or_unsupported_input(tmp_path: Pa
     with pytest.raises(FileNotFoundError, match="Audio file not found"):
         transcribe_audio_file(missing_path)
 
-    invalid_path = tmp_path / "input.mp3"
-    invalid_path.write_bytes(b"not-a-wav")
+    invalid_path = tmp_path / "input.ogg"
+    invalid_path.write_bytes(b"not-audio")
     with pytest.raises(TranscriptionError, match="Unsupported audio file type"):
         transcribe_audio_file(invalid_path)
+
+
+def test_transcribe_audio_file_rejects_invalid_mp3(tmp_path: Path) -> None:
+    invalid_mp3_path = tmp_path / "input.mp3"
+    invalid_mp3_path.write_bytes(b"not-a-valid-mp3")
+
+    with pytest.raises(TranscriptionError, match="Failed to decode audio file"):
+        transcribe_audio_file(invalid_mp3_path)
 
 
 def test_transcribe_audio_file_rejects_short_audio(tmp_path: Path) -> None:
