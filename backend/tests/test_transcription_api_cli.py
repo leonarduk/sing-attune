@@ -20,9 +20,11 @@ from backend.music import quantize_note_events
 from backend.transcription_service import (
     HOP_SIZE,
     SAMPLE_RATE,
+    UNSUPPORTED_AUDIO_ERROR_CATEGORY,
     TranscriptionError,
     TranscriptionResult,
     _frames_to_note_events,
+    _load_audio_mono,
     _load_wav_mono,
     _midi_to_pitch_name,
     _pcm_bytes_to_float32,
@@ -161,7 +163,27 @@ def test_transcribe_audio_endpoint_rejects_unsupported_type(client: TestClient) 
     )
 
     assert response.status_code == 400
-    assert "Unsupported file type" in response.json()["detail"]
+    assert "Unsupported audio file type" in response.json()["detail"]
+
+
+def test_transcribe_audio_endpoint_maps_decode_errors_to_bad_request(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "backend.main.transcribe_audio_file",
+        lambda _path: (_ for _ in ()).throw(
+            TranscriptionError("Invalid WAV file: broken data", category=UNSUPPORTED_AUDIO_ERROR_CATEGORY)
+        ),
+    )
+
+    response = client.post(
+        "/transcribe/audio",
+        files={"file": ("take.wav", io.BytesIO(b"RIFF....WAVE"), "audio/wav")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid WAV file: broken data"
 
 
 def test_cli_transcribe_writes_musicxml_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -428,6 +450,52 @@ def test_transcribe_audio_endpoint_maps_service_errors(client: TestClient, monke
     assert response.json()["detail"] == "bad wav"
 
 
+def test_transcribe_audio_endpoint_logs_request_and_success(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(
+        "backend.main.transcribe_audio_file",
+        lambda _path: TranscriptionResult(
+            musicxml="<?xml version='1.0' encoding='utf-8'?><score-partwise version='4.0'></score-partwise>",
+            tempo_bpm=120.0,
+            key_signature="C",
+            note_count=2,
+        ),
+    )
+    caplog.set_level("INFO")
+
+    response = client.post(
+        "/transcribe/audio",
+        files={"file": ("take.wav", io.BytesIO(b"RIFF....WAVE"), "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    assert any(record.levelname == "INFO" and "Transcription request received" in record.message for record in caplog.records)
+    assert any(record.levelname == "INFO" and "Transcription success" in record.message for record in caplog.records)
+
+
+def test_transcribe_audio_endpoint_logs_failures(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(
+        "backend.main.transcribe_audio_file",
+        lambda _path: (_ for _ in ()).throw(TranscriptionError("pipeline exploded")),
+    )
+    caplog.set_level("INFO")
+
+    response = client.post(
+        "/transcribe/audio",
+        files={"file": ("take.wav", io.BytesIO(b"RIFF....WAVE"), "audio/wav")},
+    )
+
+    assert response.status_code == 422
+    assert any(record.levelname == "ERROR" and "Transcription failed" in record.message for record in caplog.records)
+
+
 def test_transcribe_audio_endpoint_maps_missing_file_errors(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "backend.main.transcribe_audio_file",
@@ -441,6 +509,17 @@ def test_transcribe_audio_endpoint_maps_missing_file_errors(client: TestClient, 
 
     assert response.status_code == 404
     assert response.json()["detail"] == "gone"
+
+
+def test_load_audio_mono_normalizes_loader_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    path = tmp_path / "bad.mp3"
+    path.write_bytes(b"not-an-mp3")
+    monkeypatch.setattr("backend.transcription_service.librosa.load", lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("decode fail")))
+
+    with pytest.raises(TranscriptionError, match="Unsupported audio file type") as exc_info:
+        _load_audio_mono(path)
+
+    assert exc_info.value.category == UNSUPPORTED_AUDIO_ERROR_CATEGORY
 
 
 def test_cli_transcribe_uses_default_output_suffix(

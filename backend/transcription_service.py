@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 import wave
 
@@ -28,10 +29,18 @@ HOP_SIZE = WINDOW_SIZE // 2
 DEFAULT_TEMPO_BPM = 120.0
 MIN_NOTE_DURATION_SECONDS = 0.08
 MAX_MIDI_JUMP_FOR_SAME_NOTE = 0.75
+logger = logging.getLogger(__name__)
 
 
 class TranscriptionError(ValueError):
     """Raised when an audio file cannot be transcribed."""
+
+    def __init__(self, message: str, *, category: str = "processing") -> None:
+        super().__init__(message)
+        self.category = category
+
+
+UNSUPPORTED_AUDIO_ERROR_CATEGORY = "unsupported_audio"
 
 
 @dataclass(frozen=True)
@@ -44,11 +53,15 @@ class TranscriptionResult:
 
 def transcribe_audio_file(path: str | Path) -> TranscriptionResult:
     audio_path = Path(path)
+    logger.info("Loading transcription audio path=%s", audio_path)
     if not audio_path.exists():
+        logger.error("Transcription audio file missing path=%s", audio_path)
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
     if audio_path.suffix.lower() not in SUPPORTED_AUDIO_SUFFIXES:
+        logger.warning("Unsupported transcription audio suffix=%s", audio_path.suffix.lower())
         raise TranscriptionError(
-            f"Unsupported audio file type '{audio_path.suffix}'. Upload a .wav or .mp3 audio file."
+            f"Unsupported audio file type '{audio_path.suffix}'. Upload a .wav or .mp3 audio file.",
+            category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
         )
 
     samples = _load_audio_mono(audio_path)
@@ -58,7 +71,14 @@ def transcribe_audio_file(path: str | Path) -> TranscriptionResult:
         )
 
     frames = _detect_pitch_frames(samples)
+    logger.info("Detected pitch frames count=%d path=%s", len(frames), audio_path)
     note_events = _frames_to_note_events(frames, len(samples) / SAMPLE_RATE)
+    logger.info(
+        "Extracted note events count=%d duration_seconds=%.2f path=%s",
+        len(note_events),
+        len(samples) / SAMPLE_RATE,
+        audio_path,
+    )
     if not note_events:
         raise TranscriptionError(
             "No pitched notes were detected. Check that the audio contains a clear monophonic vocal line."
@@ -75,6 +95,12 @@ def transcribe_audio_file(path: str | Path) -> TranscriptionResult:
         )
     except ValueError as exc:
         raise TranscriptionError(str(exc)) from exc
+    logger.info(
+        "Quantized transcription summary tempo_bpm=%.1f key_signature=%s quantized_events=%d",
+        tempo_bpm,
+        key_signature,
+        len(quantized_events),
+    )
     score_model = score_model_from_quantized_events(
         quantized_events,
         metadata=ScoreMetadata(
@@ -100,7 +126,10 @@ def _load_audio_mono(path: Path) -> np.ndarray:
     try:
         samples, _ = librosa.load(str(path), sr=SAMPLE_RATE, mono=True)
     except Exception as exc:
-        raise TranscriptionError(f"Failed to decode audio file '{path.name}': {exc}") from exc
+        raise TranscriptionError(
+            f"Unsupported audio file type '{path.suffix}'. Upload a .wav or .mp3 audio file.",
+            category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+        ) from exc
     return np.clip(samples.astype(np.float32, copy=False), -1.0, 1.0)
 
 
@@ -113,16 +142,25 @@ def _load_wav_mono(path: Path) -> np.ndarray:
             frame_count = wav_file.getnframes()
             raw_frames = wav_file.readframes(frame_count)
     except (wave.Error, EOFError) as exc:
-        raise TranscriptionError(f"Invalid WAV file: {exc}") from exc
+        raise TranscriptionError(
+            f"Invalid WAV file: {exc}",
+            category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+        ) from exc
 
     if channels <= 0:
-        raise TranscriptionError("Invalid WAV file: channel count must be positive")
+        raise TranscriptionError(
+            "Invalid WAV file: channel count must be positive",
+            category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+        )
     if sample_width not in {1, 2, 3, 4}:
-        raise TranscriptionError(f"Unsupported WAV sample width: {sample_width * 8} bits")
+        raise TranscriptionError(
+            f"Unsupported WAV sample width: {sample_width * 8} bits",
+            category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+        )
 
     samples = _pcm_bytes_to_float32(raw_frames, sample_width=sample_width)
     if len(samples) == 0:
-        raise TranscriptionError("Audio file is empty")
+        raise TranscriptionError("Audio file is empty", category=UNSUPPORTED_AUDIO_ERROR_CATEGORY)
 
     if channels > 1:
         usable = len(samples) - (len(samples) % channels)
@@ -143,7 +181,10 @@ def _pcm_bytes_to_float32(raw_frames: bytes, *, sample_width: int) -> np.ndarray
         return np.frombuffer(raw_frames, dtype="<i2").astype(np.float32) / 32768.0
     if sample_width == 4:
         return np.frombuffer(raw_frames, dtype="<i4").astype(np.float32) / 2147483648.0
-    raise TranscriptionError(f"Unsupported WAV sample width: {sample_width * 8} bits")
+    raise TranscriptionError(
+        f"Unsupported WAV sample width: {sample_width * 8} bits",
+        category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+    )
 
 
 def _pcm24le_to_float32(raw_frames: bytes) -> np.ndarray:
@@ -225,6 +266,7 @@ def _append_note_event(
             confidence=average_confidence,
         )
     )
+
 
 def _midi_to_pitch_name(pitch_hz: float) -> str:
     try:
