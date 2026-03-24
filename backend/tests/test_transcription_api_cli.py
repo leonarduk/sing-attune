@@ -291,12 +291,16 @@ def test_transcribe_audio_file_preserves_non_format_load_failures(
         transcribe_audio_file(audio_path)
 
     assert exc_info.value.error_type is TranscriptionErrorType.GENERIC
+
+
 def test_transcribe_audio_file_rejects_invalid_mp3(tmp_path: Path) -> None:
     invalid_mp3_path = tmp_path / "input.mp3"
     invalid_mp3_path.write_bytes(b"not-a-valid-mp3")
 
-    with pytest.raises(TranscriptionError, match="Failed to decode audio file"):
+    with pytest.raises(TranscriptionError, match="Unsupported audio file type") as exc_info:
         transcribe_audio_file(invalid_mp3_path)
+
+    assert exc_info.value.error_type is TranscriptionErrorType.UNSUPPORTED_AUDIO_TYPE
 
 
 def test_transcribe_audio_file_accepts_valid_mp3_suffix_and_decodes_via_loader(
