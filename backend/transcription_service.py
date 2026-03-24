@@ -35,6 +35,13 @@ logger = logging.getLogger(__name__)
 class TranscriptionError(ValueError):
     """Raised when an audio file cannot be transcribed."""
 
+    def __init__(self, message: str, *, category: str = "processing") -> None:
+        super().__init__(message)
+        self.category = category
+
+
+UNSUPPORTED_AUDIO_ERROR_CATEGORY = "unsupported_audio"
+
 
 @dataclass(frozen=True)
 class TranscriptionResult:
@@ -53,7 +60,8 @@ def transcribe_audio_file(path: str | Path) -> TranscriptionResult:
     if audio_path.suffix.lower() not in SUPPORTED_AUDIO_SUFFIXES:
         logger.warning("Unsupported transcription audio suffix=%s", audio_path.suffix.lower())
         raise TranscriptionError(
-            f"Unsupported audio file type '{audio_path.suffix}'. Upload a .wav or .mp3 audio file."
+            f"Unsupported audio file type '{audio_path.suffix}'. Upload a .wav or .mp3 audio file.",
+            category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
         )
 
     samples = _load_audio_mono(audio_path)
@@ -119,7 +127,8 @@ def _load_audio_mono(path: Path) -> np.ndarray:
         samples, _ = librosa.load(str(path), sr=SAMPLE_RATE, mono=True)
     except Exception as exc:
         raise TranscriptionError(
-            f"Unsupported audio file type '{path.suffix}'. Upload a .wav or .mp3 audio file."
+            f"Unsupported audio file type '{path.suffix}'. Upload a .wav or .mp3 audio file.",
+            category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
         ) from exc
     return np.clip(samples.astype(np.float32, copy=False), -1.0, 1.0)
 
@@ -133,16 +142,25 @@ def _load_wav_mono(path: Path) -> np.ndarray:
             frame_count = wav_file.getnframes()
             raw_frames = wav_file.readframes(frame_count)
     except (wave.Error, EOFError) as exc:
-        raise TranscriptionError(f"Invalid WAV file: {exc}") from exc
+        raise TranscriptionError(
+            f"Invalid WAV file: {exc}",
+            category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+        ) from exc
 
     if channels <= 0:
-        raise TranscriptionError("Invalid WAV file: channel count must be positive")
+        raise TranscriptionError(
+            "Invalid WAV file: channel count must be positive",
+            category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+        )
     if sample_width not in {1, 2, 3, 4}:
-        raise TranscriptionError(f"Unsupported WAV sample width: {sample_width * 8} bits")
+        raise TranscriptionError(
+            f"Unsupported WAV sample width: {sample_width * 8} bits",
+            category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+        )
 
     samples = _pcm_bytes_to_float32(raw_frames, sample_width=sample_width)
     if len(samples) == 0:
-        raise TranscriptionError("Audio file is empty")
+        raise TranscriptionError("Audio file is empty", category=UNSUPPORTED_AUDIO_ERROR_CATEGORY)
 
     if channels > 1:
         usable = len(samples) - (len(samples) % channels)
@@ -163,7 +181,10 @@ def _pcm_bytes_to_float32(raw_frames: bytes, *, sample_width: int) -> np.ndarray
         return np.frombuffer(raw_frames, dtype="<i2").astype(np.float32) / 32768.0
     if sample_width == 4:
         return np.frombuffer(raw_frames, dtype="<i4").astype(np.float32) / 2147483648.0
-    raise TranscriptionError(f"Unsupported WAV sample width: {sample_width * 8} bits")
+    raise TranscriptionError(
+        f"Unsupported WAV sample width: {sample_width * 8} bits",
+        category=UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+    )
 
 
 def _pcm24le_to_float32(raw_frames: bytes) -> np.ndarray:

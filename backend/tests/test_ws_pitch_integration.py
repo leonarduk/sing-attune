@@ -140,3 +140,55 @@ def test_fan_out_suppresses_exception_from_bad_queue() -> None:
         q.put_nowait = original_put
 
     pipeline.remove_client(q)
+
+
+def test_ws_pitch_logs_client_disconnect(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def _raise_disconnect(awaitable, timeout):  # noqa: ARG001
+        awaitable.close()
+        raise backend_main.WebSocketDisconnect()
+
+    monkeypatch.setattr(
+        "backend.main.asyncio.wait_for",
+        _raise_disconnect,
+    )
+    caplog.set_level("INFO")
+
+    with client.websocket_connect("/ws/pitch") as ws:
+        assert _receive_json_with_timeout(ws, timeout_s=2.0) == {"status": "connected"}
+
+    assert any(
+        record.levelname == "INFO" and "disconnected by client" in record.message
+        for record in caplog.records
+    )
+    assert not any(
+        record.levelname in {"ERROR", "CRITICAL"} and "WebSocket pitch stream error" in record.message
+        for record in caplog.records
+    )
+
+
+def test_ws_pitch_logs_unexpected_exceptions(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def _raise_runtime_error(awaitable, timeout):  # noqa: ARG001
+        awaitable.close()
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        "backend.main.asyncio.wait_for",
+        _raise_runtime_error,
+    )
+    caplog.set_level("INFO")
+
+    with client.websocket_connect("/ws/pitch") as ws:
+        assert _receive_json_with_timeout(ws, timeout_s=2.0) == {"status": "connected"}
+
+    assert any(
+        record.levelname == "ERROR" and "WebSocket pitch stream error" in record.message
+        for record in caplog.records
+    )

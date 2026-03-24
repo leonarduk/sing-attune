@@ -19,7 +19,11 @@ from .audio.capture import list_input_devices, default_input_device_id
 from .audio.pipeline import PlaybackPipeline, _CLIENT_QUEUE_MAXSIZE
 from .models.session import SessionSaveRequest
 from .session.store import list_sessions, read_session, save_session
-from .transcription_service import TranscriptionError, transcribe_audio_file
+from .transcription_service import (
+    UNSUPPORTED_AUDIO_ERROR_CATEGORY,
+    TranscriptionError,
+    transcribe_audio_file,
+)
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -342,11 +346,8 @@ async def transcribe_audio(file: UploadFile = File(...)) -> Response:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except TranscriptionError as exc:
         logger.error("Transcription failed path=%s error=%s", tmp_path, exc)
-        if "Unsupported audio file type" in str(exc):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type '{suffix}'. Upload a .wav or .mp3 audio file.",
-            ) from exc
+        if exc.category == UNSUPPORTED_AUDIO_ERROR_CATEGORY:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally:
         tmp_path.unlink(missing_ok=True)
