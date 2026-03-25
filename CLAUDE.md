@@ -60,6 +60,11 @@
 - **Never start a coding task without a branch** — creating a branch and then leaving it at main's content is the same as not creating it.
 - **Before writing test mocks: read the real class being mocked** — check its `__init__` signature and any methods called on it during the code path under test. A mock with the wrong signature will cause CI to fail with `TypeError`.
 - **Never report "done" while CI is still running or failing** — wait for CI to complete and triage any failures before closing the loop with the user.
+- **Preserve decision context for non-obvious code** — when adding or changing magic numbers, thresholds, retries, timeouts, workarounds, temporary logic, or unusual branches, record **why** the decision exists, not just what the code does.
+- Prefer short comments near the code for business rules, constraints, tradeoffs, historical reasons, or temporary blockers.
+- If deeper context exists, add a brief pointer to the issue, ADR, incident, benchmark, or external spec.
+- Do not add comments that merely restate obvious code; add comments where a future maintainer would otherwise have to guess.
+- In review, treat missing rationale for non-obvious decisions as a quality issue, not optional polish.
 
 ## Before every commit
 
