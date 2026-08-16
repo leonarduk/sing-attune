@@ -21,7 +21,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "opensheetmusicdisplay": "^1.8.0"
+    "opensheetmusicdisplay": "^1.9.9"
   },
   "license": "Apache-2.0",
   "main": "electron/main.js",
