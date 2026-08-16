@@ -5,6 +5,9 @@
 
 **Practice your choir part. Hear the notes. Sing along. See your pitch in real time.**
 
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the current module boundaries and
+the working open-core classification.
+
 sing-attune plays your part from a MusicXML score through your headphones. You sing along. As you sing, your pitch appears live on the score — a moving dot over the notation, green when you're on it, red when you're not. No post-hoc analysis, no percentage scores. Just an honest mirror of what your voice is doing, in the moment, against what the music asks for.
 
 ## Demo
