@@ -10,8 +10,7 @@
  * After a score loads it publishes a ScoreSession via setSession().
  * Before loading it calls clearSession() so other features can tear down.
  */
-import { ScoreRenderer, type ScoreModel } from '../../score/renderer';
-import { ScoreCursor } from '../../score/cursor';
+import { OsmdScoreRenderer, type ScoreModel } from '../../score/renderer';
 import { PlaybackEngine } from '../../playback/engine';
 import './score-loader.css';
 import {
@@ -28,7 +27,7 @@ import { setAppStatus } from '../../services/status';
 import { showToast } from '../../services/toast';
 import { getVisiblePartOptions } from '../../part-options';
 import { beatToMs, seekPlayback, postPlayback } from '../../transport/controls';
-import { beatFromClick, extractMeasureHitZones, measureBoundaryFromPoint } from '../../score/click-seek';
+import { beatFromClick, measureBoundaryFromPoint } from '../../score/click-seek';
 import { clearLoopRegion, getLoopRegion, onLoopRegionChanged, setLoopEnd, setLoopStart } from '../../services/loop-region';
 import { type Feature } from '../../feature-types';
 
@@ -94,7 +93,7 @@ function mount(slot: HTMLElement): void {
     const region = getLoopRegion();
     if (!region.active) return;
 
-    const zones = extractMeasureHitZones(session.renderer.osmd);
+    const zones = session.renderer.getMeasureHitZones();
     if (zones.length === 0) return;
 
     const layer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -182,7 +181,7 @@ function mount(slot: HTMLElement): void {
     // try/catch, so it cannot throw.
     previousSession.engine.stop();
     previousSession.cursor.stop();
-    previousSession.cursor.osmd.cursor.show();
+    previousSession.cursor.show();
 
     // Best-effort backend notification so the pipeline resets its state.
     // Failure is non-fatal — audio is already silent.
@@ -238,7 +237,7 @@ function mount(slot: HTMLElement): void {
       console.error('[Soundfont] load error:', err);
     });
 
-    const renderer = new ScoreRenderer(scoreContainerEl);
+    const renderer = new OsmdScoreRenderer(scoreContainerEl);
     let model: ScoreModel;
 
     try {
@@ -283,7 +282,7 @@ function mount(slot: HTMLElement): void {
       );
 
       renderer.applyVisualTranspose(getTransposeSemitones());
-      const cursor = new ScoreCursor(renderer.osmd, model);
+      const cursor = renderer.createCursor(model);
       renderer.setHighlightedPart(selectedPart);
 
       setSession({ model, renderer, cursor, engine, selectedPart });
@@ -320,7 +319,7 @@ function mount(slot: HTMLElement): void {
     svgPoint.y = event.clientY;
     const local = svgPoint.matrixTransform(ctm.inverse());
 
-    const zones = extractMeasureHitZones(r.osmd);
+    const zones = r.getMeasureHitZones();
     if (event.shiftKey) {
       const boundary = measureBoundaryFromPoint(zones, local.x, local.y);
       if (!boundary) return;
