@@ -57,7 +57,7 @@ export function getCursorX(): number {
   if (!session) return 0;
   const scoreContainerEl = document.getElementById('score-container') as HTMLDivElement | null;
   if (!scoreContainerEl) return 0;
-  const cursorEl = session.cursor.osmd.cursor.cursorElement;
+  const cursorEl = session.cursor.getElement();
   if (!cursorEl) return 0;
   const scoreRect = scoreContainerEl.getBoundingClientRect();
   const cursorRect = cursorEl.getBoundingClientRect();

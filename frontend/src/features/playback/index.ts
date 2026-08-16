@@ -413,7 +413,7 @@ function mount(_slot: HTMLElement): void {
           syncOffsetMs: null,
         });
         cursor.stop();
-        cursor.osmd.cursor.show();
+        cursor.show();
       }
       engine.play(fromBeat);
       updateMediaSessionState('playing');
@@ -523,7 +523,7 @@ function mount(_slot: HTMLElement): void {
     finishPracticeSessionCapture();
     stopCursorRaf();
     session.cursor.stop();
-    session.cursor.osmd.cursor.show();
+    session.cursor.show();
     headphoneWarning.classList.add('hidden');
     sessionSummaryTracker.reset();
     stopSessionRecording();

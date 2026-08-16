@@ -8,8 +8,8 @@
  * but is not used in normal operation.
  *
  * Design notes:
- *   - osmd is public so main.ts can call osmd.cursor.show() after stop()
- *     (stop() hides the cursor; show() is needed before RAF starts).
+ *   - OSMD stays private; stable show() and getElement() methods cover the
+ *     controls and geometry needed by playback and pitch projection.
  *   - Cursor advance is O(1) amortised during forward playback: we never
  *     reset unless seeking backward, so we only call cursor.next() for the
  *     delta on each RAF frame.
@@ -30,8 +30,7 @@ import type { ScoreModel } from './renderer';
 import { elapsedToBeat } from './timing';
 
 export class ScoreCursor {
-  /** Public so main.ts can call osmd.cursor.show() after stop(). */
-  readonly osmd: OpenSheetMusicDisplay;
+  private readonly osmd: OpenSheetMusicDisplay;
   private readonly model: ScoreModel;
 
   private rafId: number | null = null;
@@ -107,6 +106,16 @@ export class ScoreCursor {
 
   get playing(): boolean {
     return this._playing;
+  }
+
+  /** Show the renderer cursor without exposing OSMD to playback consumers. */
+  show(): void {
+    this.osmd.cursor.show();
+  }
+
+  /** Return the cursor element used by screen-coordinate projections. */
+  getElement(): HTMLElement | null {
+    return this.osmd.cursor.cursorElement ?? null;
   }
 
   // ── Private ───────────────────────────────────────────────────────────────────

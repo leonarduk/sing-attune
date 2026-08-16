@@ -10,6 +10,8 @@
  * Never use OSMD note positions for timing — they differ from the backend model.
  */
 import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
+import { extractMeasureHitZones, type MeasureHitZone } from './click-seek';
+import { ScoreCursor } from './cursor';
 
 const OSMD_SKY_BOTTOM_LINE_WARNING = 'Not enough lines for SkyBottomLine calculation';
 
@@ -66,10 +68,24 @@ export interface ScoreModel {
   total_beats: number;
 }
 
-export class ScoreRenderer {
-  readonly osmd: OpenSheetMusicDisplay;
+/** Stable boundary consumed by playback, practice, and overlay features. */
+export interface ScoreRenderer {
+  readonly loaded: boolean;
+  readonly scoreModel: ScoreModel | null;
+  readonly currentPart: string | null;
+  load(file: File): Promise<ScoreModel>;
+  createCursor(model: ScoreModel): ScoreCursor;
+  getMeasureHitZones(): MeasureHitZone[];
+  setHighlightedPart(partName: string): void;
+  applyVisualTranspose(semitones: number): void;
+}
+
+/** OSMD-backed implementation of the stable score-rendering boundary. */
+export class OsmdScoreRenderer implements ScoreRenderer {
+  private readonly osmd: OpenSheetMusicDisplay;
   private _loaded = false;
   private visualTransposeSemitones = 0;
+  private _currentPart: string | null = null;
   public scoreModel: ScoreModel | null = null;
 
   constructor(container: HTMLElement) {
@@ -133,6 +149,18 @@ export class ScoreRenderer {
     return this._loaded;
   }
 
+  get currentPart(): string | null {
+    return this._currentPart;
+  }
+
+  createCursor(model: ScoreModel): ScoreCursor {
+    return new ScoreCursor(this.osmd, model);
+  }
+
+  getMeasureHitZones(): MeasureHitZone[] {
+    return extractMeasureHitZones(this.osmd);
+  }
+
   /**
    * Best-effort part highlighting hook.
    *
@@ -141,7 +169,8 @@ export class ScoreRenderer {
    * current time position, but not persistently style a selected part.
    * Keep this hook so app.ts can call it if OSMD gains such API later.
    */
-  setHighlightedPart(_partName: string): void {
+  setHighlightedPart(partName: string): void {
+    this._currentPart = partName;
     // Intentionally a no-op due to current OSMD public API limitations.
   }
 

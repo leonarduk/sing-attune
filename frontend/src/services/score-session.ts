@@ -13,7 +13,7 @@
  * - `clearSession()` is called before each new score load so features can
  *   clean up prior state.
  */
-import { type ScoreModel, ScoreRenderer } from '../score/renderer';
+import { type ScoreModel, type ScoreRenderer } from '../score/renderer';
 import { ScoreCursor } from '../score/cursor';
 import { PlaybackEngine } from '../playback/engine';
 
