@@ -14,7 +14,7 @@
  *   clean up prior state.
  */
 import { type ScoreModel, type ScoreRenderer } from '../score/renderer';
-import { ScoreCursor } from '../score/cursor';
+import { type ScoreCursor } from '../score/cursor';
 import { PlaybackEngine } from '../playback/engine';
 
 export interface ScoreSession {

@@ -11,7 +11,7 @@
  */
 import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { extractMeasureHitZones, type MeasureHitZone } from './click-seek';
-import { ScoreCursor } from './cursor';
+import { OsmdScoreCursor, type ScoreCursor } from './cursor';
 
 const OSMD_SKY_BOTTOM_LINE_WARNING = 'Not enough lines for SkyBottomLine calculation';
 
@@ -72,9 +72,15 @@ export interface ScoreModel {
 export interface ScoreRenderer {
   readonly loaded: boolean;
   readonly scoreModel: ScoreModel | null;
-  readonly currentPart: string | null;
   load(file: File): Promise<ScoreModel>;
   createCursor(model: ScoreModel): ScoreCursor;
+  /**
+   * Clickable/loopable regions in the rendered score, in screen-pixel
+   * coordinates mapped to beat positions. Renderer-agnostic: callers use
+   * this to hit-test clicks and drive loop overlays without knowing how
+   * the implementation computed the geometry (OSMD internals stay private
+   * to OsmdScoreRenderer / click-seek.ts).
+   */
   getMeasureHitZones(): MeasureHitZone[];
   setHighlightedPart(partName: string): void;
   applyVisualTranspose(semitones: number): void;
@@ -85,7 +91,6 @@ export class OsmdScoreRenderer implements ScoreRenderer {
   private readonly osmd: OpenSheetMusicDisplay;
   private _loaded = false;
   private visualTransposeSemitones = 0;
-  private _currentPart: string | null = null;
   public scoreModel: ScoreModel | null = null;
 
   constructor(container: HTMLElement) {
@@ -149,12 +154,8 @@ export class OsmdScoreRenderer implements ScoreRenderer {
     return this._loaded;
   }
 
-  get currentPart(): string | null {
-    return this._currentPart;
-  }
-
   createCursor(model: ScoreModel): ScoreCursor {
-    return new ScoreCursor(this.osmd, model);
+    return new OsmdScoreCursor(this.osmd, model);
   }
 
   getMeasureHitZones(): MeasureHitZone[] {
@@ -169,8 +170,7 @@ export class OsmdScoreRenderer implements ScoreRenderer {
    * current time position, but not persistently style a selected part.
    * Keep this hook so app.ts can call it if OSMD gains such API later.
    */
-  setHighlightedPart(partName: string): void {
-    this._currentPart = partName;
+  setHighlightedPart(_partName: string): void {
     // Intentionally a no-op due to current OSMD public API limitations.
   }
 

@@ -29,7 +29,19 @@ import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import type { ScoreModel } from './renderer';
 import { elapsedToBeat } from './timing';
 
-export class ScoreCursor {
+/** Stable cursor boundary consumed by playback, practice, and overlay features. */
+export interface ScoreCursor {
+  readonly playing: boolean;
+  play(fromBeat?: number): void;
+  pause(): void;
+  stop(): void;
+  seekToBeat(beat: number): void;
+  show(): void;
+  getElement(): HTMLElement | null;
+}
+
+/** OSMD-backed implementation of the stable cursor boundary. */
+export class OsmdScoreCursor implements ScoreCursor {
   private readonly osmd: OpenSheetMusicDisplay;
   private readonly model: ScoreModel;
 
