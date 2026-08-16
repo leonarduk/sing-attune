@@ -8,16 +8,23 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
+import uvicorn
+from fastapi import (
+    FastAPI,
+    File,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-import uvicorn
 
+from .audio.capture import default_input_device_id, list_input_devices
+from .audio.pipeline import _CLIENT_QUEUE_MAXSIZE, PlaybackPipeline
+from .models.session import SessionSaveRequest
 from .score.parser import parse_musicxml
 from .score.upload import persist_upload_to_temp
-from .audio.capture import list_input_devices, default_input_device_id
-from .audio.pipeline import PlaybackPipeline, _CLIENT_QUEUE_MAXSIZE
-from .models.session import SessionSaveRequest
 from .session.store import list_sessions, read_session, save_session
 from .transcription_service import (
     TranscriptionError,
@@ -257,7 +264,8 @@ async def pitch_stream(websocket: WebSocket) -> None:
     """
     Stream real-time pitch frames to the frontend at ~20Hz.
 
-    Frame format: {"t": float, "midi": float, "conf": float}
+    Frame format: {"v": 1, "t": float, "midi": float, "conf": float}
+      v    — protocol version (currently 1)
       t    — ms since playback start (aligned with AudioContext.currentTime * 1000)
       midi — MIDI float with cent detail (e.g. 60.3 = C4 + 30 cents)
       conf — confidence 0.0–1.0 (frames below 0.6 are dropped before reaching here)
@@ -278,7 +286,7 @@ async def pitch_stream(websocket: WebSocket) -> None:
             try:
                 frame = await asyncio.wait_for(q.get(), timeout=_WS_KEEPALIVE_S)
                 await websocket.send_json(frame)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # No frames for _WS_KEEPALIVE_S seconds (e.g. paused) — send ping
                 await websocket.send_json({"ping": True})
     except WebSocketDisconnect:

@@ -15,14 +15,19 @@ describe('reconnectDelayMs', () => {
 
 describe('parsePitchFrame', () => {
   it('accepts valid numeric frames', () => {
-    expect(parsePitchFrame({ t: 0.1, midi: 60, conf: 0.8 })).toEqual({ t: 0.1, midi: 60, conf: 0.8 });
+    expect(parsePitchFrame({ v: 1, t: 0.1, midi: 60, conf: 0.8 })).toEqual({ v: 1, t: 0.1, midi: 60, conf: 0.8 });
   });
 
   it('rejects malformed payloads', () => {
     expect(parsePitchFrame(null)).toBeNull();
     expect(parsePitchFrame({})).toBeNull();
-    expect(parsePitchFrame({ t: '0.1', midi: 60, conf: 0.8 })).toBeNull();
-    expect(parsePitchFrame({ t: 0.1, midi: 60 })).toBeNull();
+    expect(parsePitchFrame({ v: 1, t: '0.1', midi: 60, conf: 0.8 })).toBeNull();
+    expect(parsePitchFrame({ v: 1, t: 0.1, midi: 60 })).toBeNull();
+    expect(parsePitchFrame({ t: 0.1, midi: 60, conf: 0.8 })).toBeNull();
+    expect(parsePitchFrame({ v: 2, t: 0.1, midi: 60, conf: 0.8 })).toBeNull();
+    expect(parsePitchFrame({ v: 1, t: Number.NaN, midi: 60, conf: 0.8 })).toBeNull();
+    expect(parsePitchFrame({ v: 1, t: 0.1, midi: 128, conf: 0.8 })).toBeNull();
+    expect(parsePitchFrame({ v: 1, t: 0.1, midi: 60, conf: 1.1 })).toBeNull();
   });
 });
 
@@ -33,9 +38,9 @@ describe('parsePitchSocketMessage', () => {
   });
 
   it('returns frame messages for valid pitch payloads', () => {
-    expect(parsePitchSocketMessage({ t: 100, midi: 60.2, conf: 0.9 })).toEqual({
+    expect(parsePitchSocketMessage({ v: 1, t: 100, midi: 60.2, conf: 0.9 })).toEqual({
       kind: 'frame',
-      frame: { t: 100, midi: 60.2, conf: 0.9 },
+      frame: { v: 1, t: 100, midi: 60.2, conf: 0.9 },
     });
   });
 

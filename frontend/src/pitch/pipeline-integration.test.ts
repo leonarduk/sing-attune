@@ -8,7 +8,7 @@ describe('pitch frame integration path', () => {
     timeline.reanchor(1000, 10);
 
     const rendered: Array<{ t: number; midi: number }> = [];
-    const payload = { t: 1500, midi: 62, conf: 0.9 };
+    const payload = { v: 1, t: 1500, midi: 62, conf: 0.9 };
     const message = parsePitchSocketMessage(payload);
     expect(message.kind).toBe('frame');
     if (message.kind !== 'frame') return;
@@ -26,7 +26,7 @@ describe('pitch frame integration path', () => {
     const timeline = new PitchTimelineSync();
     timeline.reanchor(0, 5);
 
-    const message = parsePitchSocketMessage({ t: 200, midi: 60, conf: 0.95 });
+    const message = parsePitchSocketMessage({ v: 1, t: 200, midi: 60, conf: 0.95 });
     expect(message.kind).toBe('frame');
     if (message.kind !== 'frame') return;
 

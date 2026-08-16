@@ -2,7 +2,7 @@
 
 **Status:** Authoritative — all sync-path implementation must conform to this document.  
 **Required before:** Any Day 8 code in issues #8 or #9.  
-**Last updated:** 2026-03-11  
+**Last updated:** 2026-08-16
 
 ---
 
@@ -23,17 +23,24 @@ The backend emits pitch frames with a `t` value in milliseconds. The frontend mu
 
 ## 2. Frame format
 
-Every pitch frame sent over `/ws/pitch` has this shape:
+The normative machine-readable definition is
+[`pitch-frame.schema.json`](./pitch-frame.schema.json). Every pitch frame sent
+over `/ws/pitch` has this shape (protocol v1):
 
 ```json
-{ "t": 1234.5, "midi": 60.312, "conf": 0.847 }
+{ "v": 1, "t": 1234.5, "midi": 60.312, "conf": 0.847 }
 ```
 
 | Field | Type | Semantics |
 |---|---|---|
+| `v` | `integer` | Protocol version. Version 1 is the only currently supported value. Receivers reject unsupported or missing versions. |
 | `t` | `float` (ms) | Milliseconds since play-start. **Relative to the Play button press, not wall clock.** Range: 0 to end of piece. |
 | `midi` | `float` | MIDI note number with cent detail. `60.0` = C4 exactly. `60.5` = C4 + 50 cents. |
 | `conf` | `float` | Confidence 0.0–1.0. Frames with `conf < 0.6` are dropped in the backend before dispatch. The frontend will never receive a sub-threshold frame. |
+
+Frames are emitted at approximately 20 Hz while playback is active and a
+confident pitch is detected. Cadence is best-effort rather than guaranteed;
+consumers must use `t`, not frame count, for timing.
 
 Two non-frame messages may also appear on the WebSocket:
 

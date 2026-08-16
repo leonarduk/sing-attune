@@ -18,12 +18,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 import threading
+import time
 from enum import Enum, auto
 
 from .capture import MicCapture
-from .pitch import PitchFrame, PitchPipeline, Engine, resolve_engine_runtime
+from .pitch import Engine, PitchFrame, PitchPipeline, resolve_engine_runtime
+from .pitch_protocol import PitchFramePayload, encode_pitch_frame
 
 log = logging.getLogger(__name__)
 
@@ -321,24 +322,16 @@ class PlaybackPipeline:
             frame_elapsed_ms = max(0.0, frame.time_ms - play_anchor_ms)
             t_ms = self._elapsed_ms + (frame_elapsed_ms * self._tempo_multiplier)
 
-        payload = {
-            "t": round(t_ms, 1),
-            "midi": round(frame.midi, 3),
-            "conf": round(frame.confidence, 3),
-        }
+        payload = encode_pitch_frame(t_ms=t_ms, midi=frame.midi, confidence=frame.confidence)
 
         self._fan_out_payload(payload)
 
     def inject_frame(self, *, t_ms: float, midi: float, conf: float) -> None:
         """Inject a synthetic frame payload for tests without touching internals."""
-        payload = {
-            "t": round(t_ms, 1),
-            "midi": round(midi, 3),
-            "conf": round(conf, 3),
-        }
+        payload = encode_pitch_frame(t_ms=t_ms, midi=midi, confidence=conf)
         self._fan_out_payload(payload)
 
-    def _fan_out_payload(self, payload: dict[str, float]) -> None:
+    def _fan_out_payload(self, payload: PitchFramePayload) -> None:
         """Send a frame payload to all connected WebSocket clients."""
 
         loop = self._loop
