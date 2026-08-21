@@ -8,29 +8,34 @@ Acceptance criteria from issue #3:
   AC4: Frames below confidence threshold are dropped, not emitted
 """
 
-import time
-import threading
 import builtins
+import threading
+import time
 
 import numpy as np
 import pytest
 import torch
 
+from backend.audio.engine import (
+    PitchEngine,
+    PyinPitchEngine,
+    TorchCrepePitchEngine,
+    create_pitch_engine,
+)
 from backend.audio.pitch import (
+    CONFIDENCE_THRESHOLD,
+    SAMPLE_RATE,
     Engine,
     EngineRuntimeInfo,
     PitchFrame,
     PitchPipeline,
-    CONFIDENCE_THRESHOLD,
-    SAMPLE_RATE,
+    _infer_pyin,
+    _infer_torchcrepe,
     hz_to_midi,
     midi_to_hz,
     resolve_engine_runtime,
     select_engine,
-    _infer_torchcrepe,
-    _infer_pyin,
 )
-
 
 # ── Conversion helpers ───────────────────────────────────────────────────────────────
 
@@ -93,6 +98,31 @@ class TestEngineSelection:
     def test_no_cuda_selects_pyin(self, monkeypatch):
         monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
         assert select_engine() == Engine.PYIN
+
+    def test_factory_builds_pyin_implementation(self):
+        engine = create_pitch_engine(Engine.PYIN)
+
+        assert isinstance(engine, PyinPitchEngine)
+        assert isinstance(engine, PitchEngine)
+
+    def test_factory_builds_torchcrepe_implementation(self):
+        engine = create_pitch_engine(Engine.TORCHCREPE)
+
+        assert isinstance(engine, TorchCrepePitchEngine)
+        assert isinstance(engine, PitchEngine)
+
+    def test_pipeline_accepts_custom_engine(self):
+        class StubEngine:
+            kind = Engine.PYIN
+            device = "test"
+
+            def estimate(self, window, capture_time_ms):
+                return None
+
+        pipeline = PitchPipeline(engine=StubEngine())
+
+        assert pipeline.engine is Engine.PYIN
+        assert pipeline.device == "test"
 
 
 # ── resolve_engine_runtime ───────────────────────────────────────────────────────────
@@ -323,36 +353,36 @@ class TestPitchPipeline:
 
 class TestThinBuildFallback:
     def test_resolve_engine_without_torch_uses_pyin(self, monkeypatch):
-        from backend.audio import pitch as pitch_module
+        from backend.audio import engine as engine_module
 
-        monkeypatch.setattr(pitch_module, "torch", None)
+        monkeypatch.setattr(engine_module, "torch", None)
         monkeypatch.delenv("PITCH_ENGINE", raising=False)
 
-        result = pitch_module.resolve_engine_runtime()
+        result = engine_module.resolve_engine_runtime()
 
         assert result.engine == Engine.PYIN
         assert result.device == "CPU"
 
     def test_pipeline_falls_back_when_torch_missing(self, monkeypatch):
-        from backend.audio import pitch as pitch_module
+        from backend.audio import engine as engine_module
 
-        monkeypatch.setattr(pitch_module, "torch", None)
+        monkeypatch.setattr(engine_module, "torch", None)
 
-        pipeline = pitch_module.PitchPipeline(engine=Engine.TORCHCREPE)
+        pipeline = PitchPipeline(engine=Engine.TORCHCREPE)
 
         assert pipeline.engine == Engine.PYIN
         assert pipeline.device == "cpu"
 
     def test_infer_torchcrepe_errors_when_torch_missing(self, monkeypatch):
-        from backend.audio import pitch as pitch_module
+        from backend.audio import engine as engine_module
 
-        monkeypatch.setattr(pitch_module, "torch", None)
+        monkeypatch.setattr(engine_module, "torch", None)
 
         with pytest.raises(RuntimeError, match="PyTorch is not installed"):
             _infer_torchcrepe(np.zeros(2048, dtype=np.float32), "cpu", 0.0)
 
     def test_infer_torchcrepe_errors_when_torchcrepe_missing(self, monkeypatch):
-        from backend.audio import pitch as pitch_module
+        from backend.audio import engine as engine_module
 
         original_import = builtins.__import__
 
@@ -361,7 +391,7 @@ class TestThinBuildFallback:
                 raise ImportError("mocked missing torchcrepe")
             return original_import(name, *args, **kwargs)
 
-        monkeypatch.setattr(pitch_module, "torch", torch)
+        monkeypatch.setattr(engine_module, "torch", torch)
         monkeypatch.setattr(builtins, "__import__", _fake_import)
 
         with pytest.raises(RuntimeError, match="torchcrepe is not installed"):

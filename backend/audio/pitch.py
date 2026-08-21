@@ -14,53 +14,37 @@ Frames below CONFIDENCE_THRESHOLD are dropped, not emitted.
 
 from __future__ import annotations
 
-import time
-import threading
-import queue
 import logging
-import os
+import queue
+import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from enum import Enum, auto
-from typing import Callable
-
-from backend.models.transcription import PitchFrame
 
 import numpy as np
 
-try:
-    import torch
-except ImportError:  # pragma: no cover - exercised by thin installer runtime
-    torch = None  # type: ignore[assignment]
+from backend.models.transcription import PitchFrame
+
+from .engine import (
+    CONFIDENCE_THRESHOLD,  # noqa: F401 -- public compatibility export
+    CREPE_SAMPLE_RATE,  # noqa: F401 -- public compatibility export
+    FMAX_HZ,  # noqa: F401 -- public compatibility export
+    FMIN_HZ,  # noqa: F401 -- public compatibility export
+    SAMPLE_RATE,  # noqa: F401 -- public compatibility export
+    Engine,
+    EngineRuntimeInfo,  # noqa: F401 -- public compatibility export
+    PitchEngine,
+    PyinPitchEngine,
+    TorchCrepePitchEngine,
+    create_pitch_engine,
+    hz_to_midi,  # noqa: F401 -- public compatibility export
+    resolve_engine_runtime,  # noqa: F401 -- public compatibility export
+    select_engine,  # noqa: F401 -- public compatibility export
+)
 
 log = logging.getLogger(__name__)
 
-# ── Constants ──────────────────────────────────────────────────────────────────
-
-SAMPLE_RATE: int = 22050
-CONFIDENCE_THRESHOLD: float = 0.6
-
-# torchcrepe expects 16 kHz — we resample on the fly
-CREPE_SAMPLE_RATE: int = 16000
-
-# pYIN frequency range — human singing voice
-FMIN_HZ: float = 65.0    # C2
-FMAX_HZ: float = 2093.0  # C7
-
-
 # ── Engine selection ───────────────────────────────────────────────────────────
-
-
-class Engine(Enum):
-    TORCHCREPE = auto()
-    PYIN = auto()
-
-
-@dataclass(frozen=True)
-class EngineRuntimeInfo:
-    engine: Engine
-    cuda: bool
-    device: str
-    mode: str
 
 
 @dataclass(frozen=True)
@@ -69,57 +53,7 @@ class QueuedWindow:
     capture_time_ms: float
 
 
-def resolve_engine_runtime(force_cpu: bool = False) -> EngineRuntimeInfo:
-    """Resolve active engine from env + runtime override + CUDA availability."""
-    env_engine = os.getenv("PITCH_ENGINE", "").strip().lower()
-    env_forces_cpu = env_engine in {"aubio", "pyin", "cpu"}
-    cuda_available = bool(torch and torch.cuda.is_available())
-
-    if force_cpu or env_forces_cpu:
-        reason = "runtime override" if force_cpu else "PITCH_ENGINE"
-        log.info("CPU mode forced via %s — using librosa pYIN (CPU)", reason)
-        return EngineRuntimeInfo(
-            engine=Engine.PYIN,
-            cuda=cuda_available,
-            device="CPU",
-            mode="forced_cpu",
-        )
-
-    if cuda_available and torch is not None:
-        device_name = torch.cuda.get_device_name(0)
-        log.info("CUDA available — using torchcrepe (GPU: %s)", device_name)
-        return EngineRuntimeInfo(
-            engine=Engine.TORCHCREPE,
-            cuda=True,
-            device=device_name,
-            mode="auto",
-        )
-
-    log.info("No CUDA — using librosa pYIN (CPU)")
-    return EngineRuntimeInfo(
-        engine=Engine.PYIN,
-        cuda=False,
-        device="CPU",
-        mode="auto",
-    )
-
-
-def select_engine() -> Engine:
-    """
-    Auto-select pitch engine based on hardware availability.
-    torchcrepe on CPU is ~200ms/frame — too slow for real-time; fall back to pYIN.
-    """
-    return resolve_engine_runtime().engine
-
-
 # ── Conversion helpers ─────────────────────────────────────────────────────────
-
-
-def hz_to_midi(freq_hz: float) -> float:
-    """Convert frequency in Hz to MIDI float (cent-accurate)."""
-    if freq_hz <= 0:
-        return 0.0
-    return 12.0 * np.log2(freq_hz / 440.0) + 69.0
 
 
 def midi_to_hz(midi: float) -> float:
@@ -142,43 +76,7 @@ def _infer_torchcrepe(
     that Viterbi requires (blocked by Application Control on some machines).
     Returns None if confidence < threshold or no pitch detected.
     """
-    if torch is None:
-        raise RuntimeError("PyTorch is not installed. Install full-fat build for torchcrepe")
-
-    try:
-        import torchcrepe
-    except ImportError:
-        raise RuntimeError("torchcrepe is not installed. Run: uv pip install torchcrepe")
-
-    import torchaudio.functional as F  # noqa: PLC0415
-
-    audio_tensor = torch.from_numpy(window).unsqueeze(0)  # (1, N)
-    audio_16k = F.resample(audio_tensor, SAMPLE_RATE, CREPE_SAMPLE_RATE).to(device)
-
-    with torch.no_grad():
-        frequency, confidence = torchcrepe.predict(
-            audio_16k,
-            CREPE_SAMPLE_RATE,
-            hop_length=audio_16k.shape[-1],  # single frame
-            fmin=FMIN_HZ,
-            fmax=FMAX_HZ,
-            model="full",
-            decoder=torchcrepe.decode.weighted_argmax,  # avoids scipy.signal
-            return_periodicity=True,
-            device=device,
-        )
-
-    freq_hz = frequency[0, 0].item()
-    conf = confidence[0, 0].item()
-
-    if conf < CONFIDENCE_THRESHOLD or freq_hz <= 0:
-        return None
-
-    return PitchFrame(
-        time_ms=capture_time_ms,
-        midi=hz_to_midi(freq_hz),
-        confidence=conf,
-    )
+    return TorchCrepePitchEngine(device=device).estimate(window, capture_time_ms)
 
 
 # ── librosa pYIN engine ────────────────────────────────────────────────────────
@@ -193,34 +91,7 @@ def _infer_pyin(
     librosa is already installed as a torchcrepe dependency — no extra install.
     Returns None if no pitch detected above threshold.
     """
-    import librosa  # noqa: PLC0415
-
-    # librosa.pyin returns (f0, voiced_flag, voiced_prob) arrays
-    # hop_length = window length gives us a single frame
-    f0, voiced_flag, voiced_prob = librosa.pyin(
-        window,
-        fmin=FMIN_HZ,
-        fmax=FMAX_HZ,
-        sr=SAMPLE_RATE,
-        hop_length=len(window),
-        frame_length=len(window),
-    )
-
-    if f0 is None or len(f0) == 0:
-        return None
-
-    freq_hz = float(f0[0]) if not np.isnan(f0[0]) else 0.0
-    conf = float(voiced_prob[0]) if voiced_prob is not None else 0.0
-    voiced = bool(voiced_flag[0]) if voiced_flag is not None else False
-
-    if not voiced or conf < CONFIDENCE_THRESHOLD or freq_hz <= 0:
-        return None
-
-    return PitchFrame(
-        time_ms=capture_time_ms,
-        midi=hz_to_midi(freq_hz),
-        confidence=conf,
-    )
+    return PyinPitchEngine().estimate(window, capture_time_ms)
 
 
 # ── Pipeline ───────────────────────────────────────────────────────────────────
@@ -247,15 +118,15 @@ class PitchPipeline:
 
     def __init__(
         self,
-        engine: Engine | None = None,
+        engine: Engine | PitchEngine | None = None,
         on_frame: Callable[[PitchFrame], None] | None = None,
     ) -> None:
-        self._engine = engine or select_engine()
-        if self._engine == Engine.TORCHCREPE and torch is None:
-            log.warning("torchcrepe engine requested but PyTorch is unavailable; falling back to pYIN")
-            self._engine = Engine.PYIN
+        self._pitch_engine = (
+            create_pitch_engine(engine) if isinstance(engine, Engine) or engine is None else engine
+        )
+        self._engine = self._pitch_engine.kind
         self._on_frame = on_frame
-        self._device = "cuda" if self._engine == Engine.TORCHCREPE else "cpu"
+        self._device = self._pitch_engine.device
         self._queue: queue.Queue[QueuedWindow | None] = queue.Queue(
             maxsize=self._QUEUE_MAXSIZE
         )
@@ -326,9 +197,7 @@ class PitchPipeline:
                 log.exception("Pitch inference error")
 
     def _infer(self, window: np.ndarray, capture_time_ms: float) -> PitchFrame | None:
-        if self._engine == Engine.TORCHCREPE:
-            return _infer_torchcrepe(window, self._device, capture_time_ms)
-        return _infer_pyin(window, capture_time_ms)
+        return self._pitch_engine.estimate(window, capture_time_ms)
 
     def _warmup(self) -> None:
         try:
