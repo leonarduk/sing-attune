@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/leonarduk/sing-attune/blob/main/docs/pitch-frame.schema.json",
+  "title": "sing-attune pitch frame protocol v1",
+  "description": "A pitch observation emitted by /ws/pitch at approximately 20 Hz while playback is active. Time is measured from the playback anchor, never from a wall clock.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["v", "t", "midi", "conf"],
+  "properties": {
+    "v": {
+      "description": "Wire protocol version.",
+      "const": 1
+    },
+    "t": {
+      "description": "Milliseconds since playback start, adjusted for pause, resume, seek, and tempo.",
+      "type": "number",
+      "minimum": 0
+    },
+    "midi": {
+      "description": "Fractional MIDI note number; the fractional part carries cent detail.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 127
+    },
+    "conf": {
+      "description": "Pitch detector confidence. Frames below the backend threshold are not emitted.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

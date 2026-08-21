@@ -1,9 +1,9 @@
-import type { PitchFrame } from './socket';
+import { PITCH_FRAME_PROTOCOL_VERSION, type PitchFrameV1 } from './socket';
 
 const SWEEP_MIN_MIDI = 48;
 const SWEEP_MAX_MIDI = 72;
 
-export function syntheticPitchFrameAt(nowSec: number, expectedMidi: number | null, tMs = nowSec * 1000): PitchFrame {
+export function syntheticPitchFrameAt(nowSec: number, expectedMidi: number | null, tMs = nowSec * 1000): PitchFrameV1 {
   const sweepMid = (SWEEP_MIN_MIDI + SWEEP_MAX_MIDI) / 2;
   const sweepAmp = (SWEEP_MAX_MIDI - SWEEP_MIN_MIDI) / 2;
   const sweepMidi = sweepMid + (Math.sin(nowSec * 0.55) * sweepAmp);
@@ -14,6 +14,7 @@ export function syntheticPitchFrameAt(nowSec: number, expectedMidi: number | nul
   const wobble = Math.sin(nowSec * 7.3) * 0.03;
 
   return {
+    v: PITCH_FRAME_PROTOCOL_VERSION,
     t: tMs,
     midi: baseMidi + offset + wobble,
     conf: 0.95,

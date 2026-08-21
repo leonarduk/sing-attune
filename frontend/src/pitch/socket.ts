@@ -4,27 +4,37 @@ export interface PitchFrame {
   conf: number;
 }
 
+export interface PitchFrameV1 extends PitchFrame {
+  v: 1;
+}
+
 export type PitchSocketMessage =
-  | { kind: 'frame'; frame: PitchFrame }
+  | { kind: 'frame'; frame: PitchFrameV1 }
   | { kind: 'status' }
   | { kind: 'ping' }
   | { kind: 'unknown' };
 
 export const PITCH_RECONNECT_BASE_MS = 500;
 export const PITCH_RECONNECT_MAX_MS = 5000;
+export const PITCH_FRAME_PROTOCOL_VERSION = 1 as const;
 
 export function reconnectDelayMs(attempt: number): number {
   if (attempt <= 0) return PITCH_RECONNECT_BASE_MS;
   return Math.min(PITCH_RECONNECT_BASE_MS * (2 ** (attempt - 1)), PITCH_RECONNECT_MAX_MS);
 }
 
-export function parsePitchFrame(payload: unknown): PitchFrame | null {
+export function parsePitchFrame(payload: unknown): PitchFrameV1 | null {
   if (typeof payload !== 'object' || payload === null) return null;
-  const frame = payload as { t?: unknown; midi?: unknown; conf?: unknown };
-  if (typeof frame.t !== 'number' || typeof frame.midi !== 'number' || typeof frame.conf !== 'number') {
+  const frame = payload as { v?: unknown; t?: unknown; midi?: unknown; conf?: unknown };
+  if (
+    frame.v !== PITCH_FRAME_PROTOCOL_VERSION
+    || typeof frame.t !== 'number' || !Number.isFinite(frame.t) || frame.t < 0
+    || typeof frame.midi !== 'number' || !Number.isFinite(frame.midi) || frame.midi < 0 || frame.midi > 127
+    || typeof frame.conf !== 'number' || !Number.isFinite(frame.conf) || frame.conf < 0 || frame.conf > 1
+  ) {
     return null;
   }
-  return { t: frame.t, midi: frame.midi, conf: frame.conf };
+  return { v: PITCH_FRAME_PROTOCOL_VERSION, t: frame.t, midi: frame.midi, conf: frame.conf };
 }
 
 export function parsePitchSocketMessage(payload: unknown): PitchSocketMessage {
