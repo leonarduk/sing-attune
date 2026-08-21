@@ -1,17 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ScoreRenderer, withSuppressedOsmdWarnings } from './renderer';
+import { OsmdScoreRenderer, withSuppressedOsmdWarnings } from './renderer';
 
 const mocks = vi.hoisted(() => ({
   renderMock: vi.fn(),
   loadMock: vi.fn(async (_file: Blob) => undefined),
   updateGraphicMock: vi.fn(),
+  instances: [] as Array<{ Sheet: { Transpose: number } }>,
 }));
 
 vi.mock('opensheetmusicdisplay', () => ({
   OpenSheetMusicDisplay: class {
     Sheet = { Transpose: 0 };
 
-    constructor(_container: HTMLElement, _options: unknown) {}
+    constructor(_container: HTMLElement, _options: unknown) {
+      mocks.instances.push(this);
+    }
 
     async load(file: Blob): Promise<void> {
       await mocks.loadMock(file);
@@ -58,6 +61,7 @@ describe('ScoreRenderer visual transpose', () => {
     mocks.renderMock.mockClear();
     mocks.loadMock.mockClear();
     mocks.updateGraphicMock.mockClear();
+    mocks.instances.length = 0;
 
     vi.stubGlobal(
       'fetch',
@@ -76,27 +80,27 @@ describe('ScoreRenderer visual transpose', () => {
   });
 
   it('re-renders notation when transposition changes after load', async () => {
-    const renderer = new ScoreRenderer({} as HTMLElement);
+    const renderer = new OsmdScoreRenderer({} as HTMLElement);
     await renderer.load(new Blob(['<score-partwise/>'], { type: 'application/xml' }) as File);
 
     expect(mocks.renderMock).toHaveBeenCalledTimes(1);
 
     renderer.applyVisualTranspose(3);
 
-    expect(renderer.osmd.Sheet.Transpose).toBe(3);
+    expect(mocks.instances[0].Sheet.Transpose).toBe(3);
     expect(mocks.updateGraphicMock).toHaveBeenCalledTimes(1);
     expect(mocks.renderMock).toHaveBeenCalledTimes(2);
   });
 
   it('stores transpose before load and applies it once rendered', async () => {
-    const renderer = new ScoreRenderer({} as HTMLElement);
+    const renderer = new OsmdScoreRenderer({} as HTMLElement);
     renderer.applyVisualTranspose(-5);
 
     expect(mocks.updateGraphicMock).not.toHaveBeenCalled();
 
     await renderer.load(new Blob(['<score-partwise/>'], { type: 'application/xml' }) as File);
 
-    expect(renderer.osmd.Sheet.Transpose).toBe(-5);
+    expect(mocks.instances[0].Sheet.Transpose).toBe(-5);
     expect(mocks.updateGraphicMock).toHaveBeenCalledTimes(1);
     expect(mocks.renderMock).toHaveBeenCalledTimes(2);
   });

@@ -10,6 +10,8 @@
  * Never use OSMD note positions for timing — they differ from the backend model.
  */
 import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
+import { extractMeasureHitZones, type MeasureHitZone } from './click-seek';
+import { OsmdScoreCursor, type ScoreCursor } from './cursor';
 
 const OSMD_SKY_BOTTOM_LINE_WARNING = 'Not enough lines for SkyBottomLine calculation';
 
@@ -66,8 +68,27 @@ export interface ScoreModel {
   total_beats: number;
 }
 
-export class ScoreRenderer {
-  readonly osmd: OpenSheetMusicDisplay;
+/** Stable boundary consumed by playback, practice, and overlay features. */
+export interface ScoreRenderer {
+  readonly loaded: boolean;
+  readonly scoreModel: ScoreModel | null;
+  load(file: File): Promise<ScoreModel>;
+  createCursor(model: ScoreModel): ScoreCursor;
+  /**
+   * Clickable/loopable regions in the rendered score, in screen-pixel
+   * coordinates mapped to beat positions. Renderer-agnostic: callers use
+   * this to hit-test clicks and drive loop overlays without knowing how
+   * the implementation computed the geometry (OSMD internals stay private
+   * to OsmdScoreRenderer / click-seek.ts).
+   */
+  getMeasureHitZones(): MeasureHitZone[];
+  setHighlightedPart(partName: string): void;
+  applyVisualTranspose(semitones: number): void;
+}
+
+/** OSMD-backed implementation of the stable score-rendering boundary. */
+export class OsmdScoreRenderer implements ScoreRenderer {
+  private readonly osmd: OpenSheetMusicDisplay;
   private _loaded = false;
   private visualTransposeSemitones = 0;
   public scoreModel: ScoreModel | null = null;
@@ -131,6 +152,14 @@ export class ScoreRenderer {
 
   get loaded(): boolean {
     return this._loaded;
+  }
+
+  createCursor(model: ScoreModel): ScoreCursor {
+    return new OsmdScoreCursor(this.osmd, model);
+  }
+
+  getMeasureHitZones(): MeasureHitZone[] {
+    return extractMeasureHitZones(this.osmd);
   }
 
   /**
