@@ -57,8 +57,18 @@ export interface OverlayComparisonResult {
   /**
    * Explicit pass/fail equivalence verdict — per #360 AC, equivalence must
    * be reported as pass/fail, not left for a human to eyeball off the graph.
-   * Passes only when both sequences are non-empty, note counts match, and
-   * every paired note agrees with the single detected constant offset.
+   * Passes only when both sequences are non-empty, note counts match, every
+   * paired note agrees with the single detected constant offset, AND that
+   * offset is the expected one-octave displacement.
+   *
+   * That last condition is deliberate, not merely internal-consistency
+   * checking: #360's purpose is validating that a bass-clef part and its
+   * transposed-treble counterpart are the SAME tenor music, which requires
+   * the octave displacement specifically. Two sequences that are constant
+   * apart by, say, 7 semitones are "internally consistent" but are not a
+   * valid bass/transposed-treble pair, and reporting PASS for them would
+   * contradict the readout's own "does NOT match the expected octave"
+   * message (see PR #407 review, finding H2).
    */
   equivalent: boolean;
 }
@@ -100,6 +110,32 @@ export function deriveOffsetNotes<T extends OverlayNote>(
     ...note,
     midi: note.midi + offsetSemitones,
   }));
+}
+
+/**
+ * Applies a deliberate single-note error to a derived note sequence, at the
+ * given index, by adding `semitones` on top of whatever offset that note
+ * already carries.
+ *
+ * Exists because `deriveOffsetNotes` applies one constant offset to every
+ * note, which means `compareTenorVersions` always detects that same offset
+ * and always reports PASS on the live debug page — the comparison logic is
+ * exercised by a genuine mismatch in tenor-overlay-compare.test.ts, but the
+ * page itself had no way to *demonstrate* the FAIL/mismatch-highlight path
+ * (see PR #407 review, finding H1). This lets the debug page's "perturb
+ * note" control inject one wrong note into the derived series so a human
+ * can actually see mismatch markers and a FAIL verdict on real UI, not just
+ * in a unit test.
+ *
+ * No-op (returns a shallow copy) when `index` is out of range, so callers
+ * can wire this straight to a user-typed index without bounds-checking
+ * first.
+ */
+export function perturbNoteAt<T extends OverlayNote>(notes: T[], index: number, semitones: number): T[] {
+  if (!Number.isInteger(index) || index < 0 || index >= notes.length || semitones === 0) {
+    return [...notes];
+  }
+  return notes.map((note, i) => (i === index ? { ...note, midi: note.midi + semitones } : note));
 }
 
 function mostCommonDelta(deltas: number[]): number | null {
@@ -175,7 +211,8 @@ export function compareTenorVersions(
     trebleNotes.length > 0 &&
     countsMatch &&
     mismatchCount === 0 &&
-    detectedOffsetSemitones !== null;
+    detectedOffsetSemitones !== null &&
+    offsetMatchesExpectedOctave;
 
   return {
     bassNotes,

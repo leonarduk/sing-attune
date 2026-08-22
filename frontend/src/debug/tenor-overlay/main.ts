@@ -16,6 +16,7 @@ import {
   deriveOffsetNotes,
   EXPECTED_OCTAVE_OFFSET_SEMITONES,
   filterNotesInBarRange,
+  perturbNoteAt,
   type OverlayNote,
 } from '../../pitch/tenor-overlay-compare';
 import { formatOverlayReadout } from './tenor-overlay-readout';
@@ -53,6 +54,8 @@ function runComparison(): void {
   const startBarInput = byId<HTMLInputElement>('start-bar');
   const endBarInput = byId<HTMLInputElement>('end-bar');
   const offsetInput = byId<HTMLInputElement>('octave-offset');
+  const perturbIndexInput = byId<HTMLInputElement>('perturb-index');
+  const perturbSemitonesInput = byId<HTMLInputElement>('perturb-semitones');
 
   if (!scoreModel) {
     statusEl.textContent = 'Load a score file first.';
@@ -66,7 +69,20 @@ function runComparison(): void {
   const offsetSemitones = Number.isFinite(offset) ? offset : EXPECTED_OCTAVE_OFFSET_SEMITONES;
 
   const bassNotes: OverlayNote[] = filterNotesInBarRange(scoreModel.notes, partName, startBar, endBar);
-  const trebleNotes = deriveOffsetNotes(bassNotes, offsetSemitones);
+  const derivedTrebleNotes = deriveOffsetNotes(bassNotes, offsetSemitones);
+
+  // Deliberate single-note error injection (#360 review finding H1): the
+  // derived treble series is always the bass series plus one constant
+  // offset, so without this the comparison could never fail on this page —
+  // any regression in compareTenorVersions would still show PASS. Leaving
+  // "Perturb note #" blank runs the unmodified comparison as before.
+  const perturbIndexRaw = perturbIndexInput.value.trim();
+  const perturbSemitones = Number.parseInt(perturbSemitonesInput.value, 10) || 0;
+  const trebleNotes =
+    perturbIndexRaw === ''
+      ? derivedTrebleNotes
+      : perturbNoteAt(derivedTrebleNotes, Number.parseInt(perturbIndexRaw, 10), perturbSemitones);
+
   const comparison = compareTenorVersions(bassNotes, trebleNotes);
 
   readoutEl.textContent = formatOverlayReadout(comparison, partName, startBar, endBar);

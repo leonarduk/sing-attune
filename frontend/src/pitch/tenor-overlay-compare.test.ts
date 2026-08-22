@@ -4,6 +4,7 @@ import {
   deriveOffsetNotes,
   EXPECTED_OCTAVE_OFFSET_SEMITONES,
   filterNotesInBarRange,
+  perturbNoteAt,
   type OverlayNote,
 } from './tenor-overlay-compare';
 
@@ -67,9 +68,11 @@ describe('compareTenorVersions — constant-offset detection', () => {
 
     expect(result.detectedOffsetSemitones).toBe(7);
     expect(result.offsetMatchesExpectedOctave).toBe(false);
-    // Still internally consistent (every note shares the same delta), so it
-    // is "equivalent" under whatever constant offset was actually detected.
-    expect(result.equivalent).toBe(true);
+    // Internally consistent (every note shares the same delta) is NOT
+    // enough for `equivalent` — #360's purpose is validating a genuine
+    // bass-clef/transposed-treble tenor pair, which requires the offset to
+    // be the expected octave specifically (PR #407 review, finding H2).
+    expect(result.equivalent).toBe(false);
   });
 });
 
@@ -86,17 +89,61 @@ describe('compareTenorVersions — mismatch counting', () => {
     expect(result.deltas[3].matchesOffset).toBe(true);
   });
 
-  it('reports pass/fail equivalence explicitly, distinct from whether the offset matches the expected octave', () => {
+  it('fails equivalence when the offset is internally consistent but not the expected octave', () => {
     const bass = [note(60, 1)];
     const treble = [note(61, 1)];
     const result = compareTenorVersions(bass, treble);
 
     // A single paired note is trivially internally consistent (one delta is
-    // always "the" constant offset), so equivalence passes even though the
-    // detected offset is nowhere near the expected octave.
+    // always "the" constant offset) — but `equivalent` also requires that
+    // offset to match the expected octave, so this must still be a FAIL
+    // (PR #407 review, finding H2).
     expect(typeof result.equivalent).toBe('boolean');
-    expect(result.equivalent).toBe(true);
+    expect(result.equivalent).toBe(false);
     expect(result.offsetMatchesExpectedOctave).toBe(false);
+  });
+});
+
+describe('perturbNoteAt', () => {
+  it('adds the given semitones to only the note at the given index', () => {
+    const bass = [note(60, 1), note(62, 1), note(64, 2)];
+    const treble = deriveOffsetNotes(bass);
+    const perturbed = perturbNoteAt(treble, 1, 3);
+
+    expect(perturbed.map((n) => n.midi)).toEqual([72, 77, 76]);
+  });
+
+  it('is a no-op copy for an out-of-range index', () => {
+    const bass = [note(60, 1)];
+    const treble = deriveOffsetNotes(bass);
+
+    expect(perturbNoteAt(treble, 5, 3)).toEqual(treble);
+    expect(perturbNoteAt(treble, -1, 3)).toEqual(treble);
+  });
+
+  it('is a no-op for a zero-semitone perturbation', () => {
+    const bass = [note(60, 1), note(62, 1)];
+    const treble = deriveOffsetNotes(bass);
+
+    expect(perturbNoteAt(treble, 0, 0)).toEqual(treble);
+  });
+
+  it('feeds a live perturbation into compareTenorVersions and produces a real, demonstrable FAIL', () => {
+    // This is the H1 fix from the PR #407 review: without a perturbation
+    // control, the debug page could only ever show PASS because the
+    // treble series was always derived by a single constant offset from
+    // the bass series. Perturbing one note reproduces, on the live page,
+    // the same kind of genuine mismatch tenor-overlay-compare.test.ts
+    // already covers in isolation above.
+    const bass = [note(60, 1), note(62, 1), note(64, 2), note(65, 2)];
+    const treble = deriveOffsetNotes(bass);
+    const perturbedTreble = perturbNoteAt(treble, 2, 1);
+    const result = compareTenorVersions(bass, perturbedTreble);
+
+    expect(result.detectedOffsetSemitones).toBe(12);
+    expect(result.mismatchCount).toBe(1);
+    expect(result.deltas[2].matchesOffset).toBe(false);
+    expect(result.equivalent).toBe(false);
   });
 });
 
