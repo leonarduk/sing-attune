@@ -14,7 +14,9 @@
  *
  * Offline note: packaged builds resolve the first URL for each instrument
  * from local app assets, so playback still works when there is no internet
- * connection — see public/soundfonts/FluidR3_GM/.
+ * connection — see public/soundfonts/FluidR3_GM/. That directory's README
+ * records the asset provenance/licence and the "add a new bundled voice"
+ * procedure (#403); it also explains why `voice_oohs` (below) is CDN-only.
  *
  * Instrument selection (#361): the instrument is a parameter rather than a
  * hardcoded piano URL, so the settings panel can offer a vocal timbre
@@ -34,6 +36,14 @@ export interface PlaybackInstrumentOption {
 // Order shown in the settings "Playback voice" select. Vocal timbres first
 // since they're the recommended choice for singing practice (#361 AC: the
 // default must be a vocal timbre, not piano).
+//
+// Bundled vs. CDN-only (#403): `acoustic_grand_piano` and `choir_aahs` have a
+// local copy under public/soundfonts/FluidR3_GM/ and work offline. `voice_oohs`
+// is deliberately NOT bundled — a third ~2.8 MB binary wasn't judged worth the
+// bundle-size cost given it mostly duplicates `choir_aahs`. Selecting it in an
+// offline/packaged build exhausts every CDN mirror and silently falls back to
+// piano (see loadNoteMapForInstrument()). See the README in that directory for
+// the decision and the steps to bundle it locally if that tradeoff changes.
 export const PLAYBACK_INSTRUMENTS: PlaybackInstrumentOption[] = [
   { id: 'choir_aahs', label: 'Choir Aahs (vocal)' },
   { id: 'voice_oohs', label: 'Voice Oohs (vocal)' },
