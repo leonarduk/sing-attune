@@ -9,7 +9,8 @@
  *   AudioContext.currentTime is the master clock — nothing else may be used
  *   for audio/visual synchronisation.
  */
-import { SoundfontLoader } from '../playback/soundfont';
+import { SoundfontLoader, type PlaybackInstrumentId } from '../playback/soundfont';
+import { loadPlaybackVoiceId } from './audio-preflight';
 
 let ctx: AudioContext | null = null;
 let soundfont: SoundfontLoader | null = null;
@@ -44,7 +45,7 @@ export function getAudioContext(): AudioContext {
  */
 export function getSoundfont(): SoundfontLoader {
   if (!soundfont) {
-    soundfont = new SoundfontLoader();
+    soundfont = new SoundfontLoader(loadPlaybackVoiceId());
   }
   return soundfont;
 }
@@ -77,7 +78,21 @@ export function ensureSoundfontLoaded(
  * Force a new soundfont fetch cycle after a previous failure.
  */
 export function retrySoundfontLoad(onError?: (err: unknown) => void): Promise<void> {
-  soundfont = new SoundfontLoader();
+  soundfont = new SoundfontLoader(loadPlaybackVoiceId());
+  loadPromise = null;
+  return ensureSoundfontLoaded(onError);
+}
+
+/**
+ * Switch the playback voice (GM instrument) and reload immediately.
+ * Used by the settings panel's "Playback voice" control (#361) so a change
+ * takes effect without requiring a page reload.
+ */
+export function setPlaybackInstrument(
+  instrumentId: PlaybackInstrumentId,
+  onError?: (err: unknown) => void,
+): Promise<void> {
+  soundfont = new SoundfontLoader(instrumentId);
   loadPromise = null;
   return ensureSoundfontLoaded(onError);
 }

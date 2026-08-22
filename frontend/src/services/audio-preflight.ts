@@ -1,7 +1,14 @@
+import {
+  DEFAULT_PLAYBACK_INSTRUMENT_ID,
+  PLAYBACK_INSTRUMENTS,
+  type PlaybackInstrumentId,
+} from '../playback/soundfont';
+
 const PRE_FLIGHT_DEVICE_KEY = 'sing-attune.preflight.deviceId';
 const PRE_FLIGHT_LATENCY_KEY = 'sing-attune.preflight.latencyMs';
 const USER_VOICE_TYPE_KEY = 'userVoiceType';
 const USER_OCTAVE_COMP_KEY = 'sing-attune.preflight.octaveCompensation';
+const PLAYBACK_VOICE_KEY = 'sing-attune.preflight.playbackVoice';
 
 const DEFAULT_LATENCY_MS = 0;
 
@@ -81,6 +88,25 @@ export function persistUserVoiceTypeId(voiceTypeId: string | null): void {
     return;
   }
   storage.setItem(USER_VOICE_TYPE_KEY, voiceTypeId);
+}
+
+/**
+ * Playback voice (GM instrument used for score playback). Defaults to a
+ * vocal timbre — see soundfont.ts's DEFAULT_PLAYBACK_INSTRUMENT_ID — rather
+ * than piano, per #361 (piano playback is much less useful for singing
+ * practice than a vocal-ish timbre).
+ */
+export function loadPlaybackVoiceId(): PlaybackInstrumentId {
+  const storage = getStorage();
+  const stored = storage?.getItem(PLAYBACK_VOICE_KEY) ?? null;
+  const match = PLAYBACK_INSTRUMENTS.find((option) => option.id === stored);
+  return match ? match.id : DEFAULT_PLAYBACK_INSTRUMENT_ID;
+}
+
+export function persistPlaybackVoiceId(instrumentId: PlaybackInstrumentId): void {
+  const storage = getStorage();
+  if (!storage) return;
+  storage.setItem(PLAYBACK_VOICE_KEY, instrumentId);
 }
 
 export function loadOctaveCompensationEnabled(): boolean {
