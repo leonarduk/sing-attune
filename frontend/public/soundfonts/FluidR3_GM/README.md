@@ -50,12 +50,20 @@ comment.
 soundfont (`FluidR3_GM.sf2`) by Frank Wen, redistributed via
 `gleitz/midi-js-soundfonts` under CC BY 3.0.
 
-**Unable to confirm:** we could not locate a single canonical, versioned
-licence file inside `gleitz/midi-js-soundfonts` itself (no `LICENSE.md` at
-the paths checked); the CC BY 3.0 statement above reflects the licence text
-published on the project's GitHub Pages site as of the date this README was
-written (2026-08-22). If you rely on this for compliance purposes, re-verify
-against the current upstream source before redistributing further.
+**Sources, and what is still uncertain** (verified 2026-08-22):
+
+- The MIT statement comes from `LICENSE.txt` at the root of
+  `gleitz/midi-js-soundfonts`. It covers that repo's code/tooling, not the
+  sample data.
+- The CC BY 3.0 statement comes from that repo's own `README.md` ("FluidR3_GM
+  — Released under Creative Commons Attribution 3.0 license"), which is also
+  what its GitHub Pages site serves.
+- **Caveat:** Frank Wen's original FluidR3 distribution documents the
+  soundfont under an **MIT** licence, not CC BY 3.0 — the upstream
+  re-packager and the original author do not agree. We follow the stricter
+  of the two (CC BY 3.0, i.e. we attribute) so that either reading is
+  satisfied. If you rely on this for compliance purposes, re-verify both
+  sources before redistributing further.
 
 ## Adding a new bundled voice
 
@@ -77,7 +85,10 @@ instead of leaving it CDN-only):
    `voice_oohs`), no code change is needed — `buildSoundfontUrls()` already
    points at `/soundfonts/FluidR3_GM/{instrument}-mp3.js` first, so the new
    local file is picked up automatically ahead of the CDN mirrors.
-4. Update the table above and this file's attribution note if the new
-   instrument comes from a different upstream source.
+4. Update the "What's bundled" table above, and — if you bundled
+   `voice_oohs` — the "Bundled vs. CDN-only (#403)" comment above
+   `PLAYBACK_INSTRUMENTS` in `soundfont.ts`, which otherwise still claims it
+   is deliberately CDN-only. Update this file's attribution note too if the
+   new instrument comes from a different upstream source.
 5. Confirm you're satisfied with the CC BY 3.0 attribution requirement (or
    whatever licence applies to the new source) before shipping the binary.
