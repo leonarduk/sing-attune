@@ -136,8 +136,14 @@ function mostCommonDelta(deltas: number[]): number | null {
  * Compares a bass-clef note sequence against a transposed-treble note
  * sequence and reports the per-note deltas plus a pass/fail equivalence
  * verdict. Never throws — handles empty input and mismatched lengths per
- * #360 AC (unpaired trailing notes count toward mismatchCount via
- * unpairedCount, and countsMatch/equivalent reflect the length mismatch).
+ * #360 AC.
+ *
+ * Unequal lengths: the first min(bass, treble) notes are paired positionally
+ * and the surplus tail is left unpaired — it is reported via unpairedCount
+ * and fails `equivalent` through countsMatch, but is deliberately NOT added
+ * to mismatchCount, which counts only paired notes whose delta disagrees
+ * with the detected offset. Kept separate so the readout can distinguish
+ * "these notes disagree" from "one version has notes the other lacks".
  */
 export function compareTenorVersions(
   bassNotes: OverlayNote[],
