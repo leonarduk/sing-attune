@@ -34,6 +34,17 @@ function devMusescorePlugin(): Plugin {
 
 export default defineConfig({
   plugins: [devMusescorePlugin()],
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        // Developer/validation-only tenor overlay view (#360). A separate
+        // HTML entry point — not linked from index.html — so it is only
+        // reachable by navigating to it directly, never from the practice UI.
+        debugTenorOverlay: resolve(__dirname, 'debug-tenor-overlay.html'),
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {
