@@ -15,7 +15,8 @@ import {
 } from '../../services/audio-preflight';
 import { VOICE_TYPES, getVoiceTypeById } from '../../pitch/voice-type';
 import { PLAYBACK_INSTRUMENTS, type PlaybackInstrumentId } from '../../playback/soundfont';
-import { setPlaybackInstrument } from '../../services/audio-context';
+import { getSoundfont, setPlaybackInstrument } from '../../services/audio-context';
+import { getSession } from '../../services/score-session';
 
 interface BrowserAudioInputDevice {
   deviceId: string;
@@ -628,8 +629,15 @@ function mount(_slot: HTMLElement): void {
   playbackVoiceSelectEl.addEventListener('change', () => {
     const instrumentId = (playbackVoiceSelectEl?.value ?? '') as PlaybackInstrumentId;
     persistPlaybackVoiceId(instrumentId);
-    // Reload immediately so the change is audible without a page refresh.
-    void setPlaybackInstrument(instrumentId);
+    // Load the new voice, then push the *same* loader instance into the
+    // currently loaded score's engine (#361 review fix). setPlaybackInstrument()
+    // alone only swaps the audio-context singleton — PlaybackEngine captures
+    // its SoundfontLoader by reference at construction time, so without this
+    // the active engine kept scheduling notes from the old voice until the
+    // score was reloaded. See PlaybackEngine.setSoundfont().
+    void setPlaybackInstrument(instrumentId).then(() => {
+      getSession()?.engine.setSoundfont(getSoundfont());
+    });
   });
 
   testButtonEl.addEventListener('click', () => {

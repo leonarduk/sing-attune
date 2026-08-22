@@ -16,6 +16,15 @@ let ctx: AudioContext | null = null;
 let soundfont: SoundfontLoader | null = null;
 let loadPromise: Promise<void> | null = null;
 
+// Generation guard (#361 review fix): setPlaybackInstrument()/retrySoundfontLoad()
+// swap `soundfont` and null `loadPromise` without cancelling the in-flight fetch
+// behind a previous ensureSoundfontLoaded() call. Without this counter, a slow
+// stale load could settle *after* a newer (possibly failed) voice switch and
+// clobber playbackTimbreMode with its own outcome. Each ensureSoundfontLoaded()
+// call that actually starts a new load captures the post-increment value; its
+// .then()/.catch() side effects only apply if no newer load has started since.
+let loadGeneration = 0;
+
 export type PlaybackTimbreMode = 'loading' | 'soundfont' | 'synth-fallback';
 
 let playbackTimbreMode: PlaybackTimbreMode = 'loading';
@@ -58,14 +67,18 @@ export function ensureSoundfontLoaded(
   onError?: (err: unknown) => void,
 ): Promise<void> {
   if (!loadPromise) {
+    const generation = ++loadGeneration;
     setPlaybackTimbreMode('loading');
     const ac = getAudioContext();
     const sf = getSoundfont();
     loadPromise = sf.load(ac)
       .then(() => {
+        // Stale load superseded by a later voice switch — drop its result.
+        if (generation !== loadGeneration) return;
         setPlaybackTimbreMode('soundfont');
       })
       .catch((err: unknown) => {
+        if (generation !== loadGeneration) return;
         setPlaybackTimbreMode('synth-fallback');
         console.error('[Soundfont] load failed:', err);
         onError?.(err);

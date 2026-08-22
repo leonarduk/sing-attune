@@ -1,5 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// #361 review fix: the settings handler must push a freshly-loaded voice into
+// the *active* score session's PlaybackEngine (not just the audio-context
+// singleton) so a mid-session voice switch is actually audible. Mock both
+// collaborators so the "voice change updates active engine" test below can
+// assert on the wiring without needing a real SoundfontLoader/AudioContext.
+const mockSetPlaybackInstrument =
+  vi.fn<(...args: Parameters<typeof import('../../services/audio-context').setPlaybackInstrument>) => Promise<void>>(
+    async () => undefined,
+  );
+const mockGetSoundfont = vi.fn<() => string>(() => 'mock-soundfont-loader');
+vi.mock('../../services/audio-context', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/audio-context')>();
+  return {
+    ...actual,
+    setPlaybackInstrument: (...args: Parameters<typeof actual.setPlaybackInstrument>) =>
+      mockSetPlaybackInstrument(...args),
+    getSoundfont: () => mockGetSoundfont(),
+  };
+});
+
+const mockGetSession = vi.fn<() => unknown>(() => null);
+vi.mock('../../services/score-session', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/score-session')>();
+  return {
+    ...actual,
+    getSession: () => mockGetSession(),
+  };
+});
+
 import { audioPreflightFeature, __audioPreflightInternals } from './index';
 
 let nextAnalyserPeak = 0;
@@ -94,6 +123,9 @@ function flushAnimationFrames(count = 1): void {
 
 beforeEach(() => {
   nextAnalyserPeak = 0;
+  mockSetPlaybackInstrument.mockClear();
+  mockGetSoundfont.mockClear();
+  mockGetSession.mockReset().mockReturnValue(null);
   rafQueue.length = 0;
   vi.stubGlobal('requestAnimationFrame', ((callback: FrameRequestCallback) => {
     rafQueue.push(callback);
@@ -436,6 +468,47 @@ describe('audio preflight mic test feedback', () => {
 
     __audioPreflightInternals.closeModal(false);
     await expect(secondOpenPromise).resolves.toBe(false);
+  });
+});
+
+describe('audio preflight playback voice switch (#361)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="slot-audio-preflight"></div>';
+    installMediaMocks();
+    const slot = document.getElementById('slot-audio-preflight') as HTMLDivElement;
+    audioPreflightFeature.mount(slot);
+  });
+
+  it('pushes the newly-loaded soundfont into the active session engine, not just the singleton', async () => {
+    // This is the coverage gap called out in review: a naive test could only
+    // assert that setPlaybackInstrument() (the audio-context singleton) was
+    // called — that alone doesn't prove the *currently loaded score* actually
+    // changes sound. Assert the engine reference explicitly.
+    const setSoundfont = vi.fn();
+    mockGetSession.mockReturnValue({ engine: { setSoundfont } });
+
+    const select = document.getElementById('audio-preflight-playback-voice') as HTMLSelectElement;
+    select.value = 'voice_oohs';
+    select.dispatchEvent(new Event('change'));
+
+    // setPlaybackInstrument() resolves asynchronously; let its .then() run.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockSetPlaybackInstrument).toHaveBeenCalledWith('voice_oohs');
+    expect(setSoundfont).toHaveBeenCalledTimes(1);
+    expect(setSoundfont).toHaveBeenCalledWith('mock-soundfont-loader');
+  });
+
+  it('does not throw when no score is currently loaded', async () => {
+    mockGetSession.mockReturnValue(null);
+
+    const select = document.getElementById('audio-preflight-playback-voice') as HTMLSelectElement;
+    select.value = 'choir_aahs';
+    select.dispatchEvent(new Event('change'));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockSetPlaybackInstrument).toHaveBeenCalledWith('choir_aahs');
   });
 });
 
