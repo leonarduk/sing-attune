@@ -1,29 +1,69 @@
 /**
- * SoundfontLoader — loads piano samples from a bundled FluidR3 asset first,
- * then falls back to the gleitz/midi-js-soundfonts mirrors.
+ * SoundfontLoader — loads GM instrument samples from a bundled FluidR3 asset
+ * first, then falls back to the gleitz/midi-js-soundfonts mirrors.
  *
  * Format: MIDI.js-style JS file containing base64-encoded MP3 samples for
- * each piano note. We fetch the file, extract the JSON object, decode each
- * sample into an AudioBuffer, and build a MIDI-number → AudioBuffer map.
+ * each note of the instrument. We fetch the file, extract the JSON object,
+ * decode each sample into an AudioBuffer, and build a MIDI-number →
+ * AudioBuffer map.
  *
- * Nearest-sample strategy: the gleitz soundfont only includes a subset of
+ * Nearest-sample strategy: the gleitz soundfonts only include a subset of
  * MIDI notes (every 2–4 semitones). getBuffer() returns the closest sampled
  * note. Callers should apply AudioBufferSourceNode.detune to pitch-correct;
  * use getNearestSampledMidi() to find the offset in cents.
  *
- * Offline note: packaged builds should resolve the first URL below from local
- * app assets, so playback still works when there is no internet connection.
+ * Offline note: packaged builds resolve the first URL for each instrument
+ * from local app assets, so playback still works when there is no internet
+ * connection — see public/soundfonts/FluidR3_GM/.
+ *
+ * Instrument selection (#361): the instrument is a parameter rather than a
+ * hardcoded piano URL, so the settings panel can offer a vocal timbre
+ * (Choir Aahs / Voice Oohs) as the default playback voice — piano sounds
+ * much less useful for singing practice. See buildSoundfontUrls().
  */
+
+// GM instrument ids we ship as selectable playback voices. Values match the
+// gleitz/midi-js-soundfonts FluidR3_GM filenames exactly (used to build URLs).
+export type PlaybackInstrumentId = 'acoustic_grand_piano' | 'choir_aahs' | 'voice_oohs';
+
+export interface PlaybackInstrumentOption {
+  id: PlaybackInstrumentId;
+  label: string;
+}
+
+// Order shown in the settings "Playback voice" select. Vocal timbres first
+// since they're the recommended choice for singing practice (#361 AC: the
+// default must be a vocal timbre, not piano).
+export const PLAYBACK_INSTRUMENTS: PlaybackInstrumentOption[] = [
+  { id: 'choir_aahs', label: 'Choir Aahs (vocal)' },
+  { id: 'voice_oohs', label: 'Voice Oohs (vocal)' },
+  { id: 'acoustic_grand_piano', label: 'Piano' },
+];
+
+// Default playback voice is vocal, not piano — the original ask was that
+// piano playback doesn't sound enough like a voice for singing practice.
+export const DEFAULT_PLAYBACK_INSTRUMENT_ID: PlaybackInstrumentId = 'choir_aahs';
+
+// Last-resort instrument if the selected voice fails to load from every
+// mirror. Piano is the best-tested/most-reliable bundled asset, and the
+// synth oscillator fallback in engine.ts is the final safety net after this.
+export const FALLBACK_PLAYBACK_INSTRUMENT_ID: PlaybackInstrumentId = 'acoustic_grand_piano';
 
 // Priority order is intentional: use the bundled local asset first so
 // packaged/offline environments never depend on runtime CDN access.
-export const SOUNDFONT_URLS = [
-  '/soundfonts/FluidR3_GM/acoustic_grand_piano-mp3.js',
-  'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_grand_piano-mp3.js',
-  'https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@gh-pages/FluidR3_GM/acoustic_grand_piano-mp3.js',
-  'https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@master/FluidR3_GM/acoustic_grand_piano-mp3.js',
-  'https://raw.githubusercontent.com/gleitz/midi-js-soundfonts/master/FluidR3_GM/acoustic_grand_piano-mp3.js',
+// `{instrument}` is substituted with the GM instrument id.
+const SOUNDFONT_URL_TEMPLATES = [
+  '/soundfonts/FluidR3_GM/{instrument}-mp3.js',
+  'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/{instrument}-mp3.js',
+  'https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@gh-pages/FluidR3_GM/{instrument}-mp3.js',
+  'https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@master/FluidR3_GM/{instrument}-mp3.js',
+  'https://raw.githubusercontent.com/gleitz/midi-js-soundfonts/master/FluidR3_GM/{instrument}-mp3.js',
 ] as const;
+
+/** Build the mirror URL list (bundled asset first, then CDN mirrors) for a given GM instrument id. */
+export function buildSoundfontUrls(instrumentId: PlaybackInstrumentId): string[] {
+  return SOUNDFONT_URL_TEMPLATES.map((template) => template.replace('{instrument}', instrumentId));
+}
 
 const SOUNDFONT_ASSIGNMENT_RE = /MIDI\.Soundfont\.[A-Za-z0-9_]+\s*=/;
 const HTML_CONTENT_TYPE_RE = /text\/html|application\/xhtml\+xml/i;
@@ -91,24 +131,33 @@ function formatMirrorFailure(failure: MirrorFailure): string {
 }
 
 export class SoundfontLoader {
+  private readonly _instrumentId: PlaybackInstrumentId;
   private _buffers = new Map<number, AudioBuffer>();
   private _sampledMidis: number[] = [];
   private _loaded = false;
 
+  constructor(instrumentId: PlaybackInstrumentId = DEFAULT_PLAYBACK_INSTRUMENT_ID) {
+    this._instrumentId = instrumentId;
+  }
+
+  get instrumentId(): PlaybackInstrumentId { return this._instrumentId; }
+
   /**
-   * Fetch and decode all piano samples. Resolves when every AudioBuffer is
-   * ready. Logs a summary on success; individual note decode errors are
-   * silently skipped (sample is simply absent from the map).
+   * Fetch and decode all samples for the selected instrument. Resolves when
+   * every AudioBuffer is ready. Logs a summary on success; individual note
+   * decode errors are silently skipped (sample is simply absent from the map).
    *
    * Safe to call multiple times — subsequent calls are no-ops.
    */
   async load(ctx: AudioContext): Promise<void> {
     if (this._loaded) return;
 
-    // 1. Fetch the MIDI.js-format soundfont JS file.
+    // 1. Fetch the MIDI.js-format soundfont JS file for the selected voice.
     // Some CDN mirrors occasionally return a corrupt/truncated payload; we
-    // retry against a secondary mirror before falling back to synth mode.
-    const noteMap = await SoundfontLoader.loadNoteMapFromMirror();
+    // retry against a secondary mirror before falling back to piano, then
+    // to synth mode (#361: instrument load failures must never throw up to
+    // the caller — see ensureSoundfontLoaded()'s synth-fallback mode).
+    const noteMap = await SoundfontLoader.loadNoteMapForInstrument(this._instrumentId);
 
     // 3. Decode all samples concurrently
     const entries = Object.entries(noteMap);
@@ -176,10 +225,34 @@ export class SoundfontLoader {
   static midiToNoteName = midiToNoteName;
   static noteNameToMidi = noteNameToMidi;
 
-  private static async loadNoteMapFromMirror(): Promise<Record<string, string>> {
+  /**
+   * Load the note map for `instrumentId`, trying every mirror in order.
+   * If every mirror fails and `instrumentId` is not already the fallback
+   * piano voice, retries once against the piano voice before giving up —
+   * this is the "instrument load failure falls back to piano" leg of the
+   * fallback chain (#361 AC); the synth-oscillator leg lives one level up,
+   * in engine.ts, triggered when this whole method still throws.
+   */
+  private static async loadNoteMapForInstrument(
+    instrumentId: PlaybackInstrumentId,
+  ): Promise<Record<string, string>> {
+    try {
+      return await SoundfontLoader.loadNoteMapFromMirrors(instrumentId);
+    } catch (err) {
+      if (instrumentId === FALLBACK_PLAYBACK_INSTRUMENT_ID) throw err;
+      console.warn(
+        `[SoundfontLoader] instrument "${instrumentId}" failed on every mirror, falling back to "${FALLBACK_PLAYBACK_INSTRUMENT_ID}": ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return SoundfontLoader.loadNoteMapFromMirrors(FALLBACK_PLAYBACK_INSTRUMENT_ID);
+    }
+  }
+
+  private static async loadNoteMapFromMirrors(
+    instrumentId: PlaybackInstrumentId,
+  ): Promise<Record<string, string>> {
     const failures: MirrorFailure[] = [];
 
-    for (const url of SOUNDFONT_URLS) {
+    for (const url of buildSoundfontUrls(instrumentId)) {
       let status: number | null = null;
       try {
         // Avoid serving a previously cached corrupt/truncated payload.

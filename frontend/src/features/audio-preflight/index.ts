@@ -3,15 +3,19 @@ import {
   loadPreflightDeviceId,
   loadPreflightLatencyMs,
   loadOctaveCompensationEnabled,
+  loadPlaybackVoiceId,
   loadUserVoiceTypeId,
   markAudioPreflightComplete,
   persistOctaveCompensationEnabled,
+  persistPlaybackVoiceId,
   persistPreflightDeviceId,
   persistPreflightLatencyMs,
   persistUserVoiceTypeId,
   registerAudioPreflightOpener,
 } from '../../services/audio-preflight';
 import { VOICE_TYPES, getVoiceTypeById } from '../../pitch/voice-type';
+import { PLAYBACK_INSTRUMENTS, type PlaybackInstrumentId } from '../../playback/soundfont';
+import { setPlaybackInstrument } from '../../services/audio-context';
 
 interface BrowserAudioInputDevice {
   deviceId: string;
@@ -41,6 +45,7 @@ let requestButtonEl: HTMLButtonElement | null = null;
 let voiceTypeSelectEl: HTMLSelectElement | null = null;
 let voiceTypeSuggestionEl: HTMLDivElement | null = null;
 let octaveCompCheckboxEl: HTMLInputElement | null = null;
+let playbackVoiceSelectEl: HTMLSelectElement | null = null;
 const METER_GAIN_SCALE = 140;
 // Below ~1.5% peak amplitude we treat the run as silence / no usable mic signal.
 const NO_SIGNAL_THRESHOLD = 0.015;
@@ -429,6 +434,10 @@ function buildModal(): HTMLDivElement {
         <label for="audio-preflight-octave-comp">Octave compensation</label>
         <input id="audio-preflight-octave-comp" type="checkbox" />
       </div>
+      <div class="audio-preflight-row">
+        <label for="audio-preflight-playback-voice">Playback voice</label>
+        <select id="audio-preflight-playback-voice"></select>
+      </div>
       <div id="audio-preflight-test-result" class="audio-preflight-test-result" data-state="idle">Run “Test my mic” and speak to see a pass/fail result and level guidance.</div>
       <div class="audio-preflight-tip">🎧 Use headphones to avoid feedback and mic bleed.</div>
       <div id="audio-preflight-error" class="audio-preflight-error" role="alert"></div>
@@ -553,6 +562,7 @@ function mount(_slot: HTMLElement): void {
   voiceTypeSelectEl = document.getElementById('audio-preflight-voice-type') as HTMLSelectElement;
   voiceTypeSuggestionEl = document.getElementById('audio-preflight-voice-suggestion') as HTMLDivElement;
   octaveCompCheckboxEl = document.getElementById('audio-preflight-octave-comp') as HTMLInputElement;
+  playbackVoiceSelectEl = document.getElementById('audio-preflight-playback-voice') as HTMLSelectElement;
 
   requestButtonEl = document.getElementById('audio-preflight-request') as HTMLButtonElement;
   resetMicTestUi();
@@ -571,6 +581,11 @@ function mount(_slot: HTMLElement): void {
   ].join('');
   if (selectedVoiceTypeId) voiceTypeSelectEl.value = selectedVoiceTypeId;
   octaveCompCheckboxEl.checked = loadOctaveCompensationEnabled();
+
+  playbackVoiceSelectEl.innerHTML = PLAYBACK_INSTRUMENTS
+    .map((option) => `<option value="${option.id}">${option.label}</option>`)
+    .join('');
+  playbackVoiceSelectEl.value = loadPlaybackVoiceId();
 
   requestButtonEl.addEventListener('click', () => {
     void requestPermissionAndDevices();
@@ -608,6 +623,13 @@ function mount(_slot: HTMLElement): void {
 
   octaveCompCheckboxEl.addEventListener('change', () => {
     persistOctaveCompensationEnabled(Boolean(octaveCompCheckboxEl?.checked));
+  });
+
+  playbackVoiceSelectEl.addEventListener('change', () => {
+    const instrumentId = (playbackVoiceSelectEl?.value ?? '') as PlaybackInstrumentId;
+    persistPlaybackVoiceId(instrumentId);
+    // Reload immediately so the change is audible without a page refresh.
+    void setPlaybackInstrument(instrumentId);
   });
 
   testButtonEl.addEventListener('click', () => {
