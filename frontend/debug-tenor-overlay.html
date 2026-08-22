@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>sing-attune — tenor overlay (debug)</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-bg: #1a1a2e;
+      --color-surface: #16213e;
+      --color-border: #0f3460;
+      --color-accent: #e94560;
+      --color-text: #eee;
+      --color-text-muted: #aaa;
+    }
+    body {
+      font-family: system-ui, sans-serif;
+      background: var(--color-bg);
+      color: var(--color-text);
+      padding: 20px;
+    }
+    h1 { color: var(--color-accent); font-size: 1.2rem; margin-bottom: 4px; }
+    p.subtitle { color: var(--color-text-muted); font-size: 0.85rem; margin-bottom: 16px; }
+    .panel {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: end;
+    }
+    label { display: block; font-size: 0.78rem; color: var(--color-text-muted); margin-bottom: 4px; }
+    input {
+      background: var(--color-bg);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+      border-radius: 4px;
+      padding: 6px 8px;
+      font-size: 0.85rem;
+    }
+    input[type="number"] { width: 80px; }
+    button {
+      padding: 7px 16px;
+      border: 1px solid var(--color-border);
+      border-radius: 4px;
+      background: var(--color-border);
+      color: var(--color-text);
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    button:hover { background: #1a5276; }
+    #status { font-size: 0.8rem; color: var(--color-text-muted); margin-top: 10px; }
+    #overlay-canvas { width: 100%; height: 340px; }
+    #readout {
+      white-space: pre-wrap;
+      font-family: ui-monospace, monospace;
+      font-size: 0.85rem;
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      padding: 10px;
+      background: #0d162a;
+    }
+    #readout[data-state="pass"] { border-color: #4caf50; color: #c8f7d4; }
+    #readout[data-state="fail"] { border-color: #e94560; color: #ffd0d8; }
+  </style>
+</head>
+<body>
+  <h1>Tenor overlay — bass clef vs. transposed treble</h1>
+  <p class="subtitle">
+    Developer/validation-only view (issue #360). Not linked from the practice UI —
+    overlays a part's bass-clef-notated notes against a transposed-treble
+    (octave-displaced) version of the same notes to visually confirm the two
+    notations are equivalent, mirroring the numeric invariant in
+    backend/tests/test_score.py::test_part_ii_range_matches_tenor_octave_compensation_flow.
+  </p>
+
+  <div class="panel">
+    <div class="controls">
+      <div>
+        <label for="file-input">MusicXML score</label>
+        <input id="file-input" type="file" accept=".mxl,.xml,.musicxml" />
+      </div>
+      <div>
+        <label for="part-name">Part name</label>
+        <input id="part-name" type="text" value="Tenor" />
+      </div>
+      <div>
+        <label for="start-bar">Start bar</label>
+        <input id="start-bar" type="number" value="1" min="0" />
+      </div>
+      <div>
+        <label for="end-bar">End bar</label>
+        <input id="end-bar" type="number" value="8" min="0" />
+      </div>
+      <div>
+        <label for="octave-offset">Assumed offset (semitones)</label>
+        <input id="octave-offset" type="number" value="12" />
+      </div>
+      <div>
+        <button id="compare-button" type="button">Compare</button>
+      </div>
+    </div>
+    <div id="status">Load a score to begin.</div>
+  </div>
+
+  <div class="panel">
+    <div id="overlay-canvas"></div>
+  </div>
+
+  <div class="panel">
+    <pre id="readout" data-state="idle">No comparison run yet.</pre>
+  </div>
+
+  <script type="module" src="/src/debug/tenor-overlay/main.ts"></script>
+</body>
+</html>
