@@ -615,3 +615,94 @@ describe('PlaybackEngine part selection', () => {
   });
 
 });
+
+describe('PlaybackEngine.setSoundfont (#361 review fix)', () => {
+  // The engine used to capture its SoundfontLoader by reference at
+  // construction time only, so switching the playback voice mid-session had
+  // no audible effect until the score was reloaded. setSoundfont() lets the
+  // settings handler push a new loader into the *active* engine.
+  class FakeBufferSource {
+    buffer: AudioBuffer | null = null;
+    detune = { value: 0 };
+    connect(): void {}
+    start(): void {}
+    stop(): void {}
+  }
+
+  class FakeAudioContext {
+    currentTime = 0;
+    state: AudioContextState = 'running';
+    destination = {} as AudioDestinationNode;
+    createBufferSource(): AudioBufferSourceNode {
+      return new FakeBufferSource() as unknown as AudioBufferSourceNode;
+    }
+    createGain(): GainNode {
+      return { gain: { value: 1 }, connect(): void {}, disconnect(): void {} } as unknown as GainNode;
+    }
+    resume(): Promise<void> {
+      return Promise.resolve();
+    }
+  }
+
+  function makeSoundfont(label: string): import('./soundfont').SoundfontLoader {
+    return {
+      label,
+      getBuffer: () => ({}) as AudioBuffer,
+      getNearestSampledMidi: (midi: number) => midi,
+    } as unknown as import('./soundfont').SoundfontLoader;
+  }
+
+  it('uses the newly-set soundfont for notes scheduled after the swap', () => {
+    const oldSf = makeSoundfont('old');
+    const newSf = makeSoundfont('new');
+    const getBufferCalls: string[] = [];
+    oldSf.getBuffer = () => { getBufferCalls.push('old'); return {} as AudioBuffer; };
+    newSf.getBuffer = () => { getBufferCalls.push('new'); return {} as AudioBuffer; };
+
+    const ctx = new FakeAudioContext();
+    const engine = new PlaybackEngine(ctx as unknown as AudioContext, oldSf);
+
+    engine.schedule(
+      [{ midi: 60, beat_start: 0, duration: 1, measure: 1, part: 'PART I', lyric: null }],
+      BPM120,
+      'PART I',
+      1,
+    );
+
+    // Not playing yet — setSoundfont() only swaps the reference, no reschedule.
+    engine.setSoundfont(newSf);
+
+    engine.play(0);
+    expect(getBufferCalls).toEqual(['new']);
+  });
+
+  it('immediately reschedules the not-yet-started note using the new soundfont when already playing', () => {
+    const oldSf = makeSoundfont('old');
+    const newSf = makeSoundfont('new');
+    const getBufferCalls: string[] = [];
+    oldSf.getBuffer = () => { getBufferCalls.push('old'); return {} as AudioBuffer; };
+    newSf.getBuffer = () => { getBufferCalls.push('new'); return {} as AudioBuffer; };
+
+    const ctx = new FakeAudioContext();
+    const engine = new PlaybackEngine(ctx as unknown as AudioContext, oldSf);
+
+    // A note starting later in the piece, so it's still in the future when
+    // setSoundfont() reschedules from the current (early) beat.
+    engine.schedule(
+      [{ midi: 60, beat_start: 4, duration: 2, measure: 1, part: 'PART I', lyric: null }],
+      BPM120,
+      'PART I',
+      1,
+    );
+    engine.play(0);
+    expect(getBufferCalls).toEqual(['old']);
+
+    engine.setSoundfont(newSf);
+
+    // Rescheduling should re-source the still-upcoming note from the new
+    // voice — proving the swap takes effect on the current playback session
+    // rather than only affecting the next score load.
+    expect(getBufferCalls).toEqual(['old', 'new']);
+    expect(engine.playing).toBe(true);
+  });
+});

@@ -117,7 +117,11 @@ const LATE_TOLERANCE_S = 0.01;
 export class PlaybackEngine {
   /** The AudioContext. Expose so main.ts can read currentTime for cursor sync. */
   readonly ctx: AudioContext;
-  private readonly sf: SoundfontLoader;
+  // Not readonly (#361 review fix): setSoundfont() lets the settings handler
+  // push a newly-loaded voice into the *active* session's engine so a mid-
+  // session "Playback voice" change is actually audible without a score
+  // reload. See audio-preflight/index.ts's playbackVoiceSelectEl handler.
+  private sf: SoundfontLoader;
 
   private _state: PlaybackState = 'idle';
   private _sources: AudioScheduledSourceNode[] = [];
@@ -141,6 +145,24 @@ export class PlaybackEngine {
   constructor(ctx: AudioContext, sf: SoundfontLoader) {
     this.ctx = ctx;
     this.sf = sf;
+  }
+
+  /**
+   * Swap the soundfont this engine schedules notes from (#361 review fix).
+   * Only future-scheduled notes are affected — sources already scheduled via
+   * _scheduleFrom() keep the buffers they were built with. If playback is
+   * currently active, reschedule from the current beat so the new voice is
+   * audible immediately instead of waiting for the next play()/seek/tempo
+   * change to naturally rebuild the schedule.
+   */
+  setSoundfont(sf: SoundfontLoader): void {
+    this.sf = sf;
+    if (this._state !== 'playing') return;
+    const beat = this.currentBeat;
+    this._stopSources();
+    this._startBeat = beat;
+    this._startAudioTime = this.ctx.currentTime + RESCHEDULE_OFFSET_S;
+    this._scheduleFrom(beat, this._startAudioTime);
   }
 
   // ── Public state ─────────────────────────────────────────────────────────────
