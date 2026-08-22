@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Runs a command (typically a pip install) with git credentials configured so it
-# can clone the now-private leonarduk/cicaid-core repo. leonarduk/cicaid was
-# renamed to leonarduk/cicaid-core (private) and its old name reused by a new,
-# unrelated public repo, so old github.com/leonarduk/cicaid/releases/... wheel
-# URLs are not a durable source for cicaid-devtools (issue #388).
+# can clone the now-private leonarduk/cicaid-pro repo. leonarduk/cicaid was
+# renamed to a private repo and its old name reused by a new, unrelated public
+# repo, so old github.com/leonarduk/cicaid/releases/... wheel URLs are not a
+# durable source for cicaid-devtools (issue #388). That private repo was
+# itself later renamed again to cicaid-pro (issue #395) as part of a wider
+# "-core" -> "-pro" rename across the leonarduk org, ahead of the same
+# name-reuse trap recurring (allotmint#6754).
 #
-# Fails fast with an actionable message if CICAID_CORE_TOKEN is unset or empty,
+# Fails fast with an actionable message if CICAID_PRO_TOKEN is unset or empty,
 # instead of letting the wrapped command fail later with a confusing git auth
 # error. The credential rewrite is scoped to exactly this invocation through
 # Git's GIT_CONFIG_* environment variables; the token is never written to a
@@ -26,17 +29,17 @@
 # contain the URL-reserved characters (@, :, /) that would make this rewrite
 # unsafe, so that's not a practical concern for the token this script expects.
 #
-# Usage: pip_install_cicaid_core.sh <command...>
-# Required env: CICAID_CORE_TOKEN
+# Usage: pip_install_cicaid_pro.sh <command...>
+# Required env: CICAID_PRO_TOKEN
 set -euo pipefail
 
-if [ -z "${CICAID_CORE_TOKEN:-}" ]; then
-  echo "::error::CICAID_CORE_TOKEN is empty or unset. Add a fine-grained PAT (Contents: Read-only, scoped to leonarduk/cicaid-core) as the CICAID_CORE_TOKEN repository secret (Settings > Secrets and variables > Actions) before this workflow can install cicaid-devtools. See issue #388." >&2
+if [ -z "${CICAID_PRO_TOKEN:-}" ]; then
+  echo "::error::CICAID_PRO_TOKEN is empty or unset. Add a fine-grained PAT (Contents: Read-only, scoped to leonarduk/cicaid-pro) as the CICAID_PRO_TOKEN repository secret (Settings > Secrets and variables > Actions) before this workflow can install cicaid-devtools. See issue #395." >&2
   exit 1
 fi
 
 export GIT_CONFIG_COUNT=1
-export GIT_CONFIG_KEY_0="url.https://x-access-token:${CICAID_CORE_TOKEN}@github.com/leonarduk/cicaid-core.insteadOf"
-export GIT_CONFIG_VALUE_0="https://github.com/leonarduk/cicaid-core"
+export GIT_CONFIG_KEY_0="url.https://x-access-token:${CICAID_PRO_TOKEN}@github.com/leonarduk/cicaid-pro.insteadOf"
+export GIT_CONFIG_VALUE_0="https://github.com/leonarduk/cicaid-pro"
 
 exec "$@"

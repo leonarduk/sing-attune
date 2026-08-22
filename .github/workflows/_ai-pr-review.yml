@@ -35,8 +35,8 @@ on:
         type: string
         default: ""
     secrets:
-      cicaid_core_token:
-        description: "Fine-grained PAT with read access to leonarduk/cicaid-core"
+      cicaid_pro_token:
+        description: "Fine-grained PAT with read access to leonarduk/cicaid-pro"
         required: true
       openai_api_key:
         description: "OpenAI API key, used for GPT reviews"
@@ -76,8 +76,8 @@ jobs:
 
       - name: Install cicaid-devtools
         env:
-          CICAID_CORE_TOKEN: ${{ secrets.cicaid_core_token }}
-        run: .github/scripts/pip_install_cicaid_core.sh python -m pip install "cicaid-devtools @ git+https://github.com/leonarduk/cicaid-core.git@v0.9.1"
+          CICAID_PRO_TOKEN: ${{ secrets.cicaid_pro_token }}
+        run: .github/scripts/pip_install_cicaid_pro.sh python -m pip install "cicaid-devtools @ git+https://github.com/leonarduk/cicaid-pro.git@v0.9.1"
 
       - name: Get linked issue body
         id: issue
