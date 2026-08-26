@@ -51,6 +51,30 @@
 8. Open PR — **stop here and wait for user confirmation before merging**
 9. User merges PR → issue auto-closes
 
+## `cicaid` CLI
+
+This repo uses the `cicaid` CLI (package `cicaid-devtools`) for GitHub issue/PR
+plumbing and CI checks — commands like `cicaid sync-issues`, `work-on-issue`,
+`run-ci-checks`, `local-review`, `pr-review`, etc.
+
+If you need to check how a `cicaid` command actually behaves, its source is
+checked out locally at:
+- `C:\Users\steph\workspace\GitHub\cicaid\cicaid` — free/public commands
+- `C:\Users\steph\workspace\GitHub\cicaid\cicaid-core` — LLM-backed commands
+  (`triage-issues`, `review-issue`, `create-issue`, `local-review`, `pr-review`,
+  `commit-and-push`, `implement-issue-with-aider`, `clear-ai-slop-issues`)
+- `C:\Users\steph\workspace\GitHub\cicaid\cicaid.wiki` — wiki docs
+
+Each of those has its own CLAUDE.md with an accurate command/module map —
+read the relevant one before guessing at flags or behavior instead of
+inferring from this repo's usage alone. Note: `cicaid` and `cicaid-core`
+install as the same package name/entry point, so only one is ever active in
+a given venv at a time — don't assume both are simultaneously importable.
+
+This repo's own `.cicaid-checks.toml` (if present) defines what
+`cicaid run-ci-checks` actually runs here — check that file before assuming
+the `DEFAULT_CHECKS` fallback (Python/npm/CDK, tuned for allotmint) applies.
+
 ## Rules agents must never break
 
 - **Never merge a PR** — agents push fixes and report status. Merging is always the user's decision, even when all gates are green.
