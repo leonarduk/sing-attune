@@ -34,6 +34,25 @@ export function normalizeOverlaySettings(settings: OverlaySettings): OverlaySett
   };
 }
 
+/**
+ * Filters a score's notes down to one part and sorts the result ascending
+ * by beat_start.
+ *
+ * expectedNoteAtBeat() binary-searches its `notes` argument assuming
+ * ascending beat_start order, but ScoreModel.notes is not guaranteed to
+ * arrive in that order (interleaved voices/chords can appear in document
+ * order instead). Sorting defensively here mirrors the same precaution
+ * already taken in phrase-summary.ts's segmentPhrases() and
+ * score/cursor.ts's noteStarts derivation. See issue #434.
+ *
+ * Exported (rather than inlined in setPart()) so it can be unit-tested
+ * without constructing a real PitchOverlay, which needs a live canvas 2D
+ * context that jsdom does not provide.
+ */
+export function sortedNotesForPart(notes: NoteModel[], part: string): NoteModel[] {
+  return notes.filter((n) => n.part === part).sort((a, b) => a.beat_start - b.beat_start);
+}
+
 interface PitchFrame {
   t: number;
   midi: number;
@@ -139,7 +158,7 @@ export class PitchOverlay {
   }
 
   private setPart(part: string): void {
-    this.notesForPart = this.model.notes.filter((n) => n.part === part);
+    this.notesForPart = sortedNotesForPart(this.model.notes, part);
     this.midiMin = Math.min(...this.notesForPart.map((n) => n.midi), 48);
     this.midiMax = Math.max(...this.notesForPart.map((n) => n.midi), 84);
   }
