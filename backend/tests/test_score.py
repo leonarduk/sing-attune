@@ -8,6 +8,7 @@ Test scores (in musescore/):
   homeward_bound-PART_II.mxl  — Part II only (MuseScore export)
 """
 
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -232,6 +233,50 @@ class TestParserErrors:
         bad.write_text("this is not xml")
         with pytest.raises(ValueError):
             parse_musicxml(bad)
+
+    def test_malformed_tempo_mark_fallback_xml_raises_value_error(self, tmp_path):
+        """
+        A .mxl that music21 parses successfully (no tempo/metronome mark) but
+        whose raw-XML tempo-mark fallback (_get_xml_content + ET.fromstring
+        in _extract_tempo_marks) hits a malformed entry must raise ValueError,
+        not let xml.etree.ElementTree.ParseError propagate uncaught — that
+        used to surface as a bare 500 from POST /score instead of a 422.
+
+        The fixture exploits a real divergence between two "which .xml is the
+        real one" heuristics operating on the same archive: music21's own
+        ArchiveManager accepts a `.musicxml`-suffixed entry when picking the
+        file to parse, while parser._get_xml_content only matches entries
+        ending in exactly ".xml" — so, given both suffixes in one .mxl, they
+        pick different members. See issue #429.
+        """
+        score = stream.Score()
+        part = stream.Part()
+        part.partName = "Test Part"
+        part.append(meter.TimeSignature("4/4"))
+        measure = stream.Measure(number=1)
+        measure.append(note.Note("C4", quarterLength=4))
+        part.append(measure)
+        score.append(part)
+
+        good_xml_path = tmp_path / "good.musicxml"
+        score.write("musicxml", fp=good_xml_path)
+        good_xml_text = good_xml_path.read_text(encoding="utf-8")
+
+        mxl_path = tmp_path / "malformed_tempo.mxl"
+        with zipfile.ZipFile(mxl_path, "w") as zf:
+            zf.writestr(
+                "META-INF/container.xml",
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<container><rootfiles><rootfile full-path="good.musicxml"/></rootfiles></container>',
+            )
+            # music21 accepts ".musicxml" as a candidate root file, so it parses this one.
+            zf.writestr("good.musicxml", good_xml_text)
+            # _get_xml_content only matches names ending in exactly ".xml", so it
+            # picks this deliberately-broken sibling for the tempo-mark fallback scan.
+            zf.writestr("malformed.xml", '<score-partwise><part id="P1"><note><unclosed></measure></part>')
+
+        with pytest.raises(ValueError, match="tempo marks"):
+            parse_musicxml(mxl_path)
 
 
 class TestRepeatExpansion:
