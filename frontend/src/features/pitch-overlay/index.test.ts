@@ -11,7 +11,14 @@ vi.mock('../../services/playback-sync', () => ({
   onPlaybackSyncEvent: () => () => {},
 }));
 
-vi.mock('../../services/backend', () => ({ showErrorBanner: vi.fn() }));
+// Keep the real apiUrl()/wsUrl() (they no-op to a passthrough outside of a
+// file:// origin, which jsdom's default test origin is not) so WebSocket/
+// fetch URL literals asserted elsewhere in this file stay accurate; only
+// showErrorBanner needs to be a spy.
+vi.mock('../../services/backend', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/backend')>();
+  return { ...actual, showErrorBanner: vi.fn() };
+});
 vi.mock('../../services/cursor-projection', () => ({ getFrameXPosition: () => 0 }));
 vi.mock('../../pitch/overlay', () => ({
   MIN_CONFIDENCE_THRESHOLD: 0.6,

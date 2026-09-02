@@ -21,6 +21,7 @@ import {
 } from '../../pitch/tenor-overlay-compare';
 import { formatOverlayReadout } from './tenor-overlay-readout';
 import { TenorOverlayCanvas } from './tenor-overlay-view';
+import { apiUrl } from '../../services/backend';
 
 let scoreModel: ScoreModel | null = null;
 let overlayCanvas: TenorOverlayCanvas | null = null;
@@ -34,7 +35,7 @@ function byId<T extends HTMLElement>(id: string): T {
 async function loadScore(file: File): Promise<ScoreModel> {
   const form = new FormData();
   form.append('file', file);
-  const resp = await fetch('/score', { method: 'POST', body: form });
+  const resp = await fetch(apiUrl('/score'), { method: 'POST', body: form });
   if (!resp.ok) {
     let detail: string;
     try {
