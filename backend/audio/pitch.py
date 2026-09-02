@@ -198,6 +198,12 @@ class PitchPipeline:
 
     @property
     def consecutive_failures(self) -> int:
+        """
+        Mutated only on the pitch worker thread (see _worker()); no lock.
+        Safe to read after stop() has joined the thread (as tests do), or
+        for best-effort/advisory observability while running — like
+        dropped_frames, it is not synchronized for concurrent reads.
+        """
         return self._consecutive_failures
 
     def _worker(self) -> None:

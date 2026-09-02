@@ -402,6 +402,50 @@ class TestSetForceCpu:
 
         assert created_with_device_id == [7]
 
+    def test_set_force_cpu_is_noop_when_value_unchanged(self, monkeypatch):
+        """
+        Two independent callers can both ask for force_cpu=True around the
+        same time: the manual /audio/engine/force-cpu override, and the
+        automatic GPU-failure fallback in _on_pitch_engine_failure (#427).
+        A redundant call must not tear down and rebuild an already-correct
+        pipeline a second time (flagged in PR review for #427).
+        """
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        _patch_pipeline_hardware(monkeypatch)
+
+        p = self._pipeline()
+        p._capture = _MockCapture()
+        p._pitch = _MockPitch()
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+
+        p.set_force_cpu(True)
+        rebuilt_capture, rebuilt_pitch = p._capture, p._pitch
+
+        p.set_force_cpu(True)  # redundant — must be a no-op, not a second rebuild
+
+        assert p._capture is rebuilt_capture
+        assert p._pitch is rebuilt_pitch
+
+    def test_set_force_cpu_false_is_noop_when_already_false(self, monkeypatch):
+        """Same guard, other direction: redundant False must also no-op."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        _patch_pipeline_hardware(monkeypatch)
+
+        p = self._pipeline()
+        p._capture = _MockCapture()
+        p._pitch = _MockPitch()
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+        original_capture, original_pitch = p._capture, p._pitch
+
+        p.set_force_cpu(False)  # already False — must be a no-op
+
+        assert p._capture is original_capture
+        assert p._pitch is original_pitch
+
 
 # ── Automatic GPU→CPU fallback (issue #427) ────────────────────────────────────
 

@@ -206,7 +206,23 @@ class PlaybackPipeline:
 
     def set_force_cpu(self, enabled: bool) -> None:
         with self._lock:
-            self._force_cpu = bool(enabled)
+            enabled = bool(enabled)
+            if enabled == self._force_cpu:
+                # No-op guard. There are now two independent callers that can
+                # both request force_cpu=True around the same time: the
+                # manual /audio/engine/force-cpu override, and the automatic
+                # GPU-failure fallback in _on_pitch_engine_failure (#427).
+                # _on_pitch_engine_failure checks force_cpu before dispatching
+                # its call here, but that check-then-act happens across
+                # threads (it runs on a freshly spawned thread specifically
+                # to avoid a self-join deadlock — see its docstring) and is
+                # therefore racy on its own. Re-checking here, atomically
+                # under the same lock that performs the rebuild below, is
+                # what actually closes the race: a redundant call becomes a
+                # true no-op instead of an unnecessary capture/pitch
+                # teardown+rebuild. Flagged in PR review for #427.
+                return
+            self._force_cpu = enabled
             self._runtime_info = resolve_engine_runtime(force_cpu=self._force_cpu)
             self._engine = self._runtime_info.engine
             was_running = self._state != PlaybackState.STOPPED
