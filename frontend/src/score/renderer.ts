@@ -72,6 +72,12 @@ export interface ScoreModel {
 export interface ScoreRenderer {
   readonly loaded: boolean;
   readonly scoreModel: ScoreModel | null;
+  /**
+   * Implementations must tolerate load() being invoked again before a
+   * previous call has resolved: the newer call wins, and the older
+   * (superseded) call must reject rather than commit its stale result
+   * over the newer one's state. See #435.
+   */
   load(file: File): Promise<ScoreModel>;
   createCursor(model: ScoreModel): ScoreCursor;
   /**
@@ -92,6 +98,17 @@ export class OsmdScoreRenderer implements ScoreRenderer {
   private _loaded = false;
   private visualTransposeSemitones = 0;
   public scoreModel: ScoreModel | null = null;
+
+  // Reentrancy guard (#435): load() has two await points (backend /score
+  // POST, then osmd.load()/render()). Without a generation token, calling
+  // load() again before the first call resolves lets the two calls race on
+  // `this.osmd` / `this.scoreModel` / `this._loaded`, with last-to-*resolve*
+  // winning rather than last-to-*start*. Each load() call captures the
+  // post-increment token; if a newer call has started by the time an
+  // earlier call reaches a checkpoint, the earlier call aborts instead of
+  // touching shared state. Mirrors the loadGeneration idiom already used in
+  // services/audio-context.ts (#361).
+  private generation = 0;
 
   constructor(container: HTMLElement) {
     this.osmd = new OpenSheetMusicDisplay(container, {
@@ -117,8 +134,17 @@ export class OsmdScoreRenderer implements ScoreRenderer {
    *
    * Both must succeed; a failure in either leaves the renderer in the
    * previous state (not partially loaded).
+   *
+   * Reentrant-safe: if load() is called again before a previous call
+   * resolves, the previous call's Promise rejects instead of committing
+   * once it catches up — see the `generation` field (#435).
    */
   async load(file: File): Promise<ScoreModel> {
+    // Claim this call's generation before any await so a call that starts
+    // later always has a strictly higher token — "last to start" is
+    // unambiguous even though awaits below may resolve out of order.
+    const myGeneration = ++this.generation;
+
     // Phase 1: backend parse
     const form = new FormData();
     form.append('file', file);
@@ -134,6 +160,14 @@ export class OsmdScoreRenderer implements ScoreRenderer {
     }
     const model = (await resp.json()) as ScoreModel;
 
+    // A newer load() call started while we awaited the backend parse.
+    // Bail out *before* touching `this.osmd` so this stale call's render
+    // can never land after (and visually clobber) the newer call's — see
+    // the generation-token comment on the `generation` field above.
+    if (myGeneration !== this.generation) {
+      throw new Error('Score load superseded by a newer load() call');
+    }
+
     // Phase 2: OSMD render
     // File extends Blob; osmd.load() accepts Blob and handles both .xml and
     // .mxl internally (JSZip detects the ZIP magic bytes automatically).
@@ -142,6 +176,13 @@ export class OsmdScoreRenderer implements ScoreRenderer {
       await this.osmd.load(file);
       this.osmd.render();
     });
+
+    // A newer call could also have started during the (slower) OSMD phase.
+    // Re-check before committing so a stale call can never overwrite the
+    // newer call's scoreModel/loaded state (#435).
+    if (myGeneration !== this.generation) {
+      throw new Error('Score load superseded by a newer load() call');
+    }
 
     // Commit state only after both phases succeed
     this.scoreModel = model;

@@ -105,3 +105,64 @@ describe('ScoreRenderer visual transpose', () => {
     expect(mocks.renderMock).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('ScoreRenderer reentrancy guard (#435)', () => {
+  beforeEach(() => {
+    mocks.renderMock.mockClear();
+    mocks.loadMock.mockClear();
+    mocks.updateGraphicMock.mockClear();
+    mocks.instances.length = 0;
+  });
+
+  function scoreModelJson(title: string) {
+    return {
+      title,
+      parts: ['PART I'],
+      notes: [],
+      tempo_marks: [{ beat: 0, bpm: 120 }],
+      time_signatures: [{ beat: 0, numerator: 4, denominator: 4 }],
+      total_beats: 4,
+    };
+  }
+
+  it('rejects a stale load() that resolves after a newer load() has started, without touching OSMD', async () => {
+    // First call's backend fetch is held open deliberately; the second
+    // call's resolves immediately — reproducing "last to start" (second)
+    // finishing before "first to start" (first), the scenario #435 broke.
+    let resolveFirstFetch!: (value: unknown) => void;
+    const firstFetchPromise = new Promise((resolve) => {
+      resolveFirstFetch = resolve;
+    });
+
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => firstFetchPromise)
+      .mockImplementationOnce(async () => ({
+        ok: true,
+        json: async () => scoreModelJson('Second'),
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const renderer = new OsmdScoreRenderer({} as HTMLElement);
+    const fileA = new Blob(['<a/>'], { type: 'application/xml' }) as File;
+    const fileB = new Blob(['<b/>'], { type: 'application/xml' }) as File;
+
+    const loadA = renderer.load(fileA); // starts first, blocks on fetch
+    const loadB = renderer.load(fileB); // starts second — supersedes A
+
+    await loadB;
+    expect(renderer.scoreModel?.title).toBe('Second');
+    expect(renderer.loaded).toBe(true);
+
+    // Now let A's stale fetch resolve. It must reject rather than clobber
+    // the state B already committed, and it must never reach osmd.load() —
+    // otherwise A's stale render could land on screen after B's.
+    resolveFirstFetch({ ok: true, json: async () => scoreModelJson('First') });
+    await expect(loadA).rejects.toThrow(/superseded/i);
+
+    expect(renderer.scoreModel?.title).toBe('Second');
+    expect(renderer.loaded).toBe(true);
+    expect(mocks.loadMock).toHaveBeenCalledTimes(1);
+    expect(mocks.loadMock).toHaveBeenCalledWith(fileB);
+    expect(mocks.renderMock).toHaveBeenCalledTimes(1);
+  });
+});
