@@ -170,12 +170,11 @@ just --version
 git clone https://github.com/leonarduk/sing-attune
 cd sing-attune
 
-# Install Python dependencies
-uv sync
+# Install Python dependencies + PyTorch with CUDA support (adjust cu128 to your CUDA version)
+uv sync --extra cu128
 
-# Install PyTorch with CUDA support (adjust cu128 to match your CUDA version)
-uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
-uv pip install torchcrepe
+# CPU-only instead:
+#   uv sync --extra cpu
 
 # Install Node dependencies
 cd frontend && npm install && cd ..
