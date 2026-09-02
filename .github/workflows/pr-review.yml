@@ -44,12 +44,15 @@ jobs:
       # uv.lock isn't committed yet (still gitignored on main — see PR #442,
       # "ci: commit uv.lock..."), so `uv sync --locked` would fail here.
       # Switch to `--locked` once a lockfile is committed, for reproducible
-      # installs.
-      - name: Install dependencies
+      # installs — but note torch/torchcrepe are installed ad hoc via `uv pip
+      # install` below (they're optional extras, not core project deps), so
+      # they aren't tracked by the lockfile. Once `--locked` is in use, a
+      # `uv run` in a later step could re-sync against that lockfile and
+      # prune them; installing and running pytest in the same step (as done
+      # here) avoids that regardless of lock state.
+      - name: Install dependencies and run tests
         run: |
           uv sync
           uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
           uv pip install torchcrepe
-
-      - name: Run tests
-        run: uv run pytest -v
+          uv run pytest -v
