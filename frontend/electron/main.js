@@ -86,6 +86,16 @@ function killBackend() {
   if (timer.unref) timer.unref();
 }
 
+/** True if `body` parses as JSON matching backend/main.py's health() response shape. */
+function isSingAttuneHealthPayload(body) {
+  try {
+    const parsed = JSON.parse(body);
+    return Boolean(parsed) && typeof parsed === 'object' && parsed.status === 'ok';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Poll GET /health until the backend responds or timeoutMs elapses.
  *
@@ -97,6 +107,13 @@ function killBackend() {
  * than quitting outright: the frontend's own checkBackend()
  * (services/backend.ts) shows a retry-able "backend unreachable" banner
  * instead of leaving the user stuck on nothing at all.
+ *
+ * Checks the response body, not just a 200 status: BACKEND_PORT is a fixed
+ * port (see the comment above), so if something unrelated is already
+ * listening on 127.0.0.1:8000 (a stale dev server, another app) a bare
+ * status check could false-positive against it and let the window load
+ * against the wrong service. backend/main.py's health() handler always
+ * responds with {"status": "ok", ...}, so require that shape too.
  */
 function waitForBackendHealthy(timeoutMs) {
   const start = Date.now();
@@ -106,13 +123,16 @@ function waitForBackendHealthy(timeoutMs) {
       const req = http.get(
         { hostname: BACKEND_HOST, port: BACKEND_PORT, path: '/health', timeout: 1_000 },
         (res) => {
-          if (res.statusCode === 200) {
-            res.resume();
-            resolve();
-            return;
-          }
-          res.resume();
-          retry();
+          let body = '';
+          res.setEncoding('utf8');
+          res.on('data', (chunk) => { body += chunk; });
+          res.on('end', () => {
+            if (res.statusCode === 200 && isSingAttuneHealthPayload(body)) {
+              resolve();
+              return;
+            }
+            retry();
+          });
         },
       );
 
