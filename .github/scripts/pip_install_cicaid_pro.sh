@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 # Runs a command (typically a pip install) with git credentials configured so it
-# can clone the now-private leonarduk/cicaid-pro repo. leonarduk/cicaid was
-# renamed to a private repo and its old name reused by a new, unrelated public
-# repo, so old github.com/leonarduk/cicaid/releases/... wheel URLs are not a
-# durable source for cicaid-devtools (issue #388). That private repo was
-# itself later renamed again to cicaid-pro (issue #395) as part of a wider
-# "-core" -> "-pro" rename across the leonarduk org, ahead of the same
-# name-reuse trap recurring (allotmint#6754).
+# can clone the private leonarduk/cicaid-pro repo. The AI-review modules the
+# generated workflows import (review_diff, review_comment, deepseek_review,
+# gpt_review, etc.) only exist in cicaid-pro, not the public leonarduk/cicaid
+# "free shell" package, so a plain pip install of the public wheel/repo 404s
+# or is missing these modules.
 #
 # Fails fast with an actionable message if CICAID_PRO_TOKEN is unset or empty,
 # instead of letting the wrapped command fail later with a confusing git auth
@@ -34,7 +32,7 @@
 set -euo pipefail
 
 if [ -z "${CICAID_PRO_TOKEN:-}" ]; then
-  echo "::error::CICAID_PRO_TOKEN is empty or unset. Add a fine-grained PAT (Contents: Read-only, scoped to leonarduk/cicaid-pro) as the CICAID_PRO_TOKEN repository secret (Settings > Secrets and variables > Actions) before this workflow can install cicaid-devtools. See issue #395." >&2
+  echo "::error::CICAID_PRO_TOKEN is empty or unset. Add a fine-grained PAT (Contents: Read-only, scoped to leonarduk/cicaid-pro) as the CICAID_PRO_TOKEN repository secret (Settings > Secrets and variables > Actions) before this workflow can install cicaid-devtools-pro." >&2
   exit 1
 fi
 
