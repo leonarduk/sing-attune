@@ -239,8 +239,9 @@ class _FakeMicCapture:
 
 class _FakePitchPipeline:
     """No-op replacement for PitchPipeline — accepts the same constructor args."""
-    def __init__(self, engine=None, on_frame=None):
+    def __init__(self, engine=None, on_frame=None, on_engine_failure=None):
         self.engine = engine
+        self.on_engine_failure = on_engine_failure
         self.started = False
         self.stopped = False
 
@@ -400,6 +401,128 @@ class TestSetForceCpu:
         p.set_force_cpu(True)
 
         assert created_with_device_id == [7]
+
+
+# ── Automatic GPU→CPU fallback (issue #427) ────────────────────────────────────
+
+
+class TestAutomaticCpuFallback:
+    """
+    PitchPipeline notifies PlaybackPipeline after repeated torchcrepe
+    failures (see TestTorchcrepeFailureFallback in test_pitch.py).
+    PlaybackPipeline must react by reusing the same set_force_cpu()
+    hot-swap the manual /audio/engine/force-cpu override uses, so
+    /audio/engine's existing fields (active_engine/mode/force_cpu) reflect
+    the automatic fallback without a new bespoke signal.
+    """
+
+    def _pipeline(self) -> PlaybackPipeline:
+        from backend.audio.pitch import Engine
+        return PlaybackPipeline(engine=Engine.TORCHCREPE)
+
+    def _wait_until(self, predicate, timeout=3.0, interval=0.05) -> bool:
+        """
+        Poll predicate() until true or timeout. The fallback is dispatched
+        onto its own thread (see PlaybackPipeline._on_pitch_engine_failure)
+        specifically so it never joins the pitch worker thread from itself,
+        so callers must not assert immediately after triggering it.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(interval)
+        return predicate()
+
+    def test_on_pitch_engine_failure_calls_set_force_cpu(self):
+        """STOPPED pipeline: no hardware to tear down, just flips the flags."""
+        p = self._pipeline()
+        assert p.force_cpu is False
+
+        p._on_pitch_engine_failure()
+
+        assert self._wait_until(lambda: p.force_cpu is True)
+        assert p.runtime_info.mode == "forced_cpu"
+
+    def test_on_pitch_engine_failure_is_noop_when_already_force_cpu(self):
+        """Don't tear down/rebuild again if we're already on the CPU engine."""
+        p = self._pipeline()
+        p.set_force_cpu(True)
+
+        calls = []
+        p.set_force_cpu = lambda enabled: calls.append(enabled)  # type: ignore[method-assign]
+        p._on_pitch_engine_failure()
+        time.sleep(0.1)
+
+        assert calls == [], "set_force_cpu must not be re-invoked once already forced to CPU"
+
+    def test_start_wires_on_engine_failure_into_pitch_pipeline(self, monkeypatch):
+        """PlaybackPipeline.start() must pass its own callback through to PitchPipeline."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        _patch_pipeline_hardware(monkeypatch)
+        p = self._pipeline()
+        p.start()
+        try:
+            assert p._pitch.on_engine_failure == p._on_pitch_engine_failure
+        finally:
+            p.stop()
+
+    def test_set_force_cpu_rebuild_rewires_on_engine_failure(self, monkeypatch):
+        """The manual-override rebuild path must keep the same wiring."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        _patch_pipeline_hardware(monkeypatch)
+        p = self._pipeline()
+        p._capture = _MockCapture()
+        p._pitch = _MockPitch()
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+
+        p.set_force_cpu(True)
+
+        assert p._pitch.on_engine_failure == p._on_pitch_engine_failure
+
+    def test_repeated_torchcrepe_failures_trigger_end_to_end_cpu_fallback(self, monkeypatch):
+        """
+        Full path, matching issue #427's acceptance criteria: simulate
+        _infer_torchcrepe raising on every frame and assert PlaybackPipeline
+        actually falls back to the pyin engine, and that the
+        /audio/engine-equivalent state (runtime_info / force_cpu) reflects it.
+
+        Only MicCapture is faked (no real audio hardware in CI); PitchPipeline
+        is left real so the failure-counting/notification logic under test
+        actually runs. torchcrepe/CUDA itself is never exercised: _infer is
+        monkeypatched before any window is pushed, exactly as recommended by
+        CLAUDE.md for hardware-adjacent code paths.
+        """
+        from backend.audio.pitch import Engine, _MAX_CONSECUTIVE_TORCHCREPE_FAILURES
+        import numpy as np
+        import backend.audio.pipeline as pipeline_mod
+
+        monkeypatch.setattr(pipeline_mod, "MicCapture", _FakeMicCapture)
+
+        p = self._pipeline()
+        p.start(device_id=None, loop=None)
+        try:
+            failing_pitch = p._pitch
+            assert failing_pitch.engine == Engine.TORCHCREPE
+
+            def _always_raise(_window, _capture_time_ms):
+                raise RuntimeError("simulated CUDA context lost")
+
+            failing_pitch._infer = _always_raise  # type: ignore[method-assign]
+
+            for _ in range(_MAX_CONSECUTIVE_TORCHCREPE_FAILURES + 2):
+                failing_pitch.push(np.zeros(2048, dtype=np.float32))
+
+            assert self._wait_until(lambda: p.force_cpu is True)
+            assert self._wait_until(lambda: p.runtime_info.engine == Engine.PYIN)
+            assert p.runtime_info.mode == "forced_cpu"
+            # A brand new PitchPipeline was swapped in — confirm it's the CPU engine.
+            assert p._pitch is not failing_pitch
+            assert p._pitch.engine == Engine.PYIN
+        finally:
+            p.stop()
 
 
 # ── Frame fan-out ─────────────────────────────────────────────────────────────

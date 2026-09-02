@@ -123,6 +123,7 @@ class PlaybackPipeline:
             self._pitch = PitchPipeline(
                 engine=self._engine,
                 on_frame=self._on_pitch_frame,
+                on_engine_failure=self._on_pitch_engine_failure,
             )
             self._capture = MicCapture(
                 device_id=device_id,
@@ -223,6 +224,7 @@ class PlaybackPipeline:
                 self._pitch = PitchPipeline(
                     engine=self._engine,
                     on_frame=self._on_pitch_frame,
+                    on_engine_failure=self._on_pitch_engine_failure,
                 )
                 self._capture = MicCapture(
                     device_id=device_id,
@@ -325,6 +327,34 @@ class PlaybackPipeline:
         payload = encode_pitch_frame(t_ms=t_ms, midi=frame.midi, confidence=frame.confidence)
 
         self._fan_out_payload(payload)
+
+    def _on_pitch_engine_failure(self) -> None:
+        """
+        Called from the pitch worker thread after PitchPipeline has seen
+        _MAX_CONSECUTIVE_TORCHCREPE_FAILURES back-to-back GPU inference
+        errors (issue #427 — e.g. CUDA context lost, VRAM exhausted).
+
+        Reuses set_force_cpu(), the same hot-swap already used by the
+        manual `/audio/engine/force-cpu` override, so the automatic
+        fallback shows up "for free" in the existing /audio/engine
+        response (active_engine/mode/force_cpu) with no bespoke signal.
+
+        set_force_cpu() tears down PitchPipeline and joins its worker
+        thread — but this callback runs *on* that same worker thread, and
+        a thread cannot join itself (Python raises RuntimeError; some
+        runtimes would deadlock). So the switch is dispatched onto a fresh,
+        short-lived thread instead of calling set_force_cpu() inline here.
+        """
+        if self.force_cpu:
+            return  # already on CPU — nothing to fall back to
+        log.warning(
+            "Automatic CPU fallback triggered after repeated GPU pitch-engine failures"
+        )
+        threading.Thread(
+            target=lambda: self.set_force_cpu(True),
+            daemon=True,
+            name="pitch-engine-fallback",
+        ).start()
 
     def inject_frame(self, *, t_ms: float, midi: float, conf: float) -> None:
         """Inject a synthetic frame payload for tests without touching internals."""

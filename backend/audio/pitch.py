@@ -44,6 +44,18 @@ from .engine import (
 
 log = logging.getLogger(__name__)
 
+# Consecutive torchcrepe inference failures (CUDA context lost, VRAM
+# exhausted, driver reset, ...) before PitchPipeline gives up on the GPU
+# engine and asks its owner to fall back to CPU (pyin). Once torchcrepe
+# starts raising mid-session it typically fails on every subsequent frame
+# with nothing client-visible (the WS keepalive ping keeps ticking), so we
+# can't just log-and-continue like a normal per-frame miss -- see issue #427.
+# Windows push a new frame roughly every HOP_SIZE/SAMPLE_RATE ~= 46ms
+# (backend/audio/capture.py), so 3 tolerates a single transient hiccup
+# while still reacting within ~140ms -- short enough that the singer isn't
+# staring at a dead pipeline for long, long enough not to flap on noise.
+_MAX_CONSECUTIVE_TORCHCREPE_FAILURES: int = 3
+
 # ── Engine selection ───────────────────────────────────────────────────────────
 
 
@@ -120,12 +132,18 @@ class PitchPipeline:
         self,
         engine: Engine | PitchEngine | None = None,
         on_frame: Callable[[PitchFrame], None] | None = None,
+        on_engine_failure: Callable[[], None] | None = None,
     ) -> None:
         self._pitch_engine = (
             create_pitch_engine(engine) if isinstance(engine, Engine) or engine is None else engine
         )
         self._engine = self._pitch_engine.kind
         self._on_frame = on_frame
+        # Called at most once per instance, from the worker thread, after
+        # _MAX_CONSECUTIVE_TORCHCREPE_FAILURES back-to-back GPU inference
+        # errors. Owners (e.g. PlaybackPipeline) use this to trigger their
+        # own CPU-fallback switch — see _handle_inference_failure().
+        self._on_engine_failure = on_engine_failure
         self._device = self._pitch_engine.device
         self._queue: queue.Queue[QueuedWindow | None] = queue.Queue(
             maxsize=self._QUEUE_MAXSIZE
@@ -133,6 +151,8 @@ class PitchPipeline:
         self._thread: threading.Thread | None = None
         self._running = False
         self._dropped_frames = 0
+        self._consecutive_failures = 0
+        self._fallback_notified = False
 
     def start(self) -> None:
         if self._running:
@@ -176,6 +196,10 @@ class PitchPipeline:
     def dropped_frames(self) -> int:
         return self._dropped_frames
 
+    @property
+    def consecutive_failures(self) -> int:
+        return self._consecutive_failures
+
     def _worker(self) -> None:
         self._warmup()
         while True:
@@ -191,10 +215,41 @@ class PitchPipeline:
                 elapsed_ms = (time.monotonic() - t0) * 1000.0
                 if elapsed_ms > 80.0:
                     log.warning("Inference took %.1f ms (target <80ms)", elapsed_ms)
+                # A successful call (even one that returns None, e.g. below
+                # confidence threshold) clears the streak — only back-to-back
+                # *exceptions* indicate a broken GPU engine, not a quiet voice.
+                self._consecutive_failures = 0
                 if frame is not None and self._on_frame:
                     self._on_frame(frame)
             except Exception:
                 log.exception("Pitch inference error")
+                self._handle_inference_failure()
+
+    def _handle_inference_failure(self) -> None:
+        """
+        Count consecutive inference exceptions and, once the GPU engine has
+        failed _MAX_CONSECUTIVE_TORCHCREPE_FAILURES times in a row, notify
+        the owner exactly once so it can fall back to CPU (issue #427).
+
+        Scoped to the torchcrepe engine only: a lost CUDA context / OOM
+        recurs on every subsequent frame with no self-recovery, whereas
+        pyin failures are handled independently (issue #426) and shouldn't
+        trip this GPU-specific circuit breaker.
+        """
+        if self._engine != Engine.TORCHCREPE:
+            return
+        self._consecutive_failures += 1
+        if self._consecutive_failures < _MAX_CONSECUTIVE_TORCHCREPE_FAILURES:
+            return
+        if self._fallback_notified:
+            return
+        self._fallback_notified = True
+        log.error(
+            "torchcrepe failed %d times consecutively — notifying owner to fall back to CPU engine",
+            self._consecutive_failures,
+        )
+        if self._on_engine_failure:
+            self._on_engine_failure()
 
     def _infer(self, window: np.ndarray, capture_time_ms: float) -> PitchFrame | None:
         return self._pitch_engine.estimate(window, capture_time_ms)
