@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ScoreSession } from '../../services/score-session';
 import type { StatusTone } from '../../services/status';
@@ -254,5 +254,56 @@ describe('playbackFeature', () => {
     expect(event.defaultPrevented).toBe(false);
 
     playbackFeature.unmount!();
+  });
+
+  // Regression tests for issue #440: fetch() itself was guarded with
+  // `.catch(() => null)`, but a 200 response with a malformed body made
+  // `res.json()` throw inside an unawaited async click handler, failing
+  // silently with no status feedback.
+  describe('session review/export JSON parse errors', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('reports a status error when the session list body is malformed JSON', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => { throw new SyntaxError('Unexpected token'); },
+      }));
+
+      const slot = document.getElementById('slot-playback') as HTMLDivElement;
+      playbackFeature.mount(slot);
+
+      const btnReview = document.getElementById('btn-session-review') as HTMLButtonElement;
+      btnReview.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(setAppStatusMock).toHaveBeenCalledWith(
+        expect.stringContaining('session review failed'),
+        'error',
+      );
+
+      playbackFeature.unmount!();
+    });
+
+    it('reports a status error when the CSV export session body is malformed JSON', async () => {
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ sessions: [{ id: 's1' }] }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => { throw new SyntaxError('Unexpected token'); } }));
+
+      const slot = document.getElementById('slot-playback') as HTMLDivElement;
+      playbackFeature.mount(slot);
+
+      const btnCsv = document.getElementById('btn-session-csv') as HTMLButtonElement;
+      btnCsv.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(setAppStatusMock).toHaveBeenCalledWith(
+        expect.stringContaining('session export failed'),
+        'error',
+      );
+
+      playbackFeature.unmount!();
+    });
   });
 });

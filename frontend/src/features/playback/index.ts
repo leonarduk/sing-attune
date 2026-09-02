@@ -547,53 +547,67 @@ function mount(_slot: HTMLElement): void {
   btnSessionReview?.addEventListener('click', async () => {
     const res = await fetch('/session/list').catch(() => null);
     if (!res?.ok) return;
-    const listPayload = (await res.json()) as { sessions: Array<{ id: string }> };
-    const latest = listPayload.sessions[0];
-    if (!latest) return;
-    const sessionRes = await fetch(`/session/${latest.id}`).catch(() => null);
-    if (!sessionRes?.ok) return;
-    const sessionPayload = (await sessionRes.json()) as {
-      frames: Array<{ t: number; midi: number; conf: number }>;
-    };
-    const frames = sessionPayload.frames;
-    if (frames.length === 0) return;
+    try {
+      const listPayload = (await res.json()) as { sessions: Array<{ id: string }> };
+      const latest = listPayload.sessions[0];
+      if (!latest) return;
+      const sessionRes = await fetch(`/session/${latest.id}`).catch(() => null);
+      if (!sessionRes?.ok) return;
+      const sessionPayload = (await sessionRes.json()) as {
+        frames: Array<{ t: number; midi: number; conf: number }>;
+      };
+      const frames = sessionPayload.frames;
+      if (frames.length === 0) return;
 
-    window.dispatchEvent(new CustomEvent('session-review-clear'));
+      window.dispatchEvent(new CustomEvent('session-review-clear'));
 
-    // Schedule each frame at the correct wall-clock offset based on frame.t
-    // (milliseconds since playback started), so replay matches original speed.
-    const replayStart = performance.now();
-    function scheduleFrame(idx: number): void {
-      if (idx >= frames.length) return;
-      const frame = frames[idx];
-      const delay = Math.max(0, frame.t - (performance.now() - replayStart));
-      window.setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('session-review-frame', { detail: frame }));
-        scheduleFrame(idx + 1);
-      }, delay);
+      // Schedule each frame at the correct wall-clock offset based on frame.t
+      // (milliseconds since playback started), so replay matches original speed.
+      const replayStart = performance.now();
+      function scheduleFrame(idx: number): void {
+        if (idx >= frames.length) return;
+        const frame = frames[idx];
+        const delay = Math.max(0, frame.t - (performance.now() - replayStart));
+        window.setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('session-review-frame', { detail: frame }));
+          scheduleFrame(idx + 1);
+        }, delay);
+      }
+      scheduleFrame(0);
+    } catch (err) {
+      // res.json() throws on a malformed body; without this the rejection is
+      // unhandled inside an async click handler and fails silently (#440).
+      setAppStatus(`session review failed: ${String(err)}`, 'error');
+      console.error('Session review failed:', err);
     }
-    scheduleFrame(0);
   });
 
   btnSessionCsv?.addEventListener('click', async () => {
     const res = await fetch('/session/list').catch(() => null);
     if (!res?.ok) return;
-    const listPayload = (await res.json()) as { sessions: Array<{ id: string }> };
-    const latest = listPayload.sessions[0];
-    if (!latest) return;
-    const sessionRes = await fetch(`/session/${latest.id}`).catch(() => null);
-    if (!sessionRes?.ok) return;
-    const sessionPayload = (await sessionRes.json()) as {
-      frames: Array<{ t: number; beat: number; midi: number | null; conf: number; expected_midi: number | null; measure: number | null }>;
-    };
-    const csv = buildSessionCsv(sessionPayload);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'session_export.csv';
-    link.click();
-    URL.revokeObjectURL(url);
+    try {
+      const listPayload = (await res.json()) as { sessions: Array<{ id: string }> };
+      const latest = listPayload.sessions[0];
+      if (!latest) return;
+      const sessionRes = await fetch(`/session/${latest.id}`).catch(() => null);
+      if (!sessionRes?.ok) return;
+      const sessionPayload = (await sessionRes.json()) as {
+        frames: Array<{ t: number; beat: number; midi: number | null; conf: number; expected_midi: number | null; measure: number | null }>;
+      };
+      const csv = buildSessionCsv(sessionPayload);
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'session_export.csv';
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      // res.json() throws on a malformed body; without this the rejection is
+      // unhandled inside an async click handler and fails silently (#440).
+      setAppStatus(`session export failed: ${String(err)}`, 'error');
+      console.error('Session export failed:', err);
+    }
   });
 
   // Replay: rewind and play again, preserving session stats for review.
