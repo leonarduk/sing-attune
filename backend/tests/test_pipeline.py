@@ -402,6 +402,178 @@ class TestSetForceCpu:
         assert created_with_device_id == [7]
 
 
+# ── _teardown_locked() defensive cleanup ────────────────────────────────────
+
+
+class _RaisingStopCapture:
+    """Stand-in for MicCapture whose .stop() raises -- simulates a real
+    sd.PortAudioError from a stream that was opened but never fully started."""
+    device_id = None
+
+    def __init__(self):
+        self.started = False
+        self.stop_called = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stop_called = True
+        raise RuntimeError("PortAudio stream error")
+
+
+class _RaisingStopPitch:
+    """Stand-in for PitchPipeline whose .stop() raises."""
+
+    def __init__(self):
+        self.started = False
+        self.stop_called = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stop_called = True
+        raise RuntimeError("worker thread join error")
+
+    def push(self, _):
+        pass
+
+
+class TestTeardownLockedDefensiveCleanup:
+    """
+    Regression tests for #446.
+
+    _teardown_locked() used to call self._capture.stop() and
+    self._pitch.stop() unconditionally. If either raised, two things went
+    wrong: the exception would propagate out of _teardown_locked() (masking
+    whatever error the caller was already handling), and the reference that
+    raised would never be reset to None -- leaving a stale live object
+    behind despite the cleanup attempt.
+    """
+
+    def _pipeline(self) -> PlaybackPipeline:
+        from backend.audio.pitch import Engine
+        return PlaybackPipeline(engine=Engine.PYIN)
+
+    def test_does_not_raise_when_capture_stop_raises(self):
+        p = self._pipeline()
+        p._capture = _RaisingStopCapture()
+        p._pitch = _MockPitch()
+
+        with p._lock:
+            p._teardown_locked()  # must not raise
+
+        assert p._capture is None
+        assert p._pitch is None
+
+    def test_does_not_raise_when_pitch_stop_raises(self):
+        p = self._pipeline()
+        p._capture = _MockCapture()
+        p._pitch = _RaisingStopPitch()
+
+        with p._lock:
+            p._teardown_locked()  # must not raise
+
+        assert p._capture is None
+        assert p._pitch is None
+
+    def test_tears_down_pitch_even_when_capture_stop_raises(self):
+        """A failure stopping one hardware object must not prevent the
+        other from being torn down."""
+        p = self._pipeline()
+        p._capture = _RaisingStopCapture()
+        pitch = _MockPitch()
+        p._pitch = pitch
+
+        with p._lock:
+            p._teardown_locked()
+
+        assert pitch.stopped is True
+        assert p._pitch is None
+
+    def test_tears_down_capture_even_when_pitch_stop_raises(self):
+        p = self._pipeline()
+        capture = _MockCapture()
+        p._capture = capture
+        p._pitch = _RaisingStopPitch()
+
+        with p._lock:
+            p._teardown_locked()
+
+        assert capture.stopped is True
+        assert p._capture is None
+
+    def test_resets_both_refs_when_both_stops_raise(self):
+        p = self._pipeline()
+        capture = _RaisingStopCapture()
+        pitch = _RaisingStopPitch()
+        p._capture = capture
+        p._pitch = pitch
+
+        with p._lock:
+            p._teardown_locked()
+
+        assert capture.stop_called is True
+        assert pitch.stop_called is True
+        assert p._capture is None
+        assert p._pitch is None
+
+    def test_teardown_failure_is_logged(self, caplog):
+        p = self._pipeline()
+        p._capture = _RaisingStopCapture()
+        p._pitch = _MockPitch()
+
+        caplog.set_level("ERROR")
+        with p._lock:
+            p._teardown_locked()
+
+        assert any(
+            record.name == "backend.audio.pipeline"
+            and record.levelname == "ERROR"
+            and "MicCapture" in record.message
+            for record in caplog.records
+        ), "Expected a logged error for the failed MicCapture.stop()"
+
+    def test_stop_reaches_stopped_state_when_capture_stop_raises(self):
+        """stop() must reach PlaybackState.STOPPED even if the underlying
+        MicCapture.stop() raises -- a teardown failure must not leave the
+        pipeline stuck mid-transition."""
+        p = self._pipeline()
+        p._capture = _RaisingStopCapture()
+        p._pitch = _MockPitch()
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+
+        p.stop()  # must not raise
+
+        assert p.state == PlaybackState.STOPPED
+        assert p._capture is None
+        assert p._pitch is None
+
+    def test_set_force_cpu_rebuild_completes_when_old_capture_stop_raises(self, monkeypatch):
+        """set_force_cpu()'s hot-swap must still build and start fresh
+        hardware even if tearing down the OLD hardware raised."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        _patch_pipeline_hardware(monkeypatch)
+
+        p = self._pipeline()
+        p._capture = _RaisingStopCapture()
+        p._pitch = _MockPitch()
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+
+        p.set_force_cpu(True)  # must not raise
+
+        assert p.state == PlaybackState.PLAYING
+        assert p.force_cpu is True
+        assert p._capture is not None
+        assert p._pitch is not None
+        assert p._capture.started is True
+        assert p._pitch.started is True
+
+
 # ── Frame fan-out ─────────────────────────────────────────────────────────────
 
 
