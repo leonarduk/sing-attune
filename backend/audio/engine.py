@@ -126,6 +126,12 @@ class PyinPitchEngine:
     ) -> PitchFrame | None:
         import librosa
 
+        # center=False: hop_length == frame_length == len(window) is meant to
+        # yield exactly one frame per call. librosa's default center=True pads
+        # the signal instead, which turns that into 2 frames — f0[0] ends up
+        # centered on sample 0, so roughly half of its analysis window is
+        # padding rather than real audio, degrading pitch/confidence accuracy
+        # on every window. Matches the offline path in pitch_track.py. #426
         f0, voiced_flag, voiced_prob = librosa.pyin(
             window,
             fmin=FMIN_HZ,
@@ -133,6 +139,7 @@ class PyinPitchEngine:
             sr=SAMPLE_RATE,
             hop_length=len(window),
             frame_length=len(window),
+            center=False,
         )
         if f0 is None or len(f0) == 0:
             return None
