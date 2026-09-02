@@ -341,10 +341,23 @@ class PlaybackPipeline:
         with self._clients_lock:
             clients = list(self._clients)
 
-        for q in clients:
+        def _deliver(q: asyncio.Queue) -> None:
+            # Runs on the event-loop thread when the scheduled callback actually
+            # fires — NOT synchronously inside _fan_out_payload. call_soon_threadsafe
+            # only *schedules* put_nowait; it returns immediately, before put_nowait
+            # has run. So the try/except has to live in here, around the real call,
+            # not around the call_soon_threadsafe(...) call below — otherwise
+            # QueueFull raised by put_nowait surfaces later as an unhandled
+            # callback exception instead of the intended log.warning (see #428).
             try:
-                loop.call_soon_threadsafe(q.put_nowait, payload)
+                q.put_nowait(payload)
             except asyncio.QueueFull:
                 log.warning("WS client queue full — dropping frame (client too slow)")
             except Exception:
                 pass  # client may have disconnected — harmless
+
+        for q in clients:
+            try:
+                loop.call_soon_threadsafe(_deliver, q)
+            except Exception:
+                pass  # loop may be closing (shutdown race) — harmless
