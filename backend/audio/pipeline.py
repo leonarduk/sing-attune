@@ -129,8 +129,22 @@ class PlaybackPipeline:
                 on_window=self._pitch.push,
             )
 
-            self._pitch.start()
-            self._capture.start()
+            try:
+                self._pitch.start()
+                self._capture.start()
+            except Exception:
+                # self._pitch/self._capture are assigned above before either
+                # .start() runs, so a failure here (e.g. MicCapture.start()
+                # raising on an invalid/busy device_id from
+                # POST /playback/start?device_id=) can leave one of them
+                # already live — e.g. the pitch worker thread running —
+                # while state is still STOPPED. Without tearing down here,
+                # the next start() call retakes this same branch and
+                # overwrites both references, permanently orphaning the
+                # leaked thread/stream (issue #424). _teardown_locked() is
+                # a no-op for whichever side never started.
+                self._teardown_locked()
+                raise
             self._state = PlaybackState.PLAYING
             log.info("PlaybackPipeline started — device=%s engine=%s", device_id, self._engine.name)
 

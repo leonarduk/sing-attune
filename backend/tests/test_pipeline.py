@@ -402,6 +402,138 @@ class TestSetForceCpu:
         assert created_with_device_id == [7]
 
 
+# ── start() partial-failure cleanup ─────────────────────────────────────────
+#
+# Issue #424: self._pitch/self._capture are assigned before either .start()
+# runs. If one .start() raises (e.g. MicCapture.start() on an invalid/busy
+# device_id), state must stay STOPPED *and* whichever side did start must be
+# torn down -- otherwise the next start() call overwrites both references
+# and permanently leaks a running pitch thread / open PortAudio stream.
+
+
+class TestStartFailureCleanup:
+    def _pipeline(self) -> PlaybackPipeline:
+        from backend.audio.pitch import Engine
+        return PlaybackPipeline(engine=Engine.PYIN)
+
+    def test_capture_start_failure_stops_the_already_started_pitch_worker(self, monkeypatch):
+        import backend.audio.pipeline as pipeline_mod
+
+        pitch_instances = []
+
+        class _RecordingPitch(_FakePitchPipeline):
+            def __init__(self, engine=None, on_frame=None):
+                super().__init__(engine=engine, on_frame=on_frame)
+                pitch_instances.append(self)
+
+        class _FailingCapture(_FakeMicCapture):
+            def start(self):
+                raise RuntimeError("device busy")
+
+        monkeypatch.setattr(pipeline_mod, "PitchPipeline", _RecordingPitch)
+        monkeypatch.setattr(pipeline_mod, "MicCapture", _FailingCapture)
+
+        p = self._pipeline()
+
+        with pytest.raises(RuntimeError, match="device busy"):
+            p.start(device_id=42)
+
+        # State never advances past STOPPED on failure.
+        assert p.state == PlaybackState.STOPPED
+
+        # No stale live objects left for the next start() to inherit.
+        assert p._pitch is None
+        assert p._capture is None
+
+        # The pitch worker that DID start must have been stopped, not leaked.
+        assert len(pitch_instances) == 1
+        assert pitch_instances[0].started is True
+        assert pitch_instances[0].stopped is True
+
+    def test_pitch_start_failure_never_reaches_capture_start(self, monkeypatch):
+        import backend.audio.pipeline as pipeline_mod
+
+        capture_instances = []
+
+        class _RecordingCapture(_FakeMicCapture):
+            def __init__(self, device_id=None, on_window=None):
+                super().__init__(device_id=device_id, on_window=on_window)
+                capture_instances.append(self)
+
+        class _FailingPitch(_FakePitchPipeline):
+            def start(self):
+                raise RuntimeError("pitch engine init failed")
+
+        monkeypatch.setattr(pipeline_mod, "PitchPipeline", _FailingPitch)
+        monkeypatch.setattr(pipeline_mod, "MicCapture", _RecordingCapture)
+
+        p = self._pipeline()
+
+        with pytest.raises(RuntimeError, match="pitch engine init failed"):
+            p.start(device_id=1)
+
+        assert p.state == PlaybackState.STOPPED
+        assert p._pitch is None
+        assert p._capture is None
+        # MicCapture is constructed (needed for PitchPipeline.push wiring)
+        # before self._pitch.start() runs, but .start() must never have
+        # been reached on it once self._pitch.start() raised first.
+        assert len(capture_instances) == 1
+        assert capture_instances[0].started is False
+
+    def test_start_after_failed_start_works_cleanly(self, monkeypatch):
+        """A later start() with a valid device must succeed with fresh,
+        non-leaked hardware objects rather than inheriting anything from
+        the previous failed attempt."""
+        import backend.audio.pipeline as pipeline_mod
+
+        pitch_instances = []
+
+        class _RecordingPitch(_FakePitchPipeline):
+            def __init__(self, engine=None, on_frame=None):
+                super().__init__(engine=engine, on_frame=on_frame)
+                pitch_instances.append(self)
+
+        class _DeviceGatedCapture(_FakeMicCapture):
+            """Fails only for one device_id, simulating an invalid device
+            that the caller corrects on retry."""
+            FAILING_DEVICE_ID = 999
+
+            def start(self):
+                if self.device_id == self.FAILING_DEVICE_ID:
+                    raise RuntimeError("device busy")
+                super().start()
+
+        monkeypatch.setattr(pipeline_mod, "PitchPipeline", _RecordingPitch)
+        monkeypatch.setattr(pipeline_mod, "MicCapture", _DeviceGatedCapture)
+
+        p = self._pipeline()
+
+        with pytest.raises(RuntimeError):
+            p.start(device_id=_DeviceGatedCapture.FAILING_DEVICE_ID)
+
+        assert p.state == PlaybackState.STOPPED
+        first_pitch = pitch_instances[0]
+        assert first_pitch.started is True
+        assert first_pitch.stopped is True
+
+        # Retry with a valid device_id.
+        p.start(device_id=1)
+
+        assert p.state == PlaybackState.PLAYING
+        assert p._capture is not None
+        assert p._pitch is not None
+        assert p._capture.started is True
+        assert p._pitch.started is True
+
+        # The retry must build a brand new pitch worker rather than
+        # resurrecting the leaked one from the failed attempt.
+        assert len(pitch_instances) == 2
+        assert pitch_instances[1] is p._pitch
+        assert pitch_instances[1] is not first_pitch
+        assert pitch_instances[1].stopped is False
+
+
 # ── Frame fan-out ─────────────────────────────────────────────────────────────
 
 
