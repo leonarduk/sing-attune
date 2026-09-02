@@ -32,9 +32,12 @@ jobs:
 
       - name: Install backend dependencies
         run: |
-          uv sync
-          uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-          uv pip install torchcrepe
+          uv sync --locked
+          # torch/torchaudio/torchcrepe are pinned here rather than in pyproject.toml/uv.lock
+          # because they install from PyTorch's custom CPU wheel index, not PyPI, which uv's
+          # normal lock/resolve step doesn't cover — see issue #437.
+          uv pip install torch==2.10.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cpu
+          uv pip install torchcrepe==0.0.24
 
       - name: Install frontend dependencies
         run: npm ci

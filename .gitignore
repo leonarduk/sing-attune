@@ -10,9 +10,6 @@ dist/
 build/
 .pytest_cache/
 
-# uv
-uv.lock
-
 # Frontend
 frontend/node_modules/
 frontend/dist/

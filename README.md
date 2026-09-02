@@ -173,9 +173,13 @@ cd sing-attune
 # Install Python dependencies
 uv sync
 
-# Install PyTorch with CUDA support (adjust cu128 to match your CUDA version)
-uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
-uv pip install torchcrepe
+# Install PyTorch with CUDA support (adjust cu128 to match your CUDA version).
+# torch/torchaudio/torchcrepe are version-pinned here rather than in pyproject.toml
+# because they install from PyTorch's custom CUDA wheel index, not PyPI, which uv's
+# normal lock/resolve step doesn't cover — see issue #437. For CPU-only machines,
+# swap the index-url below for https://download.pytorch.org/whl/cpu (same versions).
+uv pip install torch==2.10.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu128
+uv pip install torchcrepe==0.0.24
 
 # Install Node dependencies
 cd frontend && npm install && cd ..

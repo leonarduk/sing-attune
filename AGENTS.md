@@ -171,10 +171,13 @@ The AI review is advisory. `lint` and `test` are blocking.
 uv sync
 
 # Install PyTorch (CUDA 12.8 — compatible with CUDA 12.9 runtime)
-uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+# Pinned here (not in pyproject.toml/uv.lock) because this installs from PyTorch's
+# custom CUDA wheel index rather than PyPI, which uv's normal resolver doesn't
+# cover — see issue #437.
+uv pip install torch==2.10.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu128
 
 # Install torchcrepe (pitch engine)
-uv pip install torchcrepe
+uv pip install torchcrepe==0.0.24
 ```
 
 ## Running the backend
