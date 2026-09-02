@@ -285,6 +285,26 @@ class TestGetXmlContentArchiveMemberSelection:
         })
         assert _get_xml_content(mxl_path) == "<container-pick/>"
 
+    def test_resolves_rootfile_when_container_xml_declares_the_ocf_namespace(self, tmp_path):
+        # Real .mxl files from Finale/Sibelius etc. commonly declare the OCF
+        # container namespace (MuseScore's own exports, e.g. the
+        # homeward_bound fixtures, happen not to). ElementTree's "{*}"
+        # wildcard tag match (stdlib since Python 3.8) is what lets
+        # _resolve_container_rootfile see through that namespace instead of
+        # silently falling back to the heuristic.
+        mxl_path = _build_mxl(tmp_path, "score.mxl", {
+            "META-INF/container.xml": (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+                "<rootfiles>"
+                '<rootfile full-path="real.xml" media-type="application/vnd.recordare.musicxml+xml"/>'
+                "</rootfiles></container>"
+            ),
+            "real.xml": '<sound tempo="123"/>',
+            "decoy.xml": '<sound tempo="999"/>',
+        })
+        assert _get_xml_content(mxl_path) == '<sound tempo="123"/>'
+
     def test_falls_back_to_heuristic_when_container_xml_rootfile_is_missing(self, tmp_path):
         mxl_path = _build_mxl(tmp_path, "score.mxl", {
             "META-INF/container.xml": (
