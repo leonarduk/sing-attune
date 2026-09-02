@@ -8,12 +8,18 @@ Test scores (in musescore/):
   homeward_bound-PART_II.mxl  — Part II only (MuseScore export)
 """
 
+import zipfile
 from pathlib import Path
 
 import pytest
 from music21 import bar, converter, meter, note, repeat, stream
 
-from backend.score.parser import _expand_repeats, _normalize_part_name, parse_musicxml
+from backend.score.parser import (
+    _expand_repeats,
+    _get_xml_content,
+    _normalize_part_name,
+    parse_musicxml,
+)
 from backend.score.model import ScoreModel
 from backend.score.timeline import Timeline
 
@@ -232,6 +238,86 @@ class TestParserErrors:
         bad.write_text("this is not xml")
         with pytest.raises(ValueError):
             parse_musicxml(bad)
+
+
+# ---------------------------------------------------------------------------
+# .mxl archive-member selection
+#
+# music21's own ArchiveManager._extractContents uses a suffix heuristic
+# (.musicxml/.xml/.mxl, skipping META-INF) that used to be a strict superset
+# of _get_xml_content's (exact ".xml" only). A single .mxl with more than one
+# candidate entry could therefore make music21 parse one member while our
+# raw-XML tempo-mark fallback (_extract_tempo_marks -> _get_xml_content)
+# silently scanned a different one — see issue #528, and #449, which
+# exploited exactly this divergence as a test fixture for issue #429.
+# ---------------------------------------------------------------------------
+
+def _build_mxl(tmp_path: Path, filename: str, entries: dict[str, str]) -> Path:
+    """Build a .mxl archive at tmp_path/filename from {member_name: text} entries."""
+    mxl_path = tmp_path / filename
+    with zipfile.ZipFile(mxl_path, "w") as zf:
+        for name, content in entries.items():
+            zf.writestr(name, content)
+    return mxl_path
+
+
+class TestGetXmlContentArchiveMemberSelection:
+
+    def test_recognises_musicxml_suffix_like_music21(self, tmp_path):
+        # ".musicxml" does not end with the literal substring ".xml", so the
+        # old `name.endswith(".xml")` check missed entries like this one even
+        # though music21's ArchiveManager accepts them.
+        mxl_path = _build_mxl(tmp_path, "score.mxl", {
+            "score.musicxml": '<sound tempo="99"/>',
+        })
+        assert _get_xml_content(mxl_path) == '<sound tempo="99"/>'
+
+    def test_prefers_container_xml_rootfile_over_heuristic_first_match(self, tmp_path):
+        mxl_path = _build_mxl(tmp_path, "score.mxl", {
+            "META-INF/container.xml": (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                "<container><rootfiles>"
+                '<rootfile full-path="b.xml"/>'
+                "</rootfiles></container>"
+            ),
+            "a.xml": "<heuristic-pick/>",  # written first: what the suffix heuristic alone would pick
+            "b.xml": "<container-pick/>",  # declared by container.xml: must win
+        })
+        assert _get_xml_content(mxl_path) == "<container-pick/>"
+
+    def test_falls_back_to_heuristic_when_container_xml_rootfile_is_missing(self, tmp_path):
+        mxl_path = _build_mxl(tmp_path, "score.mxl", {
+            "META-INF/container.xml": (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                "<container><rootfiles>"
+                '<rootfile full-path="does-not-exist.xml"/>'
+                "</rootfiles></container>"
+            ),
+            "a.xml": "<heuristic-pick/>",
+        })
+        assert _get_xml_content(mxl_path) == "<heuristic-pick/>"
+
+    def test_agrees_with_music21_archive_manager_on_multi_entry_mxl(self, tmp_path):
+        """
+        Reproduces the exact shape of the divergence #449 exploited: one
+        .musicxml-suffixed entry and one .xml-suffixed sibling in the same
+        archive, with container.xml declaring the .musicxml entry canonical.
+        music21's own ArchiveManager and _get_xml_content must resolve to
+        the same member.
+        """
+        mxl_path = _build_mxl(tmp_path, "score.mxl", {
+            "META-INF/container.xml": (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                "<container><rootfiles>"
+                '<rootfile full-path="good.musicxml"/>'
+                "</rootfiles></container>"
+            ),
+            "good.musicxml": '<sound tempo="72"/>',
+            "sibling.xml": '<sound tempo="200"/>',
+        })
+
+        music21_content = converter.ArchiveManager(mxl_path).getData(dataFormat="musicxml")
+        assert _get_xml_content(mxl_path) == music21_content
 
 
 class TestRepeatExpansion:
