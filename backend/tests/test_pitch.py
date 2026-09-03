@@ -31,6 +31,7 @@ from backend.audio.pitch import (
     PitchPipeline,
     _infer_pyin,
     _infer_torchcrepe,
+    _MAX_CONSECUTIVE_TORCHCREPE_FAILURES,
     hz_to_midi,
     midi_to_hz,
     resolve_engine_runtime,
@@ -349,6 +350,102 @@ class TestPitchPipeline:
 
         assert len(received) == 1
         assert received[0].time_ms == push_time_ms
+
+
+# ── Automatic GPU→CPU fallback (issue #427) ───────────────────────────────────────────
+
+
+class TestTorchcrepeFailureFallback:
+    """
+    Issue #427: a broad `except Exception` around _infer() used to swallow
+    every torchcrepe error forever (CUDA context lost, VRAM exhausted, ...)
+    with nothing client-visible. PitchPipeline must now count consecutive
+    GPU-engine failures and notify its owner once the threshold is crossed.
+    """
+
+    def _failing_pipeline(self, on_engine_failure=None) -> PitchPipeline:
+        """TORCHCREPE-engine pipeline whose _infer() always raises."""
+        pipeline = PitchPipeline(engine=Engine.TORCHCREPE, on_engine_failure=on_engine_failure)
+
+        def _always_raise(_window, _capture_time_ms):
+            raise RuntimeError("simulated CUDA context lost")
+
+        pipeline._infer = _always_raise  # type: ignore[method-assign]
+        return pipeline
+
+    def test_consecutive_failures_increment_on_exception(self):
+        pipeline = self._failing_pipeline()
+        pipeline.start()
+        for _ in range(_MAX_CONSECUTIVE_TORCHCREPE_FAILURES - 1):
+            pipeline.push(np.zeros(2048, dtype=np.float32))
+        time.sleep(0.3)
+        pipeline.stop()
+
+        assert pipeline.consecutive_failures == _MAX_CONSECUTIVE_TORCHCREPE_FAILURES - 1
+
+    def test_fallback_callback_fires_once_after_threshold_consecutive_failures(self):
+        """AC: repeated GPU failures must be detected and reported, not swallowed forever."""
+        fallback_calls = []
+        pipeline = self._failing_pipeline(on_engine_failure=lambda: fallback_calls.append(1))
+        pipeline.start()
+        # Push well past the threshold — the callback must still fire exactly once.
+        for _ in range(_MAX_CONSECUTIVE_TORCHCREPE_FAILURES + 5):
+            pipeline.push(np.zeros(2048, dtype=np.float32))
+        time.sleep(0.3)
+        pipeline.stop()
+
+        assert pipeline.consecutive_failures >= _MAX_CONSECUTIVE_TORCHCREPE_FAILURES
+        assert len(fallback_calls) == 1, "fallback must notify exactly once, not once per failure"
+
+    def test_success_resets_consecutive_failure_streak(self):
+        """A quiet/successful frame between failures must not count towards the streak."""
+        fallback_calls = []
+        pipeline = PitchPipeline(
+            engine=Engine.TORCHCREPE, on_engine_failure=lambda: fallback_calls.append(1)
+        )
+        pipeline._warmup = lambda: None  # type: ignore[method-assign]
+
+        calls = {"n": 0}
+
+        def _fail_then_succeed(_window, _capture_time_ms):
+            calls["n"] += 1
+            # Fail just short of the threshold, then return a clean (silent) frame,
+            # then fail short of the threshold again -- the streak must not carry over.
+            if calls["n"] % _MAX_CONSECUTIVE_TORCHCREPE_FAILURES == 0:
+                return None
+            raise RuntimeError("simulated transient CUDA hiccup")
+
+        pipeline._infer = _fail_then_succeed  # type: ignore[method-assign]
+        pipeline.start()
+        for _ in range(_MAX_CONSECUTIVE_TORCHCREPE_FAILURES * 4):
+            pipeline.push(np.zeros(2048, dtype=np.float32))
+        time.sleep(0.3)
+        pipeline.stop()
+
+        assert fallback_calls == [], "streak resets on success, so threshold should never be reached"
+
+    def test_pyin_engine_failures_do_not_trigger_torchcrepe_fallback(self):
+        """
+        Scope guard: this circuit breaker is for the GPU path only (issue #427).
+        pyin failure handling is tracked separately under issue #426.
+        """
+        fallback_calls = []
+        pipeline = PitchPipeline(
+            engine=Engine.PYIN, on_engine_failure=lambda: fallback_calls.append(1)
+        )
+        pipeline._warmup = lambda: None  # type: ignore[method-assign]
+
+        def _always_raise(_window, _capture_time_ms):
+            raise RuntimeError("simulated pyin failure")
+
+        pipeline._infer = _always_raise  # type: ignore[method-assign]
+        pipeline.start()
+        for _ in range(_MAX_CONSECUTIVE_TORCHCREPE_FAILURES + 5):
+            pipeline.push(np.zeros(2048, dtype=np.float32))
+        time.sleep(0.3)
+        pipeline.stop()
+
+        assert fallback_calls == []
 
 
 class TestThinBuildFallback:

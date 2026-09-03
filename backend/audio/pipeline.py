@@ -123,6 +123,7 @@ class PlaybackPipeline:
             self._pitch = PitchPipeline(
                 engine=self._engine,
                 on_frame=self._on_pitch_frame,
+                on_engine_failure=self._on_pitch_engine_failure,
             )
             self._capture = MicCapture(
                 device_id=device_id,
@@ -219,7 +220,23 @@ class PlaybackPipeline:
 
     def set_force_cpu(self, enabled: bool) -> None:
         with self._lock:
-            self._force_cpu = bool(enabled)
+            enabled = bool(enabled)
+            if enabled == self._force_cpu:
+                # No-op guard. There are now two independent callers that can
+                # both request force_cpu=True around the same time: the
+                # manual /audio/engine/force-cpu override, and the automatic
+                # GPU-failure fallback in _on_pitch_engine_failure (#427).
+                # _on_pitch_engine_failure checks force_cpu before dispatching
+                # its call here, but that check-then-act happens across
+                # threads (it runs on a freshly spawned thread specifically
+                # to avoid a self-join deadlock — see its docstring) and is
+                # therefore racy on its own. Re-checking here, atomically
+                # under the same lock that performs the rebuild below, is
+                # what actually closes the race: a redundant call becomes a
+                # true no-op instead of an unnecessary capture/pitch
+                # teardown+rebuild. Flagged in PR review for #427.
+                return
+            self._force_cpu = enabled
             self._runtime_info = resolve_engine_runtime(force_cpu=self._force_cpu)
             self._engine = self._runtime_info.engine
             was_running = self._state != PlaybackState.STOPPED
@@ -237,6 +254,7 @@ class PlaybackPipeline:
                 self._pitch = PitchPipeline(
                     engine=self._engine,
                     on_frame=self._on_pitch_frame,
+                    on_engine_failure=self._on_pitch_engine_failure,
                 )
                 self._capture = MicCapture(
                     device_id=device_id,
@@ -339,6 +357,34 @@ class PlaybackPipeline:
         payload = encode_pitch_frame(t_ms=t_ms, midi=frame.midi, confidence=frame.confidence)
 
         self._fan_out_payload(payload)
+
+    def _on_pitch_engine_failure(self) -> None:
+        """
+        Called from the pitch worker thread after PitchPipeline has seen
+        _MAX_CONSECUTIVE_TORCHCREPE_FAILURES back-to-back GPU inference
+        errors (issue #427 — e.g. CUDA context lost, VRAM exhausted).
+
+        Reuses set_force_cpu(), the same hot-swap already used by the
+        manual `/audio/engine/force-cpu` override, so the automatic
+        fallback shows up "for free" in the existing /audio/engine
+        response (active_engine/mode/force_cpu) with no bespoke signal.
+
+        set_force_cpu() tears down PitchPipeline and joins its worker
+        thread — but this callback runs *on* that same worker thread, and
+        a thread cannot join itself (Python raises RuntimeError; some
+        runtimes would deadlock). So the switch is dispatched onto a fresh,
+        short-lived thread instead of calling set_force_cpu() inline here.
+        """
+        if self.force_cpu:
+            return  # already on CPU — nothing to fall back to
+        log.warning(
+            "Automatic CPU fallback triggered after repeated GPU pitch-engine failures"
+        )
+        threading.Thread(
+            target=lambda: self.set_force_cpu(True),
+            daemon=True,
+            name="pitch-engine-fallback",
+        ).start()
 
     def inject_frame(self, *, t_ms: float, midi: float, conf: float) -> None:
         """Inject a synthetic frame payload for tests without touching internals."""
