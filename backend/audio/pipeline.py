@@ -330,12 +330,28 @@ class PlaybackPipeline:
         log.info("PlaybackPipeline resumed at t=%.1f ms", self._elapsed_ms)
 
     def _teardown_locked(self) -> None:
-        """Stop capture and pitch pipeline. Must be called with self._lock held."""
+        """Stop capture and pitch pipeline. Must be called with self._lock held.
+
+        Each .stop() is guarded independently (#446): a real PortAudio stream
+        that was opened but never fully started (a plausible state after
+        MicCapture.start() fails partway, see #424) can raise from .stop()
+        itself. Without a guard, that exception would propagate out of here
+        and mask whatever error the caller is already handling, a failure
+        stopping one object would prevent the other from being torn down,
+        and the reference that raised would never reach the `= None` below,
+        leaving a stale live object behind despite the cleanup attempt.
+        """
         if self._capture:
-            self._capture.stop()
+            try:
+                self._capture.stop()
+            except Exception:
+                log.exception("Error stopping MicCapture during teardown")
             self._capture = None
         if self._pitch:
-            self._pitch.stop()
+            try:
+                self._pitch.stop()
+            except Exception:
+                log.exception("Error stopping PitchPipeline during teardown")
             self._pitch = None
 
     def _on_pitch_frame(self, frame: PitchFrame) -> None:
