@@ -251,6 +251,14 @@ test.describe('real backend integration (issue #439)', () => {
     }
   });
 
+  // Runs even if beforeAll above throws (e.g. waitForBackendHealthy's timeout):
+  // Playwright marks a suite "active" the moment its beforeAll starts, and
+  // guarantees a matching afterAll call for cleanup regardless of that
+  // beforeAll's outcome (see @playwright/test's worker runner --
+  // _runAfterAllHooksForSuite runs for any suite _runBeforeAllHooksForSuite
+  // marked active, independent of success/failure). backendProcess is
+  // assigned synchronously above, before the awaited health-poll that can
+  // throw, so it's already set by the time this runs.
   test.afterAll(() => {
     if (backendProcess && !backendReused) {
       killBackendProcess(backendProcess);
@@ -319,9 +327,20 @@ test.describe('real backend integration (issue #439)', () => {
     await expect(page.locator('#score-info')).toContainText(formatScoreInfo(realScore), { timeout: 15000 });
 
     await expect.poll(() => pitchSocketSeen, { timeout: 15000 }).toBe(true);
-    await expect.poll(() => pitchSocketFrames.length, { timeout: 15000 }).toBeGreaterThan(0);
-    const payload = JSON.parse(pitchSocketFrames[0]) as unknown;
-    expect(payload).toEqual({ status: 'connected' });
+    // Assert on content, not position. The synchronous ws.on('framereceived', ...)
+    // attachment above already closes the *listener-attached-too-late* gap this
+    // file's header comment describes, but scanning for the specific
+    // {"status":"connected"} message (rather than indexing pitchSocketFrames[0])
+    // additionally makes this robust to frame *ordering* -- e.g. a slow CI host
+    // scheduling the 5s-idle keepalive ping's microtask ahead of the connect
+    // frame's -- without weakening what's being verified.
+    await expect.poll(() => pitchSocketFrames.some((raw) => {
+      try {
+        return (JSON.parse(raw) as { status?: unknown }).status === 'connected';
+      } catch {
+        return false; // non-JSON or unrelated frame shape; keep polling
+      }
+    }), { timeout: 15000 }).toBe(true);
 
     // Stricter than app.spec.ts's IGNORED_ERRORS list: with a real backend
     // there is no known-benign /ws/pitch failure left to filter out.
