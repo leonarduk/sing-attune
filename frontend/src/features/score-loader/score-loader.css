@@ -31,6 +31,18 @@
 #drop-zone p    { font-size: 0.9rem; }
 #drop-zone span { font-size: 0.75rem; }
 
+/*
+ * Applied for the duration of a score load (#435). In normal operation the
+ * drop zone is already hidden (.hidden, above) by the time this class is
+ * set, so this rule rarely paints — it's a defence-in-depth visual/pointer
+ * affordance for any future path that leaves the drop zone visible mid-load.
+ */
+#drop-zone.drop-zone-disabled {
+  pointer-events: none;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 /* Score container — OSMD renders here */
 #score-container {
   position: relative;

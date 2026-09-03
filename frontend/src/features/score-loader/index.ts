@@ -34,6 +34,20 @@ import { type Feature } from '../../feature-types';
 let removeLoopRegionListener: (() => void) | null = null;
 let soundfontRetryInFlight = false;
 
+// Reentrancy guard (#435): loadScore() awaits teardown, a /score POST, and
+// soundfont loading before calling setSession(). Nothing previously stopped
+// a second loadScore() from starting while the first was still in flight
+// (only transport controls were disabled — the file input/drop zone/dev
+// test-score button stayed interactive), so a slow first load could resolve
+// *after* a faster second load and clobber its session/UI state, even
+// though the second load started later and should win. Each loadScore()
+// call captures the post-increment token; if a newer call has started by
+// the time an earlier call reaches a checkpoint, the earlier call abandons
+// itself without touching session/UI state. Mirrors the loadGeneration
+// idiom already used in services/audio-context.ts (#361) and
+// score/renderer.ts's OsmdScoreRenderer.load() (#435).
+let loadGeneration = 0;
+
 function showSoundfontRetryBanner(): void {
   showErrorBanner('Soundfont failed to load; using synth fallback audio.', {
     dismissible: true,
@@ -72,6 +86,7 @@ function mount(slot: HTMLElement): void {
   // global HTML skeleton, not inside the feature slot.
   const dropZoneEl        = document.getElementById('drop-zone')          as HTMLDivElement;
   const fileInputEl       = document.getElementById('file-input')         as HTMLInputElement;
+  const btnBrowseEl       = document.getElementById('btn-browse')         as HTMLButtonElement;
   const scoreContainerEl  = document.getElementById('score-container')    as HTMLDivElement;
   const scoreInfoEl       = document.getElementById('score-info')         as HTMLDivElement;
   const scoreLoadingEl    = document.getElementById('score-loading')      as HTMLDivElement;
@@ -167,6 +182,23 @@ function mount(slot: HTMLElement): void {
     }
   }
 
+  /**
+   * Disable/enable the ways a user can start a new score load (file picker,
+   * browse button, drop zone, dev test-score button) for the duration of a
+   * load. This is the cheap, discoverable UX half of the #435 reentrancy
+   * fix — it stops most real double-drops/double-clicks outright. It is
+   * *not* the correctness guarantee: loadScore() also carries loadGeneration
+   * so that even a load triggered programmatically (bypassing these
+   * disabled/hidden states — e.g. a synthetic 'change' event) can't leave
+   * mixed state if it overlaps another load.
+   */
+  function setScoreLoadInputsEnabled(enabled: boolean): void {
+    fileInputEl.disabled = !enabled;
+    btnBrowseEl.disabled = !enabled;
+    if (btnLoadTestScore) btnLoadTestScore.disabled = !enabled;
+    dropZoneEl.classList.toggle('drop-zone-disabled', !enabled);
+  }
+
   // ── Score loading ─────────────────────────────────────────────────────────
 
   async function teardownPreviousSession(): Promise<void> {
@@ -211,6 +243,12 @@ function mount(slot: HTMLElement): void {
   }
 
   async function loadScore(file: File): Promise<void> {
+    // Reentrancy guard (#435): claim this call's generation before any
+    // await. A call that starts later always has a strictly higher token,
+    // so "last to start" stays unambiguous regardless of resolve order.
+    const myGeneration = ++loadGeneration;
+    const isStale = (): boolean => myGeneration !== loadGeneration;
+
     clearErrorBanner();
     showLoading(`Loading ${file.name}…`);
     setAppStatus(`Loading ${file.name}…`, 'warning');
@@ -218,8 +256,14 @@ function mount(slot: HTMLElement): void {
     scoreInfoEl.textContent = '';
     headphoneWarning.classList.add('hidden');
     setTransportEnabled(false);
+    setScoreLoadInputsEnabled(false);
 
     await teardownPreviousSession();
+    // A newer loadScore() may have started while we awaited teardown of the
+    // *previous* session (not this pair's race — see below). If so, let it
+    // own the UI/session; finishing this stale call's setup would race the
+    // newer call's own teardown/clearSession and could clobber its state.
+    if (isStale()) return;
 
     // Let other features tear down state from the previous session.
     clearSession();
@@ -243,13 +287,24 @@ function mount(slot: HTMLElement): void {
     try {
       model = await renderer.load(file);
     } catch (err) {
+      // A newer load has already taken over the UI — don't stomp on it with
+      // this stale call's error banner/dropzone reset (#435). Note this also
+      // covers OsmdScoreRenderer's own "superseded by a newer load() call"
+      // rejection (score/renderer.ts), which fires in the narrower case
+      // where the same renderer instance's load() was itself called twice.
+      if (isStale()) return;
       showErrorBanner('Could not load this MusicXML file. Try exporting again from notation software.');
       setAppStatus(String(err), 'error');
       console.error('Score parse/render failed:', err);
       resetDropZoneToIdle();
       hideLoading();
+      setScoreLoadInputsEnabled(true);
       return;
     }
+
+    // Superseded while awaiting renderer.load() — the newer call owns the
+    // container/session now; don't touch either from here (#435).
+    if (isStale()) return;
 
     try {
       // Populate part selector
@@ -269,6 +324,9 @@ function mount(slot: HTMLElement): void {
       // getSoundfontLoadPromise() is non-null here because ensureSoundfontLoaded
       // was called above, but TypeScript doesn't know that — hence the ?? fallback.
       await (getSoundfontLoadPromise() ?? Promise.resolve());
+      // Another overlapping-load checkpoint: a newer call may have started
+      // while we awaited the soundfont (#435).
+      if (isStale()) return;
 
       const audioCtx = getAudioContext();
       const sf = getSoundfont();
@@ -294,12 +352,18 @@ function mount(slot: HTMLElement): void {
         setAppStatus('score loaded', 'success');
       }
     } catch (err) {
+      if (isStale()) return;
       showErrorBanner('Score loaded, but playback setup failed. Check audio/soundfont settings and try again.');
       setAppStatus(String(err), 'error');
       console.error('Post-parse score setup failed:', err);
       resetDropZoneToIdle();
     } finally {
-      hideLoading();
+      // A stale call's finally must not hide the spinner or re-enable
+      // inputs out from under a still-in-flight newer load (#435).
+      if (!isStale()) {
+        hideLoading();
+        setScoreLoadInputsEnabled(true);
+      }
     }
   }
 
@@ -373,8 +437,7 @@ function mount(slot: HTMLElement): void {
   });
   dropZoneEl.addEventListener('click', () => fileInputEl.click());
 
-  const btnBrowse = document.getElementById('btn-browse') as HTMLButtonElement;
-  btnBrowse.addEventListener('click', () => fileInputEl.click());
+  btnBrowseEl.addEventListener('click', () => fileInputEl.click());
 
   if (btnLoadTestScore) {
     const devScoreFilename = 'homeward_bound.mxl';

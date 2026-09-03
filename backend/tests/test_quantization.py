@@ -8,7 +8,12 @@ import pytest
 
 from backend.models.transcription import NoteEvent
 from backend.music import ScoreMetadata, quantize_note_events, score_model_from_quantized_events
-from backend.music.quantization import _build_rest_events, _choose_duration, _midi_to_pitch_name
+from backend.music.quantization import (
+    _build_rest_events,
+    _choose_duration,
+    _is_readable_choice,
+    _midi_to_pitch_name,
+)
 from backend.music.notation_policy import V1_NOTATION_POLICY
 
 
@@ -55,6 +60,30 @@ class TestQuantizeNoteEvents:
         assert quantized[1].pitch == "C4"
         assert not quantized[1].tie_start
         assert not quantized[1].tie_stop
+
+    def test_decomposes_off_grid_dotted_half_into_tied_fragments(self):
+        # Regression test for issue #430: `_is_readable_choice` used to bucket
+        # the 3.0-beat (dotted half) duration with the unconditionally-True
+        # simple durations, so a candidate starting mid-beat was emitted as a
+        # single off-grid dotted half instead of being decomposed like the
+        # 1.5/0.75 dotted cases. Beat 0.25 has 3.0 beats remaining before the
+        # next beat-aligned position, so this exercises exactly that bucket.
+        events = [
+            NoteEvent(start_time=0.125, end_time=1.625, pitch=_hz_from_midi(60), confidence=0.9),
+        ]
+
+        quantized = quantize_note_events(events, tempo_bpm=120.0)
+
+        assert [event.event_type for event in quantized] == ["rest", "note", "note"]
+        assert quantized[0].duration_beats == pytest.approx(0.25)
+        note_events = quantized[1:]
+        # No single off-grid 3.0-beat note: the candidate is decomposed into
+        # beat-aligned fragments instead (2.0 + 1.0 rather than one 3.0 span).
+        assert [event.duration_beats for event in note_events] == pytest.approx([2.0, 1.0])
+        assert all(event.duration_beats != pytest.approx(3.0) for event in note_events)
+        assert [event.pitch for event in note_events] == ["C4", "C4"]
+        assert [event.tie_start for event in note_events] == [True, False]
+        assert [event.tie_stop for event in note_events] == [False, True]
 
     def test_splits_notes_crossing_barlines_into_tied_events(self):
         events = [
@@ -121,6 +150,24 @@ class TestQuantizationHelpers:
 
     def test_choose_duration_clamps_when_remaining_is_below_smallest_candidate(self):
         assert _choose_duration(0.0, 0.1, V1_NOTATION_POLICY) == pytest.approx(0.1)
+
+    def test_choose_duration_rejects_off_grid_dotted_half(self):
+        # Beat-aligned cursor: a 3.0-beat (dotted half) candidate is still the
+        # readable choice when the full 3.0 beats are available.
+        assert _choose_duration(0.0, 3.0, V1_NOTATION_POLICY) == pytest.approx(3.0)
+        # Off-grid cursor (beat-offset 0.25): the 3.0-beat candidate must be
+        # rejected in favour of the next readable duration (2.0), not emitted
+        # as a single off-grid dotted half. See issue #430.
+        assert _choose_duration(0.25, 3.0, V1_NOTATION_POLICY) == pytest.approx(2.0)
+
+    def test_is_readable_choice_requires_beat_alignment_for_dotted_half(self):
+        # Dotted half (3.0) must require beat alignment just like its dotted
+        # sibling, the dotted quarter (1.5) — both were previously handled by
+        # separate branches with 3.0 wrongly grouped into the always-True set.
+        assert _is_readable_choice(0.0, 3.0) is True
+        assert _is_readable_choice(0.25, 3.0) is False
+        assert _is_readable_choice(0.0, 1.5) is True
+        assert _is_readable_choice(0.25, 1.5) is False
 
     def test_supports_extreme_tempo_values(self):
         event = NoteEvent(start_time=0.0, end_time=0.02, pitch=_hz_from_midi(60), confidence=0.9)

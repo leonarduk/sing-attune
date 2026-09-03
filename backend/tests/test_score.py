@@ -239,6 +239,50 @@ class TestParserErrors:
         with pytest.raises(ValueError):
             parse_musicxml(bad)
 
+    def test_malformed_tempo_mark_fallback_xml_raises_value_error(self, tmp_path):
+        """
+        A .mxl that music21 parses successfully (no tempo/metronome mark) but
+        whose raw-XML tempo-mark fallback (_get_xml_content + ET.fromstring
+        in _extract_tempo_marks) hits a malformed entry must raise ValueError,
+        not let xml.etree.ElementTree.ParseError propagate uncaught — that
+        used to surface as a bare 500 from POST /score instead of a 422.
+
+        The fixture exploits a real divergence between two "which .xml is the
+        real one" heuristics operating on the same archive: music21's own
+        ArchiveManager accepts a `.musicxml`-suffixed entry when picking the
+        file to parse, while parser._get_xml_content only matches entries
+        ending in exactly ".xml" — so, given both suffixes in one .mxl, they
+        pick different members. See issue #429.
+        """
+        score = stream.Score()
+        part = stream.Part()
+        part.partName = "Test Part"
+        part.append(meter.TimeSignature("4/4"))
+        measure = stream.Measure(number=1)
+        measure.append(note.Note("C4", quarterLength=4))
+        part.append(measure)
+        score.append(part)
+
+        good_xml_path = tmp_path / "good.musicxml"
+        score.write("musicxml", fp=good_xml_path)
+        good_xml_text = good_xml_path.read_text(encoding="utf-8")
+
+        mxl_path = tmp_path / "malformed_tempo.mxl"
+        with zipfile.ZipFile(mxl_path, "w") as zf:
+            zf.writestr(
+                "META-INF/container.xml",
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<container><rootfiles><rootfile full-path="good.musicxml"/></rootfiles></container>',
+            )
+            # music21 accepts ".musicxml" as a candidate root file, so it parses this one.
+            zf.writestr("good.musicxml", good_xml_text)
+            # _get_xml_content only matches names ending in exactly ".xml", so it
+            # picks this deliberately-broken sibling for the tempo-mark fallback scan.
+            zf.writestr("malformed.xml", '<score-partwise><part id="P1"><note><unclosed></measure></part>')
+
+        with pytest.raises(ValueError, match="tempo marks"):
+            parse_musicxml(mxl_path)
+
 
 # ---------------------------------------------------------------------------
 # .mxl archive-member selection
@@ -467,6 +511,53 @@ class TestRepeatExpansion:
         expanded_pitches = [n.pitch.nameWithOctave for n in expanded.parts[0].flatten().notes]
         assert expanded_pitches == ["C4", "D4", "E4", "F4", "C4", "D4", "E4", "G4", "A4"]
         assert expanded.duration.quarterLength == pytest.approx(36.0)
+
+
+# ---------------------------------------------------------------------------
+# Note.midi precision (issue #431)
+#
+# Note.midi's docstring in model.py explains that it is always a whole
+# semitone value: music21's Pitch.midi accessor rounds to the nearest
+# integer semitone even for genuinely microtonal accidentals (fractional
+# precision lives on Pitch.ps, which does survive a MusicXML round-trip —
+# see the ps=60.5 assertion below). This test locks in that documented
+# behaviour end-to-end through parse_musicxml so a future change cannot
+# silently make the docstring inaccurate again.
+# ---------------------------------------------------------------------------
+
+class TestMicrotonalPitchTruncation:
+
+    def test_quarter_tone_note_yields_whole_semitone_midi(self, tmp_path):
+        score = stream.Score()
+        part = stream.Part()
+        part.partName = "Test Part"
+        part.append(meter.TimeSignature("4/4"))
+
+        m1 = stream.Measure(number=1)
+        # C4 raised a quarter tone (half-sharp accidental): pitch.ps == 60.5,
+        # a genuinely microtonal (non-integer) pitch-space value.
+        microtonal_note = note.Note("C~4", quarterLength=4)
+        assert microtonal_note.pitch.ps == pytest.approx(60.5)
+        m1.append(microtonal_note)
+        part.append(m1)
+        score.append(part)
+
+        path = tmp_path / "quarter_tone.musicxml"
+        score.write("musicxml", fp=path)
+
+        # Confirm MusicXML itself preserves the fractional pitch space after
+        # a round-trip — the microtonal detail is not lost by the file format.
+        reloaded = converter.parse(str(path))
+        reloaded_pitch = reloaded.parts[0].flatten().notes[0].pitch
+        assert reloaded_pitch.ps == pytest.approx(60.5)
+
+        parsed = parse_musicxml(path)
+
+        assert len(parsed.notes) == 1
+        # Rounded from ps=60.5 by music21's Pitch.midi, then int()-cast by
+        # _make_note — Note.midi cannot carry the microtonal detail today.
+        assert parsed.notes[0].midi == 61
+        assert parsed.notes[0].midi == int(parsed.notes[0].midi)
 
 
 # ---------------------------------------------------------------------------

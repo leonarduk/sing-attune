@@ -137,14 +137,36 @@ class PlaybackPipeline:
             self._pitch = PitchPipeline(
                 engine=self._engine,
                 on_frame=self._on_pitch_frame,
+                on_engine_failure=self._on_pitch_engine_failure,
             )
             self._capture = MicCapture(
                 device_id=device_id,
                 on_window=self._pitch.push,
             )
 
-            self._pitch.start()
-            self._capture.start()
+            try:
+                self._pitch.start()
+                self._capture.start()
+            except Exception:
+                # self._pitch/self._capture are assigned above before either
+                # .start() runs, so a failure here (e.g. MicCapture.start()
+                # raising on an invalid/busy device_id from
+                # POST /playback/start?device_id=) can leave one of them
+                # already live — e.g. the pitch worker thread running —
+                # while state is still STOPPED. Without tearing down here,
+                # the next start() call retakes this same branch and
+                # overwrites both references, permanently orphaning the
+                # leaked thread/stream (issue #424). _teardown_hardware()
+                # is a no-op for whichever side never started; unlike
+                # stop()/set_force_cpu() (#425) it's called here with
+                # self._lock still held, since capture never started and
+                # so never pushed a window for the pitch worker to still
+                # be processing — there's nothing that could be blocked
+                # wanting self._lock on the other side of this join.
+                self._teardown_hardware(self._capture, self._pitch)
+                self._capture = None
+                self._pitch = None
+                raise
             self._state = PlaybackState.PLAYING
             log.info("PlaybackPipeline started — device=%s engine=%s", device_id, self._engine.name)
 
@@ -256,7 +278,25 @@ class PlaybackPipeline:
         # device_id/engine choice to another racing set_force_cpu()).
         with self._lifecycle_lock:
             with self._lock:
-                self._force_cpu = bool(enabled)
+                enabled = bool(enabled)
+                if enabled == self._force_cpu:
+                    # No-op guard. There are now two independent callers that
+                    # can both request force_cpu=True around the same time:
+                    # the manual /audio/engine/force-cpu override, and the
+                    # automatic GPU-failure fallback in
+                    # _on_pitch_engine_failure (#427).
+                    # _on_pitch_engine_failure checks force_cpu before
+                    # dispatching its call here, but that check-then-act
+                    # happens across threads (it runs on a freshly spawned
+                    # thread specifically to avoid a self-join deadlock —
+                    # see its docstring) and is therefore racy on its own.
+                    # Re-checking here, atomically under the same lock that
+                    # performs the rebuild below, is what actually closes
+                    # the race: a redundant call becomes a true no-op
+                    # instead of an unnecessary capture/pitch teardown+
+                    # rebuild. Flagged in PR review for #427.
+                    return
+                self._force_cpu = enabled
                 self._runtime_info = resolve_engine_runtime(force_cpu=self._force_cpu)
                 self._engine = self._runtime_info.engine
                 was_running = self._state != PlaybackState.STOPPED
@@ -285,6 +325,7 @@ class PlaybackPipeline:
                     self._pitch = PitchPipeline(
                         engine=self._engine,
                         on_frame=self._on_pitch_frame,
+                        on_engine_failure=self._on_pitch_engine_failure,
                     )
                     self._capture = MicCapture(
                         device_id=device_id,
@@ -365,11 +406,15 @@ class PlaybackPipeline:
         """
         Stop the given (already-detached) capture/pitch objects.
 
-        Must be called WITHOUT `self._lock` held (#425). `capture`/`pitch`
-        are local references the caller already removed from `self._capture`/
-        `self._pitch` under the lock, so calling this outside the lock is
-        safe even under concurrent stop()/set_force_cpu() calls — nobody
-        else can reach these specific objects anymore.
+        Must be called WITHOUT `self._lock` held (#425), unless the caller
+        can prove nothing could be contending for it — see the comment at
+        `start()`'s except block, the one caller that's an exception to
+        this. `capture`/`pitch` are local references the caller already
+        removed from `self._capture`/`self._pitch` under the lock (or, for
+        `start()`'s failure path, is about to null right after calling
+        this), so calling this outside the lock is safe even under
+        concurrent stop()/set_force_cpu() calls — nobody else can reach
+        these specific objects anymore.
 
         `PitchPipeline.stop()` calls `self._thread.join(timeout=2.0)`, and
         if the worker still has a window queued, it must run one more
@@ -379,11 +424,30 @@ class PlaybackPipeline:
         `.join()` would stall for the full 2s timeout instead of returning
         as soon as the worker drains — see stop()/set_force_cpu() for the
         full write-up.
+
+        Each .stop() is also guarded independently (#446): a real
+        PortAudio stream that was opened but never fully started (a
+        plausible state after MicCapture.start() fails partway, see #424)
+        can raise from .stop() itself. Without a guard, that exception
+        would propagate out of here and mask whatever error the caller is
+        already handling, and a failure stopping one object would prevent
+        the other from being torn down. Note this function no longer owns
+        resetting self._capture/self._pitch to None — every caller now
+        does that itself (stop()/set_force_cpu() do it *before* calling
+        this, as part of detaching; start()'s except block does it right
+        after), so a raise here can no longer leave a stale self.*
+        reference behind either way.
         """
         if capture:
-            capture.stop()
+            try:
+                capture.stop()
+            except Exception:
+                log.exception("Error stopping MicCapture during teardown")
         if pitch:
-            pitch.stop()
+            try:
+                pitch.stop()
+            except Exception:
+                log.exception("Error stopping PitchPipeline during teardown")
 
     def _on_pitch_frame(self, frame: PitchFrame) -> None:
         """
@@ -405,6 +469,34 @@ class PlaybackPipeline:
 
         self._fan_out_payload(payload)
 
+    def _on_pitch_engine_failure(self) -> None:
+        """
+        Called from the pitch worker thread after PitchPipeline has seen
+        _MAX_CONSECUTIVE_TORCHCREPE_FAILURES back-to-back GPU inference
+        errors (issue #427 — e.g. CUDA context lost, VRAM exhausted).
+
+        Reuses set_force_cpu(), the same hot-swap already used by the
+        manual `/audio/engine/force-cpu` override, so the automatic
+        fallback shows up "for free" in the existing /audio/engine
+        response (active_engine/mode/force_cpu) with no bespoke signal.
+
+        set_force_cpu() tears down PitchPipeline and joins its worker
+        thread — but this callback runs *on* that same worker thread, and
+        a thread cannot join itself (Python raises RuntimeError; some
+        runtimes would deadlock). So the switch is dispatched onto a fresh,
+        short-lived thread instead of calling set_force_cpu() inline here.
+        """
+        if self.force_cpu:
+            return  # already on CPU — nothing to fall back to
+        log.warning(
+            "Automatic CPU fallback triggered after repeated GPU pitch-engine failures"
+        )
+        threading.Thread(
+            target=lambda: self.set_force_cpu(True),
+            daemon=True,
+            name="pitch-engine-fallback",
+        ).start()
+
     def inject_frame(self, *, t_ms: float, midi: float, conf: float) -> None:
         """Inject a synthetic frame payload for tests without touching internals."""
         payload = encode_pitch_frame(t_ms=t_ms, midi=midi, confidence=conf)
@@ -420,10 +512,23 @@ class PlaybackPipeline:
         with self._clients_lock:
             clients = list(self._clients)
 
-        for q in clients:
+        def _deliver(q: asyncio.Queue) -> None:
+            # Runs on the event-loop thread when the scheduled callback actually
+            # fires — NOT synchronously inside _fan_out_payload. call_soon_threadsafe
+            # only *schedules* put_nowait; it returns immediately, before put_nowait
+            # has run. So the try/except has to live in here, around the real call,
+            # not around the call_soon_threadsafe(...) call below — otherwise
+            # QueueFull raised by put_nowait surfaces later as an unhandled
+            # callback exception instead of the intended log.warning (see #428).
             try:
-                loop.call_soon_threadsafe(q.put_nowait, payload)
+                q.put_nowait(payload)
             except asyncio.QueueFull:
                 log.warning("WS client queue full — dropping frame (client too slow)")
             except Exception:
                 pass  # client may have disconnected — harmless
+
+        for q in clients:
+            try:
+                loop.call_soon_threadsafe(_deliver, q)
+            except Exception:
+                pass  # loop may be closing (shutdown race) — harmless

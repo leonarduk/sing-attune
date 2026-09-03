@@ -21,14 +21,30 @@ dependencies = [
 sing-attune = "backend.cli:main"
 
 [project.optional-dependencies]
-# Pitch engines — install PyTorch first:
-#   uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
-# Then:
-#   uv pip install torchcrepe
-torchcrepe = [
-    "torchcrepe>=0.0.20",
+# GPU pitch engine (torchcrepe). torch/torchaudio come from PyTorch's own
+# cpu/cu128 wheel indexes (not PyPI) — see [tool.uv.sources]/[tool.uv.index]
+# below. `cpu` and `cu128` are mutually exclusive (see [tool.uv.conflicts]);
+# pick one:
+#   uv sync --extra cpu     # librosa pYIN + torchcrepe running on CPU
+#   uv sync --extra cu128   # torchcrepe GPU-accelerated (CUDA 12.8 wheels)
+# Versions are pinned exactly (not `>=`) so both extras resolve the same
+# torch/torchaudio release — the two indexes don't publish in lockstep, so a
+# loose bound can let `cpu` and `cu128` drift to different upstream versions.
+# 2.11.0, not 2.10.0: 2.10.0 carries a GHSA/OSV-listed high-severity local
+# deserialization CVE (CVE-2026-4538, pt2 loading handler) fixed in 2.11.0 —
+# checked via OSV.dev when this pin was added; re-check before bumping again.
+cpu = [
+    "torch==2.11.0",
+    "torchaudio==2.11.0",
+    "torchcrepe==0.0.24",
 ]
-# torchaudio pYIN (CPU fallback) ships with torchaudio — no separate install needed
+cu128 = [
+    "torch==2.11.0",
+    "torchaudio==2.11.0",
+    "torchcrepe==0.0.24",
+]
+# Plain `uv sync` (no extra) omits torch entirely — librosa pYIN (a base
+# dependency above) is the CPU fallback used by the thin installer build.
 
 [dependency-groups]
 dev = [
@@ -41,6 +57,36 @@ dev = [
     "ruff==0.15.5",
     "pyinstaller>=6.16.0",
 ]
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "cpu" },
+        { extra = "cu128" },
+    ],
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu128", extra = "cu128" },
+]
+torchaudio = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu128", extra = "cu128" },
+]
+
+# `explicit = true` so only torch/torchaudio (sourced above) resolve from
+# these indexes — other packages keep resolving from PyPI.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]

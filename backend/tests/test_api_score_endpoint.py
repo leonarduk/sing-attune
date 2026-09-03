@@ -5,10 +5,12 @@ from __future__ import annotations
 import io
 import sys
 import types
+import zipfile
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from music21 import meter, note, stream
 
 from backend.score.model import ScoreModel
 
@@ -151,3 +153,58 @@ def test_score_endpoint_handles_corrupted_xml(client: TestClient) -> None:
 
     assert response.status_code == 422
     assert "parse" in response.json()["detail"].lower()
+
+
+def _build_malformed_tempo_mark_mxl(tmp_path: Path) -> bytes:
+    """
+    Build a .mxl where music21's own parser succeeds but the module's raw-XML
+    tempo-mark fallback (_get_xml_content + ET.fromstring) hits a malformed
+    entry.
+
+    This exploits a real divergence between the two archive-member "which
+    .xml is the real one" heuristics: music21's ArchiveManager accepts a
+    `.musicxml`-suffixed entry when picking the file to parse, while
+    parser._get_xml_content only matches entries ending in exactly ".xml" —
+    so, given both suffixes in one archive, they genuinely pick different
+    members. The score itself has no tempo/metronome mark, so parsing it
+    falls through to the raw-XML fallback and lands on the malformed member.
+    See issue #429.
+    """
+    score = stream.Score()
+    part = stream.Part()
+    part.partName = "Test Part"
+    part.append(meter.TimeSignature("4/4"))
+    measure = stream.Measure(number=1)
+    measure.append(note.Note("C4", quarterLength=4))
+    part.append(measure)
+    score.append(part)
+
+    good_xml_path = tmp_path / "good.musicxml"
+    score.write("musicxml", fp=good_xml_path)
+    good_xml_text = good_xml_path.read_text(encoding="utf-8")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<container><rootfiles><rootfile full-path="good.musicxml"/></rootfiles></container>',
+        )
+        # music21 accepts ".musicxml" as a candidate root file, so it parses this one.
+        zf.writestr("good.musicxml", good_xml_text)
+        # _get_xml_content only matches names ending in exactly ".xml", so it
+        # picks this deliberately-broken sibling for the tempo-mark fallback scan.
+        zf.writestr("malformed.xml", '<score-partwise><part id="P1"><note><unclosed></measure></part>')
+    return buf.getvalue()
+
+
+def test_score_endpoint_handles_malformed_tempo_mark_fallback_xml(client: TestClient, tmp_path: Path) -> None:
+    mxl_bytes = _build_malformed_tempo_mark_mxl(tmp_path)
+
+    response = client.post(
+        "/score",
+        files={"file": ("malformed_tempo.mxl", io.BytesIO(mxl_bytes), "application/vnd.recordare.musicxml")},
+    )
+
+    assert response.status_code == 422
+    assert "tempo" in response.json()["detail"].lower()

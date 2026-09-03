@@ -108,7 +108,20 @@ def _extract_tempo_marks(score: Score, path: Path) -> list[TempoMark]:
         # Fallback: parse raw XML for <sound tempo="N">
         xml_content = _get_xml_content(path)
         if xml_content:
-            root = ET.fromstring(xml_content)
+            try:
+                root = ET.fromstring(xml_content)
+            except ET.ParseError as exc:
+                # music21's own parser can tolerate XML that stdlib ElementTree
+                # rejects (e.g. a malformed non-META-INF .xml entry inside a
+                # .mxl, or minor spec deviations music21 shrugs off). Without
+                # this, ParseError propagates past parse_musicxml uncaught —
+                # it's neither ValueError nor FileNotFoundError — and
+                # POST /score returns a bare 500 instead of a 422. Re-raise as
+                # ValueError so it's handled the same way as any other
+                # unparseable input (see issue #429).
+                raise ValueError(
+                    f"Malformed XML in {path.name} while extracting tempo marks: {exc}"
+                ) from exc
             for sound in root.iter("sound"):
                 t = sound.get("tempo")
                 if t:
@@ -196,6 +209,10 @@ def _make_note(
         lyric = el.lyric
 
     return Note(
+        # el.pitch.midi is already an int rounded to the nearest semitone by
+        # music21 (see music21.pitch.Pitch.midi) — this int() is a defensive
+        # type-narrowing cast, not the source of any microtonal precision loss.
+        # See Note.midi docstring in model.py and issue #431.
         midi=int(el.pitch.midi),
         beat_start=override_offset if override_offset is not None else float(el.offset),
         duration=override_duration if override_duration is not None else float(el.duration.quarterLength),
