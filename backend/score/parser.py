@@ -209,6 +209,10 @@ def _make_note(
         lyric = el.lyric
 
     return Note(
+        # el.pitch.midi is already an int rounded to the nearest semitone by
+        # music21 (see music21.pitch.Pitch.midi) — this int() is a defensive
+        # type-narrowing cast, not the source of any microtonal precision loss.
+        # See Note.midi docstring in model.py and issue #431.
         midi=int(el.pitch.midi),
         beat_start=override_offset if override_offset is not None else float(el.offset),
         duration=override_duration if override_duration is not None else float(el.duration.quarterLength),

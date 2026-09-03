@@ -514,6 +514,53 @@ class TestRepeatExpansion:
 
 
 # ---------------------------------------------------------------------------
+# Note.midi precision (issue #431)
+#
+# Note.midi's docstring in model.py explains that it is always a whole
+# semitone value: music21's Pitch.midi accessor rounds to the nearest
+# integer semitone even for genuinely microtonal accidentals (fractional
+# precision lives on Pitch.ps, which does survive a MusicXML round-trip —
+# see the ps=60.5 assertion below). This test locks in that documented
+# behaviour end-to-end through parse_musicxml so a future change cannot
+# silently make the docstring inaccurate again.
+# ---------------------------------------------------------------------------
+
+class TestMicrotonalPitchTruncation:
+
+    def test_quarter_tone_note_yields_whole_semitone_midi(self, tmp_path):
+        score = stream.Score()
+        part = stream.Part()
+        part.partName = "Test Part"
+        part.append(meter.TimeSignature("4/4"))
+
+        m1 = stream.Measure(number=1)
+        # C4 raised a quarter tone (half-sharp accidental): pitch.ps == 60.5,
+        # a genuinely microtonal (non-integer) pitch-space value.
+        microtonal_note = note.Note("C~4", quarterLength=4)
+        assert microtonal_note.pitch.ps == pytest.approx(60.5)
+        m1.append(microtonal_note)
+        part.append(m1)
+        score.append(part)
+
+        path = tmp_path / "quarter_tone.musicxml"
+        score.write("musicxml", fp=path)
+
+        # Confirm MusicXML itself preserves the fractional pitch space after
+        # a round-trip — the microtonal detail is not lost by the file format.
+        reloaded = converter.parse(str(path))
+        reloaded_pitch = reloaded.parts[0].flatten().notes[0].pitch
+        assert reloaded_pitch.ps == pytest.approx(60.5)
+
+        parsed = parse_musicxml(path)
+
+        assert len(parsed.notes) == 1
+        # Rounded from ps=60.5 by music21's Pitch.midi, then int()-cast by
+        # _make_note — Note.midi cannot carry the microtonal detail today.
+        assert parsed.notes[0].midi == 61
+        assert parsed.notes[0].midi == int(parsed.notes[0].midi)
+
+
+# ---------------------------------------------------------------------------
 # Timeline tests
 # ---------------------------------------------------------------------------
 
