@@ -215,9 +215,15 @@ def _candidate_durations(notation_policy: NotationPolicy) -> tuple[float, ...]:
 
 def _is_readable_choice(beat_offset: float, duration: float) -> bool:
     normalized_offset = round(beat_offset, 8)
-    if duration in {4.0, 3.0, 2.0, 1.0, 0.5, 0.25}:
+    if duration in {4.0, 2.0, 1.0, 0.5, 0.25}:
         return True
-    if duration == 1.5:
+    if duration in {3.0, 1.5}:
+        # Dotted half (3.0) and dotted quarter (1.5) notes are only legible as a
+        # single note when they start exactly on a beat. Without this check a
+        # 3.0-beat candidate starting mid-beat (e.g. beat-offset 0.25) was
+        # emitted as a single off-grid dotted half instead of falling through
+        # to tied-fragment decomposition like every other dotted duration.
+        # See issue #430.
         return math.isclose(normalized_offset, 0.0, abs_tol=1e-8)
     if duration == 0.75:
         return math.isclose(normalized_offset, 0.0, abs_tol=1e-8) or math.isclose(

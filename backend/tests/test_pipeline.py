@@ -12,6 +12,7 @@ a mock pitch source injected via on_frame callback.
 """
 
 import asyncio
+import threading
 import time
 
 import pytest
@@ -239,8 +240,9 @@ class _FakeMicCapture:
 
 class _FakePitchPipeline:
     """No-op replacement for PitchPipeline — accepts the same constructor args."""
-    def __init__(self, engine=None, on_frame=None):
+    def __init__(self, engine=None, on_frame=None, on_engine_failure=None):
         self.engine = engine
+        self.on_engine_failure = on_engine_failure
         self.started = False
         self.stopped = False
 
@@ -252,6 +254,72 @@ class _FakePitchPipeline:
 
     def push(self, _):
         pass
+
+
+class _BusyFakePitchPipeline:
+    """
+    Replacement for PitchPipeline that mimics its real *threading* behaviour,
+    unlike `_FakePitchPipeline` above (a total no-op that can't catch #425).
+
+    The real `PitchPipeline.stop()` sets a sentinel and then does
+    `self._thread.join(timeout=2.0)`; if a window was still queued, the
+    worker thread processes it first — calling `on_frame()`, which needs
+    `PlaybackPipeline._lock` — before it reaches the sentinel and exits.
+    This fake reproduces exactly that shape: `.stop()` spawns a thread that
+    calls `on_frame()` (as if draining one last in-flight frame) and then
+    joins it with the same 2.0s timeout the real implementation uses.
+
+    If the caller (PlaybackPipeline.stop()/set_force_cpu()) still holds its
+    own lock while calling this `.stop()`, `on_frame()` blocks trying to
+    acquire it, so this `.join()` — and therefore the caller — stalls for
+    the full 2.0s. If the caller released its lock first (the #425 fix),
+    `on_frame()` runs uncontended almost instantly and `.stop()` returns
+    fast.
+    """
+
+    # Mirrors PitchPipeline.stop()'s real join timeout so a still-buggy
+    # caller would stall for a comparable, easily-assertable duration.
+    JOIN_TIMEOUT = 2.0
+
+    def __init__(self, engine=None, on_frame=None, on_engine_failure=None):
+        self.engine = engine
+        self._on_frame = on_frame
+        self.on_engine_failure = on_engine_failure
+        self.started = False
+        self.stopped = False
+        self._worker: threading.Thread | None = None
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        if self.stopped:
+            return
+        self.stopped = True
+
+        def _drain_one_more_frame():
+            if self._on_frame:
+                frame = PitchFrame(time_ms=time.monotonic() * 1000.0, midi=60.0, confidence=0.9)
+                self._on_frame(frame)
+
+        self._worker = threading.Thread(target=_drain_one_more_frame, daemon=True)
+        self._worker.start()
+        self._worker.join(timeout=self.JOIN_TIMEOUT)
+
+    def push(self, _):
+        pass
+
+
+def _patch_pipeline_hardware_busy(monkeypatch):
+    """
+    Like `_patch_pipeline_hardware`, but replaces PitchPipeline with
+    `_BusyFakePitchPipeline` instead of the no-op `_FakePitchPipeline`, so
+    a `set_force_cpu()` rebuild produces hardware that still reproduces the
+    real worker-thread-vs-lock interaction (#425) if exercised again later.
+    """
+    import backend.audio.pipeline as pipeline_mod
+    monkeypatch.setattr(pipeline_mod, "MicCapture", _FakeMicCapture)
+    monkeypatch.setattr(pipeline_mod, "PitchPipeline", _BusyFakePitchPipeline)
 
 
 class TestSetForceCpu:
@@ -400,6 +468,615 @@ class TestSetForceCpu:
         p.set_force_cpu(True)
 
         assert created_with_device_id == [7]
+
+    def test_set_force_cpu_is_noop_when_value_unchanged(self, monkeypatch):
+        """
+        Two independent callers can both ask for force_cpu=True around the
+        same time: the manual /audio/engine/force-cpu override, and the
+        automatic GPU-failure fallback in _on_pitch_engine_failure (#427).
+        A redundant call must not tear down and rebuild an already-correct
+        pipeline a second time (flagged in PR review for #427).
+        """
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        _patch_pipeline_hardware(monkeypatch)
+
+        p = self._pipeline()
+        p._capture = _MockCapture()
+        p._pitch = _MockPitch()
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+
+        p.set_force_cpu(True)
+        rebuilt_capture, rebuilt_pitch = p._capture, p._pitch
+
+        p.set_force_cpu(True)  # redundant — must be a no-op, not a second rebuild
+
+        assert p._capture is rebuilt_capture
+        assert p._pitch is rebuilt_pitch
+
+    def test_set_force_cpu_false_is_noop_when_already_false(self, monkeypatch):
+        """Same guard, other direction: redundant False must also no-op."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        _patch_pipeline_hardware(monkeypatch)
+
+        p = self._pipeline()
+        p._capture = _MockCapture()
+        p._pitch = _MockPitch()
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+        original_capture, original_pitch = p._capture, p._pitch
+
+        p.set_force_cpu(False)  # already False — must be a no-op
+
+        assert p._capture is original_capture
+        assert p._pitch is original_pitch
+
+
+# ── Automatic GPU→CPU fallback (issue #427) ────────────────────────────────────
+
+
+class TestAutomaticCpuFallback:
+    """
+    PitchPipeline notifies PlaybackPipeline after repeated torchcrepe
+    failures (see TestTorchcrepeFailureFallback in test_pitch.py).
+    PlaybackPipeline must react by reusing the same set_force_cpu()
+    hot-swap the manual /audio/engine/force-cpu override uses, so
+    /audio/engine's existing fields (active_engine/mode/force_cpu) reflect
+    the automatic fallback without a new bespoke signal.
+    """
+
+    def _pipeline(self) -> PlaybackPipeline:
+        from backend.audio.pitch import Engine
+        return PlaybackPipeline(engine=Engine.TORCHCREPE)
+
+    def _wait_until(self, predicate, timeout=3.0, interval=0.05) -> bool:
+        """
+        Poll predicate() until true or timeout. The fallback is dispatched
+        onto its own thread (see PlaybackPipeline._on_pitch_engine_failure)
+        specifically so it never joins the pitch worker thread from itself,
+        so callers must not assert immediately after triggering it.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(interval)
+        return predicate()
+
+    def test_on_pitch_engine_failure_calls_set_force_cpu(self):
+        """STOPPED pipeline: no hardware to tear down, just flips the flags."""
+        p = self._pipeline()
+        assert p.force_cpu is False
+
+        p._on_pitch_engine_failure()
+
+        assert self._wait_until(lambda: p.force_cpu is True)
+        assert p.runtime_info.mode == "forced_cpu"
+
+    def test_on_pitch_engine_failure_is_noop_when_already_force_cpu(self):
+        """Don't tear down/rebuild again if we're already on the CPU engine."""
+        p = self._pipeline()
+        p.set_force_cpu(True)
+
+        calls = []
+        p.set_force_cpu = lambda enabled: calls.append(enabled)  # type: ignore[method-assign]
+        p._on_pitch_engine_failure()
+        time.sleep(0.1)
+
+        assert calls == [], "set_force_cpu must not be re-invoked once already forced to CPU"
+
+    def test_start_wires_on_engine_failure_into_pitch_pipeline(self, monkeypatch):
+        """PlaybackPipeline.start() must pass its own callback through to PitchPipeline."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        _patch_pipeline_hardware(monkeypatch)
+        p = self._pipeline()
+        p.start()
+        try:
+            assert p._pitch.on_engine_failure == p._on_pitch_engine_failure
+        finally:
+            p.stop()
+
+    def test_set_force_cpu_rebuild_rewires_on_engine_failure(self, monkeypatch):
+        """The manual-override rebuild path must keep the same wiring."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        _patch_pipeline_hardware(monkeypatch)
+        p = self._pipeline()
+        p._capture = _MockCapture()
+        p._pitch = _MockPitch()
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+
+        p.set_force_cpu(True)
+
+        assert p._pitch.on_engine_failure == p._on_pitch_engine_failure
+
+    def test_repeated_torchcrepe_failures_trigger_end_to_end_cpu_fallback(self, monkeypatch):
+        """
+        Full path, matching issue #427's acceptance criteria: simulate
+        _infer_torchcrepe raising on every frame and assert PlaybackPipeline
+        actually falls back to the pyin engine, and that the
+        /audio/engine-equivalent state (runtime_info / force_cpu) reflects it.
+
+        Only MicCapture is faked (no real audio hardware in CI); PitchPipeline
+        is left real so the failure-counting/notification logic under test
+        actually runs. torchcrepe/CUDA itself is never exercised: _infer is
+        monkeypatched before any window is pushed, exactly as recommended by
+        CLAUDE.md for hardware-adjacent code paths.
+        """
+        from backend.audio.pitch import Engine, _MAX_CONSECUTIVE_TORCHCREPE_FAILURES
+        import numpy as np
+        import backend.audio.pipeline as pipeline_mod
+
+        monkeypatch.setattr(pipeline_mod, "MicCapture", _FakeMicCapture)
+
+        p = self._pipeline()
+        p.start(device_id=None, loop=None)
+        try:
+            failing_pitch = p._pitch
+            assert failing_pitch.engine == Engine.TORCHCREPE
+
+            def _always_raise(_window, _capture_time_ms):
+                raise RuntimeError("simulated CUDA context lost")
+
+            failing_pitch._infer = _always_raise  # type: ignore[method-assign]
+
+            for _ in range(_MAX_CONSECUTIVE_TORCHCREPE_FAILURES + 2):
+                failing_pitch.push(np.zeros(2048, dtype=np.float32))
+
+            assert self._wait_until(lambda: p.force_cpu is True)
+            assert self._wait_until(lambda: p.runtime_info.engine == Engine.PYIN)
+            assert p.runtime_info.mode == "forced_cpu"
+            # A brand new PitchPipeline was swapped in — confirm it's the CPU engine.
+            assert p._pitch is not failing_pitch
+            assert p._pitch.engine == Engine.PYIN
+        finally:
+            p.stop()
+
+
+# ── start() partial-failure cleanup ─────────────────────────────────────────
+#
+# Issue #424: self._pitch/self._capture are assigned before either .start()
+# runs. If one .start() raises (e.g. MicCapture.start() on an invalid/busy
+# device_id), state must stay STOPPED *and* whichever side did start must be
+# torn down -- otherwise the next start() call overwrites both references
+# and permanently leaks a running pitch thread / open PortAudio stream.
+
+
+class TestStartFailureCleanup:
+    def _pipeline(self) -> PlaybackPipeline:
+        from backend.audio.pitch import Engine
+        return PlaybackPipeline(engine=Engine.PYIN)
+
+    def test_capture_start_failure_stops_the_already_started_pitch_worker(self, monkeypatch):
+        import backend.audio.pipeline as pipeline_mod
+
+        pitch_instances = []
+
+        class _RecordingPitch(_FakePitchPipeline):
+            def __init__(self, engine=None, on_frame=None, on_engine_failure=None):
+                super().__init__(engine=engine, on_frame=on_frame, on_engine_failure=on_engine_failure)
+                pitch_instances.append(self)
+
+        class _FailingCapture(_FakeMicCapture):
+            def start(self):
+                raise RuntimeError("device busy")
+
+        monkeypatch.setattr(pipeline_mod, "PitchPipeline", _RecordingPitch)
+        monkeypatch.setattr(pipeline_mod, "MicCapture", _FailingCapture)
+
+        p = self._pipeline()
+
+        with pytest.raises(RuntimeError, match="device busy"):
+            p.start(device_id=42)
+
+        # State never advances past STOPPED on failure.
+        assert p.state == PlaybackState.STOPPED
+
+        # No stale live objects left for the next start() to inherit.
+        assert p._pitch is None
+        assert p._capture is None
+
+        # The pitch worker that DID start must have been stopped, not leaked.
+        assert len(pitch_instances) == 1
+        assert pitch_instances[0].started is True
+        assert pitch_instances[0].stopped is True
+
+    def test_pitch_start_failure_never_reaches_capture_start(self, monkeypatch):
+        import backend.audio.pipeline as pipeline_mod
+
+        capture_instances = []
+
+        class _RecordingCapture(_FakeMicCapture):
+            def __init__(self, device_id=None, on_window=None):
+                super().__init__(device_id=device_id, on_window=on_window)
+                capture_instances.append(self)
+
+        class _FailingPitch(_FakePitchPipeline):
+            def start(self):
+                raise RuntimeError("pitch engine init failed")
+
+        monkeypatch.setattr(pipeline_mod, "PitchPipeline", _FailingPitch)
+        monkeypatch.setattr(pipeline_mod, "MicCapture", _RecordingCapture)
+
+        p = self._pipeline()
+
+        with pytest.raises(RuntimeError, match="pitch engine init failed"):
+            p.start(device_id=1)
+
+        assert p.state == PlaybackState.STOPPED
+        assert p._pitch is None
+        assert p._capture is None
+        # MicCapture is constructed (needed for PitchPipeline.push wiring)
+        # before self._pitch.start() runs, but .start() must never have
+        # been reached on it once self._pitch.start() raised first.
+        assert len(capture_instances) == 1
+        assert capture_instances[0].started is False
+
+    def test_start_after_failed_start_works_cleanly(self, monkeypatch):
+        """A later start() with a valid device must succeed with fresh,
+        non-leaked hardware objects rather than inheriting anything from
+        the previous failed attempt."""
+        import backend.audio.pipeline as pipeline_mod
+
+        pitch_instances = []
+
+        class _RecordingPitch(_FakePitchPipeline):
+            def __init__(self, engine=None, on_frame=None, on_engine_failure=None):
+                super().__init__(engine=engine, on_frame=on_frame, on_engine_failure=on_engine_failure)
+                pitch_instances.append(self)
+
+        class _DeviceGatedCapture(_FakeMicCapture):
+            """Fails only for one device_id, simulating an invalid device
+            that the caller corrects on retry."""
+            FAILING_DEVICE_ID = 999
+
+            def start(self):
+                if self.device_id == self.FAILING_DEVICE_ID:
+                    raise RuntimeError("device busy")
+                super().start()
+
+        monkeypatch.setattr(pipeline_mod, "PitchPipeline", _RecordingPitch)
+        monkeypatch.setattr(pipeline_mod, "MicCapture", _DeviceGatedCapture)
+
+        p = self._pipeline()
+
+        with pytest.raises(RuntimeError):
+            p.start(device_id=_DeviceGatedCapture.FAILING_DEVICE_ID)
+
+        assert p.state == PlaybackState.STOPPED
+        first_pitch = pitch_instances[0]
+        assert first_pitch.started is True
+        assert first_pitch.stopped is True
+
+        # Retry with a valid device_id.
+        p.start(device_id=1)
+
+        assert p.state == PlaybackState.PLAYING
+        assert p._capture is not None
+        assert p._pitch is not None
+        assert p._capture.started is True
+        assert p._pitch.started is True
+
+        # The retry must build a brand new pitch worker rather than
+        # resurrecting the leaked one from the failed attempt.
+        assert len(pitch_instances) == 2
+        assert pitch_instances[1] is p._pitch
+        assert pitch_instances[1] is not first_pitch
+        assert pitch_instances[1].stopped is False
+
+
+# ── _teardown_hardware() defensive cleanup ──────────────────────────────────
+
+
+class _RaisingStopCapture:
+    """Stand-in for MicCapture whose .stop() raises -- simulates a real
+    sd.PortAudioError from a stream that was opened but never fully started."""
+    device_id = None
+
+    def __init__(self):
+        self.started = False
+        self.stop_called = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stop_called = True
+        raise RuntimeError("PortAudio stream error")
+
+
+class _RaisingStopPitch:
+    """Stand-in for PitchPipeline whose .stop() raises."""
+
+    def __init__(self):
+        self.started = False
+        self.stop_called = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stop_called = True
+        raise RuntimeError("worker thread join error")
+
+    def push(self, _):
+        pass
+
+
+class TestTeardownHardwareDefensiveCleanup:
+    """
+    Regression tests for #446.
+
+    _teardown_hardware() (renamed from _teardown_locked() by #425 -- it now
+    takes the capture/pitch objects as params instead of reading
+    self._capture/self._pitch, and is called without self._lock held) used
+    to call capture.stop() and pitch.stop() unconditionally. If either
+    raised, two things went wrong: the exception would propagate out of
+    _teardown_hardware() (masking whatever error the caller was already
+    handling), and a failure stopping one object would prevent the other
+    from being torn down.
+
+    Note what's *not* tested here anymore: _teardown_hardware() itself no
+    longer owns resetting self._capture/self._pitch to None -- every
+    caller does that itself now (stop()/set_force_cpu() detach under the
+    lock *before* calling this; start()'s except block nulls them right
+    after). That caller-level guarantee is covered by
+    test_stop_reaches_stopped_state_when_capture_stop_raises and
+    test_set_force_cpu_rebuild_completes_when_old_capture_stop_raises
+    below instead.
+    """
+
+    def _pipeline(self) -> PlaybackPipeline:
+        from backend.audio.pitch import Engine
+        return PlaybackPipeline(engine=Engine.PYIN)
+
+    def test_does_not_raise_when_capture_stop_raises(self):
+        p = self._pipeline()
+        p._teardown_hardware(_RaisingStopCapture(), _MockPitch())  # must not raise
+
+    def test_does_not_raise_when_pitch_stop_raises(self):
+        p = self._pipeline()
+        p._teardown_hardware(_MockCapture(), _RaisingStopPitch())  # must not raise
+
+    def test_tears_down_pitch_even_when_capture_stop_raises(self):
+        """A failure stopping one hardware object must not prevent the
+        other from being torn down."""
+        p = self._pipeline()
+        pitch = _MockPitch()
+
+        p._teardown_hardware(_RaisingStopCapture(), pitch)
+
+        assert pitch.stopped is True
+
+    def test_tears_down_capture_even_when_pitch_stop_raises(self):
+        p = self._pipeline()
+        capture = _MockCapture()
+
+        p._teardown_hardware(capture, _RaisingStopPitch())
+
+        assert capture.stopped is True
+
+    def test_both_stop_calls_attempted_when_both_raise(self):
+        p = self._pipeline()
+        capture = _RaisingStopCapture()
+        pitch = _RaisingStopPitch()
+
+        p._teardown_hardware(capture, pitch)  # must not raise
+
+        assert capture.stop_called is True
+        assert pitch.stop_called is True
+
+    def test_teardown_failure_is_logged(self, caplog):
+        p = self._pipeline()
+
+        caplog.set_level("ERROR")
+        p._teardown_hardware(_RaisingStopCapture(), _MockPitch())
+
+        assert any(
+            record.name == "backend.audio.pipeline"
+            and record.levelname == "ERROR"
+            and "MicCapture" in record.message
+            for record in caplog.records
+        ), "Expected a logged error for the failed MicCapture.stop()"
+
+    def test_stop_reaches_stopped_state_when_capture_stop_raises(self):
+        """stop() must reach PlaybackState.STOPPED even if the underlying
+        MicCapture.stop() raises -- a teardown failure must not leave the
+        pipeline stuck mid-transition, and self._capture/self._pitch must
+        still end up None (guaranteed by stop() detaching them under the
+        lock before _teardown_hardware() ever runs, not by that function)."""
+        p = self._pipeline()
+        p._capture = _RaisingStopCapture()
+        p._pitch = _MockPitch()
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+
+        p.stop()  # must not raise
+
+        assert p.state == PlaybackState.STOPPED
+        assert p._capture is None
+        assert p._pitch is None
+
+    def test_set_force_cpu_rebuild_completes_when_old_capture_stop_raises(self, monkeypatch):
+        """set_force_cpu()'s hot-swap must still build and start fresh
+        hardware even if tearing down the OLD hardware raised."""
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        _patch_pipeline_hardware(monkeypatch)
+
+        p = self._pipeline()
+        p._capture = _RaisingStopCapture()
+        p._pitch = _MockPitch()
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+
+        p.set_force_cpu(True)  # must not raise
+
+        assert p.state == PlaybackState.PLAYING
+        assert p.force_cpu is True
+        assert p._capture is not None
+        assert p._pitch is not None
+        assert p._capture.started is True
+        assert p._pitch.started is True
+
+
+# ── #425: stop()/set_force_cpu() must not hold the lock across thread.join() ──
+
+
+class TestStopAndSetForceCpuDoNotStallOnBusyWorker:
+    """
+    Regression tests for #425.
+
+    stop() and set_force_cpu() used to hold `PlaybackPipeline._lock` across
+    `PitchPipeline.stop()`'s blocking `thread.join(timeout=2.0)`. If the
+    worker thread still had a window queued, it would need that same lock
+    inside `_on_pitch_frame()` before it could drain to the stop sentinel —
+    a lock-contention stall that ties up the caller (and, via the
+    synchronous REST handlers, the whole asyncio event loop) for up to the
+    full 2s timeout.
+
+    `_FakePitchPipeline`/`_FakeMicCapture` (used elsewhere in this file) are
+    total no-ops and never exercised this path, which is why the bug wasn't
+    caught. `_BusyFakePitchPipeline` reproduces the real worker's threading
+    behaviour instead.
+    """
+
+    def _pipeline(self) -> PlaybackPipeline:
+        from backend.audio.pitch import Engine
+        return PlaybackPipeline(engine=Engine.PYIN)
+
+    def test_stop_returns_quickly_while_worker_drains_in_flight_frame(self, monkeypatch):
+        # No module-level patching needed: stop() never calls the
+        # MicCapture/PitchPipeline constructors, it only tears down
+        # whatever is already assigned to p._capture/p._pitch below.
+        p = self._pipeline()
+        p._capture = _FakeMicCapture()
+        p._pitch = _BusyFakePitchPipeline(on_frame=p._on_pitch_frame)
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+
+        start = time.monotonic()
+        p.stop()
+        elapsed = time.monotonic() - start
+
+        # A fixed stop() completes almost instantly (the worker's
+        # on_frame() call runs uncontended). A still-buggy implementation
+        # that holds self._lock across the fake's join would take the full
+        # ~2.0s JOIN_TIMEOUT, since the worker thread would be stuck
+        # waiting for that same lock inside _on_pitch_frame(). 1.0s gives a
+        # wide, non-flaky margin between the two.
+        assert elapsed < 1.0, (
+            f"stop() took {elapsed:.2f}s — looks like it held the lock "
+            "across PitchPipeline.stop()'s thread.join() (#425)"
+        )
+        assert p.state == PlaybackState.STOPPED
+        assert p._capture is None
+        assert p._pitch is None
+
+    def test_set_force_cpu_returns_quickly_while_worker_drains_in_flight_frame(
+        self, monkeypatch
+    ):
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        _patch_pipeline_hardware_busy(monkeypatch)
+
+        p = self._pipeline()
+        p._capture = _FakeMicCapture()
+        p._pitch = _BusyFakePitchPipeline(on_frame=p._on_pitch_frame)
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+
+        start = time.monotonic()
+        p.set_force_cpu(True)
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 1.0, (
+            f"set_force_cpu() took {elapsed:.2f}s — looks like it held the "
+            "lock across PitchPipeline.stop()'s thread.join() (#425)"
+        )
+        # Hot-swap still completed correctly: new hardware built & running,
+        # PLAYING state restored.
+        assert p.state == PlaybackState.PLAYING
+        assert p.force_cpu is True
+        assert isinstance(p._pitch, _BusyFakePitchPipeline)
+        assert p._pitch.started is True
+        assert p._capture.started is True
+
+    def test_concurrent_stop_calls_are_idempotent_and_do_not_hang(self, monkeypatch):
+        """Two/more racing stop() calls must serialize safely, not double-teardown or hang."""
+        # No module-level patching needed — see comment in the single-call
+        # stop() test above.
+        p = self._pipeline()
+        p._capture = _FakeMicCapture()
+        p._pitch = _BusyFakePitchPipeline(on_frame=p._on_pitch_frame)
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+
+        callers = [threading.Thread(target=p.stop) for _ in range(4)]
+        start = time.monotonic()
+        for t in callers:
+            t.start()
+        for t in callers:
+            t.join(timeout=5.0)
+        elapsed = time.monotonic() - start
+
+        assert all(not t.is_alive() for t in callers), "a racing stop() call hung"
+        # Only the winner actually tears down real hardware; the rest see
+        # STOPPED and no-op. Total time should be roughly one teardown, not
+        # 4x (which would suggest redundant/serialized-but-slow teardowns)
+        # or the multi-second stalls #425 describes.
+        assert elapsed < 3.0
+        assert p.state == PlaybackState.STOPPED
+
+    def test_stop_then_set_force_cpu_race_does_not_resurrect_stopped_pipeline(
+        self, monkeypatch
+    ):
+        """
+        A racing stop() + set_force_cpu(True) must converge to STOPPED
+        either way `_lifecycle_lock` happens to order them:
+          - stop() first: set_force_cpu() then reads state == STOPPED, so
+            its `was_running` check is False and it skips the rebuild
+            entirely (just updates the force_cpu flag/engine choice).
+          - set_force_cpu() first: it fully rebuilds and restores PLAYING,
+            but stop() (still pending on `_lifecycle_lock`) then runs and
+            tears that freshly-rebuilt hardware straight back down.
+        Without `_lifecycle_lock` serializing the two full sequences, the
+        second interleaving could instead resurrect hardware after stop()
+        "won" — leaking the orphaned MicCapture stream/PitchPipeline thread
+        and leaving state PLAYING when a client just asked to stop.
+        """
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        _patch_pipeline_hardware_busy(monkeypatch)
+
+        p = self._pipeline()
+        p._capture = _FakeMicCapture()
+        p._pitch = _BusyFakePitchPipeline(on_frame=p._on_pitch_frame)
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+
+        def _call_stop():
+            p.stop()
+
+        def _call_force_cpu():
+            p.set_force_cpu(True)
+
+        t_stop = threading.Thread(target=_call_stop)
+        t_force = threading.Thread(target=_call_force_cpu)
+        t_stop.start()
+        t_force.start()
+        t_stop.join(timeout=5.0)
+        t_force.join(timeout=5.0)
+
+        assert not t_stop.is_alive()
+        assert not t_force.is_alive()
+        # Both interleavings converge here — see docstring above.
+        assert p.state == PlaybackState.STOPPED
+        assert p._capture is None
+        assert p._pitch is None
 
 
 # ── Frame fan-out ─────────────────────────────────────────────────────────────

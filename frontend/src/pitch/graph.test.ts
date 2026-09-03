@@ -12,6 +12,7 @@ import {
   traceLineDash,
 } from './graph';
 import { classifyGraphTraceColor, centsError, GRAPH_IN_TUNE_CENTS } from './graph-colors';
+import { MIN_CONFIDENCE_FOR_DOT } from './accuracy';
 
 
 
@@ -54,6 +55,28 @@ describe('graph color classification', () => {
     expect(classifyGraphTraceColor(60.5, 60)).toBe('green');
     expect(classifyGraphTraceColor(60.51, 60)).toBe('red');
     expect(Math.round(centsError(60.51, 60))).toBe(51);
+  });
+
+  // Issue #433: PitchGraphCanvas.pushFrame had no independent confidence
+  // gate, so a future backend regression that let sub-threshold frames
+  // through (docs/sync-protocol.md says the backend drops conf < 0.6 before
+  // dispatch) would render as a clean, confident-looking green/red line
+  // instead of being flagged like the overlay dot and diagnostics panel are.
+  it('gates a low-confidence frame to grey even when the pitch is dead-on (issue #433)', () => {
+    expect(classifyGraphTraceColor(60, 60, MIN_CONFIDENCE_FOR_DOT - 0.01)).toBe('grey');
+  });
+
+  it('does not gate a frame right at the confidence threshold', () => {
+    expect(classifyGraphTraceColor(60, 60, MIN_CONFIDENCE_FOR_DOT)).toBe('green');
+  });
+
+  it('accepts a custom confidence threshold, matching PitchInterpreter/StablePitchTracker', () => {
+    expect(classifyGraphTraceColor(60, 60, 0.74, 0.75)).toBe('grey');
+    expect(classifyGraphTraceColor(60, 60, 0.75, 0.75)).toBe('green');
+  });
+
+  it('defaults conf to full confidence so existing pitch-only callers are unaffected', () => {
+    expect(classifyGraphTraceColor(60.5, 60)).toBe('green');
   });
 });
 

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ScoreSession } from '../../services/score-session';
 
-const getSessionMock = vi.fn<[], ScoreSession | null>(() => null);
+const getSessionMock = vi.fn<() => ScoreSession | null>(() => null);
 const onScoreLoadedHandlers: Array<() => void> = [];
 const onScoreClearedHandlers: Array<() => void> = [];
 

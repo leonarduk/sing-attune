@@ -146,11 +146,13 @@ export class PitchGraphCanvas {
   }
 
   pushFrame(frame: PitchFrame, expectedMidi: number | null): void {
+    // frame.conf gates the trace color to grey below MIN_CONFIDENCE_FOR_DOT,
+    // same as the overlay dot and diagnostics panel — see classifyGraphTraceColor.
     this.samples.push({
       tSec: frame.t / 1000,
       midi: frame.midi,
       expectedMidi,
-      color: classifyGraphTraceColor(frame.midi, expectedMidi),
+      color: classifyGraphTraceColor(frame.midi, expectedMidi, frame.conf),
     });
   }
 

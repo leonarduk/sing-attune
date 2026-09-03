@@ -9,7 +9,7 @@
 - One branch per issue: `feature/dayN-short-description`
 - **Always create the branch from the GitHub issue** using `gh issue develop`:
   ```
-  gh issue develop <N> --checkout --branch feature/dayN-short-description
+  gh issue develop <N> --checkout --name feature/dayN-short-description
   ```
   This links the branch to the issue on GitHub automatically.
 - If `gh` is unavailable, create manually then link explicitly:
@@ -160,22 +160,35 @@ Every PR runs `.github/workflows/pr-review.yml`:
 |-----|-------------|
 | `lint` | `ruff check backend/` — fails on any violation |
 | `test` | `pytest` with CPU torch + libportaudio2 — hardware tests auto-skipped |
-| `ai-review` | Calls Claude API, posts review comment against linked issue ACs |
 
-The AI review is advisory. `lint` and `test` are blocking.
+`lint` and `test` are blocking.
+
+A separate set of workflows runs on every PR as well: `gpt-pr-review.yml` /
+`deepseek-pr-review.yml` (AI review against the linked issue's ACs, advisory),
+`codeql.yml` (static analysis), `workflow-lint.yml` (actionlint, advisory),
+`dependency-review.yml` (fails on new high-severity advisories), and
+`pr-lint.yml` (requires an issue reference in the PR body). See
+`.github/workflows/` for the current set.
 
 ## Python environment
 
 ```powershell
-# Install core deps (includes ruff as a dev dependency)
+# Install core deps (includes ruff as a dev dependency) — no torch, librosa pYIN only
 uv sync
 
-# Install PyTorch (CUDA 12.8 — compatible with CUDA 12.9 runtime)
-uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+# Or with the GPU pitch engine (CUDA 12.8 — compatible with CUDA 12.9 runtime):
+uv sync --extra cu128
 
-# Install torchcrepe (pitch engine)
-uv pip install torchcrepe
+# Or CPU-only torch/torchcrepe instead of the GPU extra:
+uv sync --extra cpu
 ```
+
+`torch`/`torchaudio`/`torchcrepe` are declared in `pyproject.toml` under the
+`cpu`/`cu128` optional-dependency extras (mutually exclusive — see
+`[tool.uv.conflicts]`), sourced from PyTorch's own wheel indexes via
+`[tool.uv.sources]`/`[tool.uv.index]`. Both variants are pinned and hashed in
+`uv.lock`, so `uv sync --extra <cpu|cu128> --locked` is fully reproducible —
+no separate manually-pinned `uv pip install` step needed.
 
 ## Running the backend
 

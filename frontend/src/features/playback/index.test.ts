@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ScoreSession } from '../../services/score-session';
 import type { StatusTone } from '../../services/status';
 
-const setAppStatusMock = vi.fn<[message: string, tone?: StatusTone], void>();
-const getSessionMock = vi.fn<[], ScoreSession | null>(() => null);
-const ensureAudioPreflightReadyMock = vi.fn<[], Promise<boolean>>(async () => true);
+const setAppStatusMock = vi.fn<(message: string, tone?: StatusTone) => void>();
+const getSessionMock = vi.fn<() => ScoreSession | null>(() => null);
+const ensureAudioPreflightReadyMock = vi.fn<() => Promise<boolean>>(async () => true);
 
 vi.mock('../../services/score-session', () => ({
   getSession: () => getSessionMock(),

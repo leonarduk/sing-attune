@@ -8,12 +8,18 @@ Test scores (in musescore/):
   homeward_bound-PART_II.mxl  — Part II only (MuseScore export)
 """
 
+import zipfile
 from pathlib import Path
 
 import pytest
 from music21 import bar, converter, meter, note, repeat, stream
 
-from backend.score.parser import _expand_repeats, _normalize_part_name, parse_musicxml
+from backend.score.parser import (
+    _expand_repeats,
+    _get_xml_content,
+    _normalize_part_name,
+    parse_musicxml,
+)
 from backend.score.model import ScoreModel
 from backend.score.timeline import Timeline
 
@@ -233,6 +239,158 @@ class TestParserErrors:
         with pytest.raises(ValueError):
             parse_musicxml(bad)
 
+    def test_malformed_tempo_mark_fallback_xml_raises_value_error(self, tmp_path):
+        """
+        A .mxl that music21 parses successfully (no tempo/metronome mark) but
+        whose raw-XML tempo-mark fallback (_get_xml_content + ET.fromstring
+        in _extract_tempo_marks) hits a malformed entry must raise ValueError,
+        not let xml.etree.ElementTree.ParseError propagate uncaught — that
+        used to surface as a bare 500 from POST /score instead of a 422.
+
+        The fixture exploits a real divergence between two "which .xml is the
+        real one" heuristics operating on the same archive: _get_xml_content
+        trusts META-INF/container.xml's declared rootfile when present (issue
+        #528), while music21's own ArchiveManager never actually reads
+        container.xml — despite a comment in its source claiming it does — and
+        always falls back to picking the first non-META-INF entry with a
+        recognised MusicXML suffix, in archive order. So a container.xml that
+        (wrongly) declares the malformed entry as the rootfile, while the good
+        entry still sorts first by the suffix heuristic, makes music21 parse
+        the good entry successfully while our own fallback reads the malformed
+        one it was pointed at. See issues #429 and #538.
+        """
+        score = stream.Score()
+        part = stream.Part()
+        part.partName = "Test Part"
+        part.append(meter.TimeSignature("4/4"))
+        measure = stream.Measure(number=1)
+        measure.append(note.Note("C4", quarterLength=4))
+        part.append(measure)
+        score.append(part)
+
+        good_xml_path = tmp_path / "good.musicxml"
+        score.write("musicxml", fp=good_xml_path)
+        good_xml_text = good_xml_path.read_text(encoding="utf-8")
+
+        mxl_path = tmp_path / "malformed_tempo.mxl"
+        with zipfile.ZipFile(mxl_path, "w") as zf:
+            zf.writestr(
+                "META-INF/container.xml",
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<container><rootfiles><rootfile full-path="malformed.xml"/></rootfiles></container>',
+            )
+            # music21's ArchiveManager ignores container.xml and uses its own
+            # suffix heuristic instead, so it parses this entry: the first
+            # non-META-INF member with a recognised MusicXML suffix in archive order.
+            zf.writestr("good.musicxml", good_xml_text)
+            # _get_xml_content trusts container.xml's declared rootfile above, so
+            # it reads this deliberately-broken sibling for the tempo-mark fallback
+            # scan instead of the good entry music21 just parsed.
+            zf.writestr("malformed.xml", '<score-partwise><part id="P1"><note><unclosed></measure></part>')
+
+        with pytest.raises(ValueError, match="tempo marks"):
+            parse_musicxml(mxl_path)
+
+
+# ---------------------------------------------------------------------------
+# .mxl archive-member selection
+#
+# music21's own ArchiveManager._extractContents uses a suffix heuristic
+# (.musicxml/.xml/.mxl, skipping META-INF) that used to be a strict superset
+# of _get_xml_content's (exact ".xml" only). A single .mxl with more than one
+# candidate entry could therefore make music21 parse one member while our
+# raw-XML tempo-mark fallback (_extract_tempo_marks -> _get_xml_content)
+# silently scanned a different one — see issue #528, and #449, which
+# exploited exactly this divergence as a test fixture for issue #429.
+# ---------------------------------------------------------------------------
+
+def _build_mxl(tmp_path: Path, filename: str, entries: dict[str, str]) -> Path:
+    """Build a .mxl archive at tmp_path/filename from {member_name: text} entries."""
+    mxl_path = tmp_path / filename
+    with zipfile.ZipFile(mxl_path, "w") as zf:
+        for name, content in entries.items():
+            zf.writestr(name, content)
+    return mxl_path
+
+
+class TestGetXmlContentArchiveMemberSelection:
+
+    def test_recognises_musicxml_suffix_like_music21(self, tmp_path):
+        # ".musicxml" does not end with the literal substring ".xml", so the
+        # old `name.endswith(".xml")` check missed entries like this one even
+        # though music21's ArchiveManager accepts them.
+        mxl_path = _build_mxl(tmp_path, "score.mxl", {
+            "score.musicxml": '<sound tempo="99"/>',
+        })
+        assert _get_xml_content(mxl_path) == '<sound tempo="99"/>'
+
+    def test_prefers_container_xml_rootfile_over_heuristic_first_match(self, tmp_path):
+        mxl_path = _build_mxl(tmp_path, "score.mxl", {
+            "META-INF/container.xml": (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                "<container><rootfiles>"
+                '<rootfile full-path="b.xml"/>'
+                "</rootfiles></container>"
+            ),
+            "a.xml": "<heuristic-pick/>",  # written first: what the suffix heuristic alone would pick
+            "b.xml": "<container-pick/>",  # declared by container.xml: must win
+        })
+        assert _get_xml_content(mxl_path) == "<container-pick/>"
+
+    def test_resolves_rootfile_when_container_xml_declares_the_ocf_namespace(self, tmp_path):
+        # Real .mxl files from Finale/Sibelius etc. commonly declare the OCF
+        # container namespace (MuseScore's own exports, e.g. the
+        # homeward_bound fixtures, happen not to). ElementTree's "{*}"
+        # wildcard tag match (stdlib since Python 3.8) is what lets
+        # _resolve_container_rootfile see through that namespace instead of
+        # silently falling back to the heuristic.
+        mxl_path = _build_mxl(tmp_path, "score.mxl", {
+            "META-INF/container.xml": (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+                "<rootfiles>"
+                '<rootfile full-path="real.xml" media-type="application/vnd.recordare.musicxml+xml"/>'
+                "</rootfiles></container>"
+            ),
+            "real.xml": '<sound tempo="123"/>',
+            "decoy.xml": '<sound tempo="999"/>',
+        })
+        assert _get_xml_content(mxl_path) == '<sound tempo="123"/>'
+
+    def test_falls_back_to_heuristic_when_container_xml_rootfile_is_missing(self, tmp_path):
+        mxl_path = _build_mxl(tmp_path, "score.mxl", {
+            "META-INF/container.xml": (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                "<container><rootfiles>"
+                '<rootfile full-path="does-not-exist.xml"/>'
+                "</rootfiles></container>"
+            ),
+            "a.xml": "<heuristic-pick/>",
+        })
+        assert _get_xml_content(mxl_path) == "<heuristic-pick/>"
+
+    def test_agrees_with_music21_archive_manager_on_multi_entry_mxl(self, tmp_path):
+        """
+        Reproduces the exact shape of the divergence #449 exploited: one
+        .musicxml-suffixed entry and one .xml-suffixed sibling in the same
+        archive, with container.xml declaring the .musicxml entry canonical.
+        music21's own ArchiveManager and _get_xml_content must resolve to
+        the same member.
+        """
+        mxl_path = _build_mxl(tmp_path, "score.mxl", {
+            "META-INF/container.xml": (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                "<container><rootfiles>"
+                '<rootfile full-path="good.musicxml"/>'
+                "</rootfiles></container>"
+            ),
+            "good.musicxml": '<sound tempo="72"/>',
+            "sibling.xml": '<sound tempo="200"/>',
+        })
+
+        music21_content = converter.ArchiveManager(mxl_path).getData(dataFormat="musicxml")
+        assert _get_xml_content(mxl_path) == music21_content
+
 
 class TestRepeatExpansion:
 
@@ -361,6 +519,53 @@ class TestRepeatExpansion:
         expanded_pitches = [n.pitch.nameWithOctave for n in expanded.parts[0].flatten().notes]
         assert expanded_pitches == ["C4", "D4", "E4", "F4", "C4", "D4", "E4", "G4", "A4"]
         assert expanded.duration.quarterLength == pytest.approx(36.0)
+
+
+# ---------------------------------------------------------------------------
+# Note.midi precision (issue #431)
+#
+# Note.midi's docstring in model.py explains that it is always a whole
+# semitone value: music21's Pitch.midi accessor rounds to the nearest
+# integer semitone even for genuinely microtonal accidentals (fractional
+# precision lives on Pitch.ps, which does survive a MusicXML round-trip —
+# see the ps=60.5 assertion below). This test locks in that documented
+# behaviour end-to-end through parse_musicxml so a future change cannot
+# silently make the docstring inaccurate again.
+# ---------------------------------------------------------------------------
+
+class TestMicrotonalPitchTruncation:
+
+    def test_quarter_tone_note_yields_whole_semitone_midi(self, tmp_path):
+        score = stream.Score()
+        part = stream.Part()
+        part.partName = "Test Part"
+        part.append(meter.TimeSignature("4/4"))
+
+        m1 = stream.Measure(number=1)
+        # C4 raised a quarter tone (half-sharp accidental): pitch.ps == 60.5,
+        # a genuinely microtonal (non-integer) pitch-space value.
+        microtonal_note = note.Note("C~4", quarterLength=4)
+        assert microtonal_note.pitch.ps == pytest.approx(60.5)
+        m1.append(microtonal_note)
+        part.append(m1)
+        score.append(part)
+
+        path = tmp_path / "quarter_tone.musicxml"
+        score.write("musicxml", fp=path)
+
+        # Confirm MusicXML itself preserves the fractional pitch space after
+        # a round-trip — the microtonal detail is not lost by the file format.
+        reloaded = converter.parse(str(path))
+        reloaded_pitch = reloaded.parts[0].flatten().notes[0].pitch
+        assert reloaded_pitch.ps == pytest.approx(60.5)
+
+        parsed = parse_musicxml(path)
+
+        assert len(parsed.notes) == 1
+        # Rounded from ps=60.5 by music21's Pitch.midi, then int()-cast by
+        # _make_note — Note.midi cannot carry the microtonal detail today.
+        assert parsed.notes[0].midi == 61
+        assert parsed.notes[0].midi == int(parsed.notes[0].midi)
 
 
 # ---------------------------------------------------------------------------
