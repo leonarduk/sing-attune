@@ -160,9 +160,15 @@ Every PR runs `.github/workflows/pr-review.yml`:
 |-----|-------------|
 | `lint` | `ruff check backend/` — fails on any violation |
 | `test` | `pytest` with CPU torch + libportaudio2 — hardware tests auto-skipped |
-| `ai-review` | Calls Claude API, posts review comment against linked issue ACs |
 
-The AI review is advisory. `lint` and `test` are blocking.
+`lint` and `test` are blocking.
+
+A separate set of workflows runs on every PR as well: `gpt-pr-review.yml` /
+`deepseek-pr-review.yml` (AI review against the linked issue's ACs, advisory),
+`codeql.yml` (static analysis), `workflow-lint.yml` (actionlint, advisory),
+`dependency-review.yml` (fails on new high-severity advisories), and
+`pr-lint.yml` (requires an issue reference in the PR body). See
+`.github/workflows/` for the current set.
 
 ## Python environment
 
