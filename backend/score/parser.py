@@ -210,9 +210,11 @@ def _get_xml_content(path: Path) -> str | None:
     if path.suffix.lower() == ".mxl":
         try:
             with zipfile.ZipFile(path) as zf:
-                for name in zf.namelist():
-                    if name.endswith(".xml") and not name.startswith("META-INF"):
-                        return zf.read(name).decode("utf-8")
+                names = zf.namelist()
+                member = _resolve_container_rootfile(zf, names) or _first_musicxml_member(names)
+                if member is None:
+                    return None
+                return zf.read(member).decode("utf-8")
         except Exception:
             return None
     else:
@@ -220,4 +222,51 @@ def _get_xml_content(path: Path) -> str | None:
             return path.read_text(encoding="utf-8")
         except Exception:
             return None
+    return None
+
+
+# music21's own ArchiveManager._extractContents accepts these suffixes (plus a
+# literal ".xml" filename, which already satisfies str.endswith(".xml") below).
+# Keeping this list in sync avoids the two implementations picking different
+# archive members from the same .mxl — see issue #528.
+_MUSICXML_SUFFIXES = (".musicxml", ".xml", ".mxl")
+
+
+def _resolve_container_rootfile(zf: zipfile.ZipFile, names: list[str]) -> str | None:
+    """
+    Resolve the canonical archive member via META-INF/container.xml's
+    <rootfile full-path="..."/>, per the OCF container spec .mxl follows.
+
+    music21's ArchiveManager has a comment claiming it does this but its
+    actual implementation never reads container.xml — it always uses the
+    suffix heuristic in _first_musicxml_member. Reading the manifest here is
+    the spec-correct choice and, when it agrees with the heuristic (the
+    common case), keeps our raw-XML fallback and music21's own parse
+    reading the same member. See issue #528.
+    """
+    if "META-INF/container.xml" not in names:
+        return None
+    try:
+        container = ET.fromstring(zf.read("META-INF/container.xml"))
+    except Exception:
+        return None
+    rootfile = container.find(".//{*}rootfile[@full-path]")
+    if rootfile is None:
+        return None
+    full_path = rootfile.get("full-path")
+    return full_path if full_path in names else None
+
+
+def _first_musicxml_member(names: list[str]) -> str | None:
+    """
+    Fallback heuristic when no usable container.xml manifest is present.
+
+    Mirrors music21's ArchiveManager._extractContents: first non-META-INF
+    entry with a recognised MusicXML suffix, in archive order.
+    """
+    for name in names:
+        if "META-INF" in name:
+            continue
+        if name.endswith(_MUSICXML_SUFFIXES):
+            return name
     return None
