@@ -626,8 +626,20 @@ class TestAutomaticCpuFallback:
             for _ in range(_MAX_CONSECUTIVE_TORCHCREPE_FAILURES + 2):
                 failing_pitch.push(np.zeros(2048, dtype=np.float32))
 
-            assert self._wait_until(lambda: p.force_cpu is True)
-            assert self._wait_until(lambda: p.runtime_info.engine == Engine.PYIN)
+            # Unlike other _wait_until callers, the predicate here waits on
+            # set_force_cpu()'s full teardown+rebuild (see
+            # _on_pitch_engine_failure), which includes a blocking
+            # thread.join(timeout=2.0) on the old pitch worker. Under the
+            # CPU load of the full suite (~370 tests: librosa/numba JIT,
+            # matplotlib, ...) that can approach or exceed the default 3s
+            # budget even though nothing is actually stuck — observed once
+            # locally as a flaky failure (issue #625). Give this specific
+            # assertion more patience rather than raising the shared
+            # default, which would also slow down failure detection for
+            # the STOPPED-pipeline case in test_on_pitch_engine_failure_
+            # calls_set_force_cpu (no hardware to tear down there).
+            assert self._wait_until(lambda: p.force_cpu is True, timeout=10.0)
+            assert self._wait_until(lambda: p.runtime_info.engine == Engine.PYIN, timeout=10.0)
             assert p.runtime_info.mode == "forced_cpu"
             # A brand new PitchPipeline was swapped in — confirm it's the CPU engine.
             assert p._pitch is not failing_pitch
