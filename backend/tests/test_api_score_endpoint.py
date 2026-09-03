@@ -162,13 +162,18 @@ def _build_malformed_tempo_mark_mxl(tmp_path: Path) -> bytes:
     entry.
 
     This exploits a real divergence between the two archive-member "which
-    .xml is the real one" heuristics: music21's ArchiveManager accepts a
-    `.musicxml`-suffixed entry when picking the file to parse, while
-    parser._get_xml_content only matches entries ending in exactly ".xml" —
-    so, given both suffixes in one archive, they genuinely pick different
-    members. The score itself has no tempo/metronome mark, so parsing it
-    falls through to the raw-XML fallback and lands on the malformed member.
-    See issue #429.
+    .xml is the real one" heuristics: _get_xml_content trusts
+    META-INF/container.xml's declared rootfile when present (issue #528),
+    while music21's own ArchiveManager never actually reads container.xml —
+    despite a comment in its source claiming it does — and always falls back
+    to picking the first non-META-INF entry with a recognised MusicXML
+    suffix, in archive order. So a container.xml that (wrongly) declares the
+    malformed entry as the rootfile, while the good entry still sorts first
+    by the suffix heuristic, makes music21 parse the good entry successfully
+    while our own fallback reads the malformed one it was pointed at. The
+    score itself has no tempo/metronome mark, so parsing it falls through to
+    the raw-XML fallback and lands on the malformed member. See issues #429
+    and #538.
     """
     score = stream.Score()
     part = stream.Part()
@@ -188,12 +193,15 @@ def _build_malformed_tempo_mark_mxl(tmp_path: Path) -> bytes:
         zf.writestr(
             "META-INF/container.xml",
             '<?xml version="1.0" encoding="UTF-8"?>'
-            '<container><rootfiles><rootfile full-path="good.musicxml"/></rootfiles></container>',
+            '<container><rootfiles><rootfile full-path="malformed.xml"/></rootfiles></container>',
         )
-        # music21 accepts ".musicxml" as a candidate root file, so it parses this one.
+        # music21's ArchiveManager ignores container.xml and uses its own
+        # suffix heuristic instead, so it parses this entry: the first
+        # non-META-INF member with a recognised MusicXML suffix in archive order.
         zf.writestr("good.musicxml", good_xml_text)
-        # _get_xml_content only matches names ending in exactly ".xml", so it
-        # picks this deliberately-broken sibling for the tempo-mark fallback scan.
+        # _get_xml_content trusts container.xml's declared rootfile above, so
+        # it reads this deliberately-broken sibling for the tempo-mark fallback
+        # scan instead of the good entry music21 just parsed.
         zf.writestr("malformed.xml", '<score-partwise><part id="P1"><note><unclosed></measure></part>')
     return buf.getvalue()
 

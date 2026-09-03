@@ -656,8 +656,8 @@ class TestStartFailureCleanup:
         pitch_instances = []
 
         class _RecordingPitch(_FakePitchPipeline):
-            def __init__(self, engine=None, on_frame=None):
-                super().__init__(engine=engine, on_frame=on_frame)
+            def __init__(self, engine=None, on_frame=None, on_engine_failure=None):
+                super().__init__(engine=engine, on_frame=on_frame, on_engine_failure=on_engine_failure)
                 pitch_instances.append(self)
 
         class _FailingCapture(_FakeMicCapture):
@@ -724,8 +724,8 @@ class TestStartFailureCleanup:
         pitch_instances = []
 
         class _RecordingPitch(_FakePitchPipeline):
-            def __init__(self, engine=None, on_frame=None):
-                super().__init__(engine=engine, on_frame=on_frame)
+            def __init__(self, engine=None, on_frame=None, on_engine_failure=None):
+                super().__init__(engine=engine, on_frame=on_frame, on_engine_failure=on_engine_failure)
                 pitch_instances.append(self)
 
         class _DeviceGatedCapture(_FakeMicCapture):
