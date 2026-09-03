@@ -9,7 +9,7 @@
 - One branch per issue: `feature/dayN-short-description`
 - **Always create the branch from the GitHub issue** using `gh issue develop`:
   ```
-  gh issue develop <N> --checkout --branch feature/dayN-short-description
+  gh issue develop <N> --checkout --name feature/dayN-short-description
   ```
   This links the branch to the issue on GitHub automatically.
 - If `gh` is unavailable, create manually then link explicitly:
