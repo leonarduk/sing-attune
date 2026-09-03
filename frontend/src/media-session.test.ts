@@ -30,7 +30,9 @@ describe('media-session', () => {
         actionHandlers.set(action, handler);
       }),
     };
-    const mediaMetadataCtor = vi.fn((meta) => meta);
+    const mediaMetadataCtor = vi.fn(function (meta) {
+      return meta;
+    });
 
     vi.stubGlobal('navigator', { mediaSession });
     vi.stubGlobal('MediaMetadata', mediaMetadataCtor);

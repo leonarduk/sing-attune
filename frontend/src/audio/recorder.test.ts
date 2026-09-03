@@ -92,7 +92,16 @@ describe('PracticeRecorder', () => {
     URL.revokeObjectURL = vi.fn();
 
     const play = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal('Audio', vi.fn(() => ({ play })));
+    const pause = vi.fn();
+    const removeAttribute = vi.fn();
+    const load = vi.fn();
+    // A named function (not an arrow function) so `new Audio()` works under jsdom/vitest.
+    vi.stubGlobal(
+      'Audio',
+      vi.fn(function Audio() {
+        return { play, pause, removeAttribute, load, src: '' };
+      }),
+    );
 
     vi.stubGlobal('document', {
       body: { appendChild: vi.fn() },
@@ -105,10 +114,6 @@ describe('PracticeRecorder', () => {
         remove: vi.fn(),
       })),
     } as unknown as Document);
-    const pause = vi.fn();
-    const removeAttribute = vi.fn();
-    const load = vi.fn();
-    vi.stubGlobal('Audio', vi.fn(() => ({ play, pause, removeAttribute, load, src: '' })));
   });
 
   afterEach(() => {
