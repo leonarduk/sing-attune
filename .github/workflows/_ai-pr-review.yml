@@ -140,10 +140,29 @@ jobs:
           ISSUE_BODY: ${{ steps.issue.outputs.body }}
         run: |
           git fetch origin "$BASE_REF"
+          # review_diff's built-in DEFAULT_GLOBS has no *.ts/*.js entry at all, so
+          # on a frontend-only change its `git diff -- <globs>` matches none of
+          # the actual TypeScript, leaving the reviewer a diff of only whatever
+          # *.md/*.py files happen to be in the same PR -- which then (reasonably,
+          # given what it was actually shown) reads as the referenced code not
+          # existing. PR #510 hit exactly this: DeepSeek reported a real,
+          # 351-line frontend/e2e/real-backend.spec.ts as "not present in this
+          # diff" solely because the glob filter silently dropped it, leaving
+          # only docs/integration-test-plan.md. Verified locally: `git diff
+          # origin/main...HEAD -- <DEFAULT_GLOBS>` shows only the .md file;
+          # adding the frontend extensions below picks up both. Pass
+          # review_diff's own defaults back explicitly, plus this repo's
+          # frontend/ stack (AGENTS.md/CLAUDE.md: Vite + TypeScript, no JSX/CSS
+          # frameworks in use yet, but harmless to cover), so the diff sent to
+          # every AI reviewer actually includes frontend code.
           DIFF=$(python3 -m cicaid_devtools.lib.review_diff \
             --base-ref "$BASE_REF" \
             --pr-title "$PR_TITLE" \
-            --issue-body "$ISSUE_BODY")
+            --issue-body "$ISSUE_BODY" \
+            -- \
+            '*.py' '*.toml' '*.md' '*.yml' '*.yaml' '*.sh' '*.cfg' '*.ini' 'Dockerfile' \
+            '*.java' '*.xml' '*.properties' '*.ps1' '*.txt' \
+            '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.cjs' '*.json' '*.html' '*.css')
           DELIM="EOF_$(uuidgen | tr -d '-')"
           {
             echo "diff<<$DELIM"

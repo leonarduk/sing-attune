@@ -1,5 +1,24 @@
 # sing-attune Integration Test Plan (AI-Executable)
 
+## Automation status (issue #439)
+
+Originally this whole plan was a manual-only checklist — the one Playwright
+spec (`frontend/e2e/app.spec.ts`) mocked every backend route, so none of it
+ran against a real backend. `frontend/e2e/real-backend.spec.ts` now
+automates the foundational slice that doesn't need a synthetic-audio
+injection harness:
+
+- **IT-001**, **IT-002**, and the connection-handshake part of **IT-003**
+  (up to and including the `{"status":"connected"}` message) — automated.
+- **IT-005** — automated for the single-part case only; multi-part /
+  accompaniment-filtering behaviour is still manual (see the scenario below).
+- **IT-011** — the latency budget is covered separately, in
+  `backend/tests/test_integration.py`, not by a Playwright spec.
+- Everything else below (the keepalive/close part of IT-003, IT-004,
+  IT-006..IT-010) remains a manual AI-executable checklist, per the original
+  scope note under IT-007/IT-008/IT-009 needing synthetic audio injection.
+  Tracked as follow-up work under issue #439.
+
 ## Scope
 
 This plan defines deterministic integration scenarios that an AI agent can execute against a running sing-attune stack.
@@ -76,6 +95,7 @@ Required signals:
 
 - **Boundary:** backend process + `/health`
 - **hardware:** false
+- **Automated:** `frontend/e2e/real-backend.spec.ts` (test `IT-001: GET /health reports a healthy backend`)
 - **Preconditions:** backend process is running.
 
 ### Steps
@@ -97,6 +117,7 @@ Required signals:
 
 - **Boundary:** HTTP upload -> parser -> score model
 - **hardware:** false
+- **Automated:** `frontend/e2e/real-backend.spec.ts` (test `IT-002 + IT-003 (connect): ...`), via the real `#file-input` -> `/score` flow rather than a raw HTTP call.
 - **Preconditions:** fixture file exists.
 
 ### Steps
@@ -121,6 +142,7 @@ Required signals:
 
 - **Boundary:** WS handshake, status message, keepalive, shutdown
 - **hardware:** false
+- **Automated (partial):** `frontend/e2e/real-backend.spec.ts` covers only the handshake + `{"status":"connected"}` message (steps 1-2 below). Keepalive-ping-while-idle and clean shutdown (steps 3-4) are still manual.
 - **Preconditions:** backend running, WS endpoint reachable.
 
 ### Steps
@@ -168,6 +190,7 @@ Required signals:
 
 - **Boundary:** backend score parts -> frontend part options
 - **hardware:** false
+- **Automated (partial):** `frontend/e2e/real-backend.spec.ts` (test `IT-005: ...`) covers this against `frontend/e2e/fixtures/minimal.xml`, which has a single non-accompaniment part. The multi-part / accompaniment-toggle behaviour described below (steps 1-4, using `musescore/homeward_bound.mxl`) is still manual.
 - **Preconditions:** frontend loaded; score upload succeeds.
 
 ### Steps
