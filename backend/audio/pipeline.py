@@ -159,10 +159,18 @@ class PlaybackPipeline:
                 # leaked thread/stream (issue #424). _teardown_hardware()
                 # is a no-op for whichever side never started; unlike
                 # stop()/set_force_cpu() (#425) it's called here with
-                # self._lock still held, since capture never started and
-                # so never pushed a window for the pitch worker to still
-                # be processing — there's nothing that could be blocked
-                # wanting self._lock on the other side of this join.
+                # self._lock still held. That's only safe because nothing
+                # on the other side of PitchPipeline.stop()'s thread.join()
+                # could be blocked wanting self._lock: MicCapture.start()
+                # opens and starts the PortAudio stream *synchronously* —
+                # if it raises (the only way this except block is reached
+                # once self._pitch.start() has already succeeded), that
+                # stream's audio callback, the sole caller of
+                # pitch.push(), has never fired even once. The pitch
+                # worker's queue is therefore empty; it's idling on
+                # queue.get(), not inside _on_pitch_frame() wanting the
+                # lock. (Raised and confirmed during AI review of the
+                # #425/#446 merge, PR #472.)
                 self._teardown_hardware(self._capture, self._pitch)
                 self._capture = None
                 self._pitch = None
