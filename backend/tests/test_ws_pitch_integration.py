@@ -149,6 +149,55 @@ def test_fan_out_suppresses_exception_from_bad_queue() -> None:
     pipeline.remove_client(q)
 
 
+async def test_fan_out_logs_warning_when_client_queue_full(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """
+    Regression test for #428.
+
+    call_soon_threadsafe only *schedules* put_nowait — it does not run it
+    synchronously, so a try/except wrapped around the scheduling call can
+    never observe QueueFull raised when put_nowait actually executes on the
+    event loop. This drives a full client queue through the real
+    _fan_out_payload -> call_soon_threadsafe -> event loop path (no mocked
+    loop, no manually-invoked callback) and checks the intended log.warning
+    fires with no unhandled asyncio callback exception.
+    """
+    loop = asyncio.get_running_loop()
+    pipeline = PlaybackPipeline(engine=Engine.PYIN)
+    pipeline._loop = loop
+
+    unhandled: list[object] = []
+
+    def _record_unhandled(_loop: asyncio.AbstractEventLoop, context: dict) -> None:
+        unhandled.append(context.get("exception") or context.get("message"))
+
+    loop.set_exception_handler(_record_unhandled)
+
+    # maxsize=1 so the second injected frame deterministically overflows it.
+    q: asyncio.Queue = asyncio.Queue(maxsize=1)
+    pipeline.add_client(q)
+
+    caplog.set_level("WARNING")
+
+    pipeline.inject_frame(t_ms=1.0, midi=60.0, conf=0.9)
+    await asyncio.sleep(0)  # let the scheduled callback actually run
+    assert q.qsize() == 1, "First frame should have filled the queue"
+
+    pipeline.inject_frame(t_ms=2.0, midi=61.0, conf=0.9)
+    await asyncio.sleep(0)  # let the second callback hit QueueFull for real
+
+    pipeline.remove_client(q)
+
+    assert not unhandled, f"Unhandled exception(s) reached the event loop: {unhandled}"
+    assert any(
+        record.name == "backend.audio.pipeline"
+        and record.levelname == "WARNING"
+        and "WS client queue full" in record.message
+        for record in caplog.records
+    ), "Expected the QueueFull backpressure warning to be logged"
+
+
 def test_ws_pitch_logs_client_disconnect(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
