@@ -227,24 +227,75 @@ class TestPyinFallback:
         _infer_pyin(self._sine_wave(440.0), 0.0)  # must not raise
 
     def test_pyin_detects_a4(self):
-        """AC2: librosa pYIN should detect A4 (440 Hz)."""
+        """AC2: librosa pYIN should detect A4 (440 Hz).
+
+        Regression test for #426: with center=False fixed, a full 2048-sample
+        window of a pure tone must reliably resolve to a single high-confidence
+        frame — previously this silently tolerated `None`, which would not have
+        caught the center=True mis-framing bug.
+        """
         result = _infer_pyin(self._sine_wave(440.0), 0.0)
-        if result is not None:
-            assert abs(result.midi - 69.0) < 1.0
-            assert result.confidence >= CONFIDENCE_THRESHOLD
+        assert result is not None, "pYIN failed to detect a clean 440Hz tone"
+        assert abs(result.midi - 69.0) < 1.0
+        assert result.confidence >= CONFIDENCE_THRESHOLD
 
     def test_pyin_frame_has_correct_fields(self):
         result = _infer_pyin(self._sine_wave(440.0), 123.456)
-        if result is not None:
-            assert result.time_ms == 123.456
-            assert isinstance(result.midi, float)
-            assert isinstance(result.confidence, float)
+        assert result is not None, "pYIN failed to detect a clean 440Hz tone"
+        assert result.time_ms == 123.456
+        assert isinstance(result.midi, float)
+        assert isinstance(result.confidence, float)
 
     def test_pyin_confidence_at_least_threshold(self):
         """Any returned frame must meet the confidence threshold."""
         result = _infer_pyin(self._sine_wave(440.0), 0.0)
-        if result is not None:
-            assert result.confidence >= CONFIDENCE_THRESHOLD
+        assert result is not None, "pYIN failed to detect a clean 440Hz tone"
+        assert result.confidence >= CONFIDENCE_THRESHOLD
+
+    def test_pyin_engine_detects_a4_directly(self):
+        """
+        Same as test_pyin_detects_a4 but exercises PyinPitchEngine.estimate()
+        directly rather than through the pitch.py wrapper. _infer_pyin is a
+        one-line delegation to this method, so both paths already cover the
+        same code — this test pins the assertion to the actual class that
+        owns the librosa.pyin() call, in case that delegation ever changes.
+        """
+        engine = PyinPitchEngine()
+        result = engine.estimate(self._sine_wave(440.0), 0.0)
+        assert result is not None, "pYIN failed to detect a clean 440Hz tone"
+        assert abs(result.midi - 69.0) < 1.0
+        assert result.confidence >= CONFIDENCE_THRESHOLD
+
+    def test_pyin_engine_calls_librosa_with_center_false(self, monkeypatch):
+        """
+        Regression guard for #426: PyinPitchEngine.estimate must call
+        librosa.pyin with center=False. hop_length == frame_length == len(window)
+        is meant to yield exactly one frame; librosa's default center=True pads
+        the signal and silently returns 2 frames instead, with f0[0] centered on
+        sample 0 (half its context is padding, not audio). The accuracy tests
+        above can't fully pin this down — a synthetic stationary sine can still
+        score well even when mis-framed — so this asserts the actual kwarg
+        passed to librosa directly.
+        """
+        import librosa
+
+        captured_kwargs: dict = {}
+
+        def fake_pyin(window, **kwargs):
+            captured_kwargs.update(kwargs)
+            return (
+                np.array([440.0], dtype=np.float64),
+                np.array([True]),
+                np.array([0.9], dtype=np.float64),
+            )
+
+        monkeypatch.setattr(librosa, "pyin", fake_pyin)
+
+        engine = PyinPitchEngine()
+        result = engine.estimate(self._sine_wave(440.0), 0.0)
+
+        assert captured_kwargs.get("center") is False
+        assert result is not None
 
 
 # ── PitchPipeline ──────────────────────────────────────────────────────────────
