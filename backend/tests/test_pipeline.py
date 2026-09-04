@@ -626,20 +626,34 @@ class TestAutomaticCpuFallback:
             for _ in range(_MAX_CONSECUTIVE_TORCHCREPE_FAILURES + 2):
                 failing_pitch.push(np.zeros(2048, dtype=np.float32))
 
-            # Unlike other _wait_until callers, the predicate here waits on
-            # set_force_cpu()'s full teardown+rebuild (see
-            # _on_pitch_engine_failure), which includes a blocking
-            # thread.join(timeout=2.0) on the old pitch worker. Under the
-            # CPU load of the full suite (~370 tests: librosa/numba JIT,
-            # matplotlib, ...) that can approach or exceed the default 3s
-            # budget even though nothing is actually stuck — observed once
-            # locally as a flaky failure (issue #625). Give this specific
-            # assertion more patience rather than raising the shared
-            # default, which would also slow down failure detection for
-            # the STOPPED-pipeline case in test_on_pitch_engine_failure_
-            # calls_set_force_cpu (no hardware to tear down there).
+            # set_force_cpu() flips force_cpu/runtime_info *before* it tears
+            # down/rebuilds the hardware (see its own comments), so this
+            # wait is not gated by that rebuild -- it is gated by ordinary
+            # thread-scheduling/GIL-handoff latency in getting the freshly
+            # spawned "pitch-engine-fallback" thread (see
+            # _on_pitch_engine_failure) actually running. Confirmed by
+            # instrumenting both call sites: across repeated healthy runs
+            # this took anywhere from ~50ms to ~470ms end-to-end (a >9x
+            # spread from run to run with nothing else wrong), so the
+            # default 3s budget has too little headroom against a rare
+            # tail-latency spike -- observed once locally as a flaky
+            # failure (issue #625). Give this specific assertion more
+            # patience rather than raising the shared default, which would
+            # also slow down failure detection for the STOPPED-pipeline
+            # case in test_on_pitch_engine_failure_calls_set_force_cpu (no
+            # hardware to tear down there).
             assert self._wait_until(lambda: p.force_cpu is True, timeout=10.0)
-            assert self._wait_until(lambda: p.runtime_info.engine == Engine.PYIN, timeout=10.0)
+            # p._pitch is nulled out in the same locked block that flips
+            # force_cpu/runtime_info, *before* the rebuild that reassigns
+            # it -- so p._pitch can still legitimately be None right after
+            # the line above returns. Wait for the rebuild to finish too
+            # (not just the engine label) before touching p._pitch below,
+            # or this can intermittently raise AttributeError on
+            # 'NoneType' instead of the assertion actually being tested.
+            assert self._wait_until(
+                lambda: p._pitch is not None and p.runtime_info.engine == Engine.PYIN,
+                timeout=10.0,
+            )
             assert p.runtime_info.mode == "forced_cpu"
             # A brand new PitchPipeline was swapped in — confirm it's the CPU engine.
             assert p._pitch is not failing_pitch
