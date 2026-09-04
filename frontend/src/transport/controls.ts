@@ -1,5 +1,6 @@
 import { beatToSeconds } from '../playback/engine';
 import type { ScoreModel } from '../score/renderer';
+import { apiUrl } from '../services/backend';
 
 export interface PlaybackCommandResponse {
   state: string;
@@ -8,7 +9,7 @@ export interface PlaybackCommandResponse {
 }
 
 async function postPlaybackCommand(path: string): Promise<PlaybackCommandResponse> {
-  const res = await fetch(path, { method: 'POST' });
+  const res = await fetch(apiUrl(path), { method: 'POST' });
   if (!res.ok) throw new Error(`Playback command failed: ${path} (HTTP ${res.status})`);
   return await res.json() as PlaybackCommandResponse;
 }
@@ -27,7 +28,7 @@ export async function seekPlayback(tMs: number): Promise<PlaybackCommandResponse
 }
 
 export async function setPlaybackTempo(multiplier: number): Promise<void> {
-  const res = await fetch(`/playback/tempo?multiplier=${encodeURIComponent(multiplier.toFixed(3))}`, { method: 'POST' });
+  const res = await fetch(apiUrl(`/playback/tempo?multiplier=${encodeURIComponent(multiplier.toFixed(3))}`), { method: 'POST' });
   if (!res.ok) throw new Error(`Playback command failed: /playback/tempo (HTTP ${res.status})`);
 }
 
@@ -43,7 +44,7 @@ export async function setPlaybackTempo(multiplier: number): Promise<void> {
  */
 export async function setPlaybackTranspose(semitones: number): Promise<void> {
   const res = await fetch(
-    `/playback/transpose?semitones=${encodeURIComponent(Math.round(semitones))}`,
+    apiUrl(`/playback/transpose?semitones=${encodeURIComponent(Math.round(semitones))}`),
     { method: 'POST' },
   );
   if (!res.ok) throw new Error(`Playback command failed: /playback/transpose (HTTP ${res.status})`);

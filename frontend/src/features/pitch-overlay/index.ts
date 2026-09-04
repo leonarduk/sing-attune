@@ -17,7 +17,7 @@
  */
 import { onScoreLoaded, onScoreCleared, onPartChanged, getSession } from '../../services/score-session';
 import { onPlaybackSyncEvent } from '../../services/playback-sync';
-import { showErrorBanner } from '../../services/backend';
+import { showErrorBanner, apiUrl, wsUrl } from '../../services/backend';
 import { getFrameXPosition } from '../../services/cursor-projection';
 import { MIN_CONFIDENCE_THRESHOLD, PitchOverlay, type OverlaySettings } from '../../pitch/overlay';
 import { PitchGraphCanvas } from '../../pitch/graph';
@@ -347,8 +347,7 @@ function connectPitchSocket(): void {
   if (pitchReconnectTimer !== null) { window.clearTimeout(pitchReconnectTimer); pitchReconnectTimer = null; }
   if (pitchWs && (pitchWs.readyState === WebSocket.OPEN ||
                   pitchWs.readyState === WebSocket.CONNECTING)) return;
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  pitchWs = new WebSocket(`${protocol}://${window.location.host}/ws/pitch`);
+  pitchWs = new WebSocket(wsUrl('/ws/pitch'));
   pitchWs.onopen  = () => { pitchReconnectAttempts = 0; };
   pitchWs.onerror = () => { pitchWs?.close(); };
   pitchWs.onclose = () => {
@@ -460,7 +459,7 @@ async function refreshAudioSettings(
   settingsForceCpuEl: HTMLInputElement,
 ): Promise<void> {
   try {
-    const [devicesRes, engineRes] = await Promise.all([fetch('/audio/devices'), fetch('/audio/engine')]);
+    const [devicesRes, engineRes] = await Promise.all([fetch(apiUrl('/audio/devices')), fetch(apiUrl('/audio/engine'))]);
     if (!devicesRes.ok) throw new Error(`/audio/devices HTTP ${devicesRes.status}`);
     const devicesPayload = (await devicesRes.json()) as {
       default_device_id: number | null; devices: AudioInputDevice[];
@@ -726,7 +725,7 @@ function mount(_slot: HTMLElement): void {
   settingsForceCpuEl.addEventListener('change', async () => {
     try {
       const params = new URLSearchParams({ force_cpu: String(settingsForceCpuEl.checked) });
-      const res = await fetch(`/audio/engine/force-cpu?${params.toString()}`, { method: 'POST' });
+      const res = await fetch(apiUrl(`/audio/engine/force-cpu?${params.toString()}`), { method: 'POST' });
       if (!res.ok) throw new Error(`/audio/engine/force-cpu HTTP ${res.status}`);
       await refreshAudioSettings(settingsDeviceEl, settingsEngineEl, settingsCpuWarningEl, settingsForceCpuEl);
     } catch (err) {

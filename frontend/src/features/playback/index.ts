@@ -17,6 +17,7 @@
  */
 import { onPartChanged, onScoreCleared, onScoreLoaded, getSession } from '../../services/score-session';
 import { setAppStatus } from '../../services/status';
+import { apiUrl } from '../../services/backend';
 import { recordBeatSample, resetProjection, getCursorX } from '../../services/cursor-projection';
 import { finishPracticeSessionCapture, startPracticeSessionCapture } from '../../services/progress-history';
 import { emitPlaybackSyncEvent } from '../../services/playback-sync';
@@ -484,7 +485,7 @@ function mount(_slot: HTMLElement): void {
       if (summary) showSessionSummary(summary);
       const recorded = stopSessionRecording();
       if (recorded) {
-        const saveRes = await fetch('/session/save', {
+        const saveRes = await fetch(apiUrl('/session/save'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(recorded),
@@ -545,12 +546,12 @@ function mount(_slot: HTMLElement): void {
   });
 
   btnSessionReview?.addEventListener('click', async () => {
-    const res = await fetch('/session/list').catch(() => null);
+    const res = await fetch(apiUrl('/session/list')).catch(() => null);
     if (!res?.ok) return;
     const listPayload = (await res.json()) as { sessions: Array<{ id: string }> };
     const latest = listPayload.sessions[0];
     if (!latest) return;
-    const sessionRes = await fetch(`/session/${latest.id}`).catch(() => null);
+    const sessionRes = await fetch(apiUrl(`/session/${latest.id}`)).catch(() => null);
     if (!sessionRes?.ok) return;
     const sessionPayload = (await sessionRes.json()) as {
       frames: Array<{ t: number; midi: number; conf: number }>;
@@ -576,12 +577,12 @@ function mount(_slot: HTMLElement): void {
   });
 
   btnSessionCsv?.addEventListener('click', async () => {
-    const res = await fetch('/session/list').catch(() => null);
+    const res = await fetch(apiUrl('/session/list')).catch(() => null);
     if (!res?.ok) return;
     const listPayload = (await res.json()) as { sessions: Array<{ id: string }> };
     const latest = listPayload.sessions[0];
     if (!latest) return;
-    const sessionRes = await fetch(`/session/${latest.id}`).catch(() => null);
+    const sessionRes = await fetch(apiUrl(`/session/${latest.id}`)).catch(() => null);
     if (!sessionRes?.ok) return;
     const sessionPayload = (await sessionRes.json()) as {
       frames: Array<{ t: number; beat: number; midi: number | null; conf: number; expected_midi: number | null; measure: number | null }>;

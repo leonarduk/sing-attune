@@ -1,3 +1,5 @@
+import { apiUrl } from '../../services/backend';
+
 export interface TranscriptionResponse {
   musicxml: string;
   tempoBpm: number | null;
@@ -72,7 +74,7 @@ function parseSyncResponse(musicxml: string, headers: Headers): TranscriptionRes
 
 async function pollForResult(resultUrl: string): Promise<TranscriptionResponse> {
   for (let attempt = 0; attempt < DEFAULT_MAX_POLLS; attempt += 1) {
-    const response = await fetch(resultUrl);
+    const response = await fetch(apiUrl(resultUrl));
     if (!response.ok) {
       throw new Error(await extractError(response));
     }
@@ -107,7 +109,7 @@ export async function requestTranscription(file: File): Promise<TranscriptionRes
   const formData = new FormData();
   formData.append('file', file, file.name);
 
-  const response = await fetch(DEFAULT_TRANSCRIPTION_ENDPOINT, {
+  const response = await fetch(apiUrl(DEFAULT_TRANSCRIPTION_ENDPOINT), {
     method: 'POST',
     body: formData,
     headers: {

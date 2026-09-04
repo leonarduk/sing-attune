@@ -12,6 +12,7 @@
 import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { extractMeasureHitZones, type MeasureHitZone } from './click-seek';
 import { OsmdScoreCursor, type ScoreCursor } from './cursor';
+import { apiUrl } from '../services/backend';
 
 const OSMD_SKY_BOTTOM_LINE_WARNING = 'Not enough lines for SkyBottomLine calculation';
 
@@ -148,7 +149,7 @@ export class OsmdScoreRenderer implements ScoreRenderer {
     // Phase 1: backend parse
     const form = new FormData();
     form.append('file', file);
-    const resp = await fetch('/score', { method: 'POST', body: form });
+    const resp = await fetch(apiUrl('/score'), { method: 'POST', body: form });
     if (!resp.ok) {
       let detail: string;
       try {
