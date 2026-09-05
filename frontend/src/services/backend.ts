@@ -57,7 +57,10 @@ export function wsUrl(path: string): string {
   return `${protocol}://${window.location.host}${path}`;
 }
 
-const errorBannerEl = document.getElementById('error-banner') as HTMLDivElement;
+// Typed `| null` and guarded like its siblings below: an absent/renamed
+// #error-banner must degrade quietly instead of throwing on every
+// showErrorBanner()/clearErrorBanner() call (issue #440).
+const errorBannerEl = document.getElementById('error-banner') as HTMLDivElement | null;
 const errorBannerMessageEl = document.getElementById('error-banner-message') as HTMLSpanElement | null;
 const errorBannerActionEl = document.getElementById('error-banner-action') as HTMLButtonElement | null;
 const errorBannerDismissEl = document.getElementById('error-banner-dismiss') as HTMLButtonElement | null;
@@ -87,7 +90,7 @@ export function showErrorBanner(message: string, options: ShowErrorBannerOptions
 
   if (errorBannerMessageEl) {
     errorBannerMessageEl.textContent = message;
-  } else {
+  } else if (errorBannerEl) {
     errorBannerEl.textContent = message;
   }
 
@@ -106,13 +109,13 @@ export function showErrorBanner(message: string, options: ShowErrorBannerOptions
     }
   }
 
-  errorBannerEl.classList.add('visible');
+  errorBannerEl?.classList.add('visible');
 }
 
 export function clearErrorBanner(): void {
   if (errorBannerMessageEl) {
     errorBannerMessageEl.textContent = '';
-  } else {
+  } else if (errorBannerEl) {
     errorBannerEl.textContent = '';
   }
 
@@ -126,7 +129,7 @@ export function clearErrorBanner(): void {
   }
   errorBannerActionHandler = null;
 
-  errorBannerEl.classList.remove('visible');
+  errorBannerEl?.classList.remove('visible');
 }
 
 export async function checkBackend(): Promise<void> {

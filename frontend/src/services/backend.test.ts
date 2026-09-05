@@ -125,4 +125,15 @@ describe('backend error banner', () => {
       'Backend not available — please start the sing-attune backend on port 8000 and refresh.',
     );
   });
+
+  // Regression test for issue #440: errorBannerEl used to be grabbed with a
+  // non-null assertion and used unconditionally, so a missing/renamed
+  // #error-banner would throw on every call instead of degrading quietly.
+  it('does not throw when #error-banner is missing from the DOM', async () => {
+    document.body.innerHTML = '';
+    const backend = await import('./backend');
+
+    expect(() => backend.showErrorBanner('Backend down', { dismissible: true })).not.toThrow();
+    expect(() => backend.clearErrorBanner()).not.toThrow();
+  });
 });
