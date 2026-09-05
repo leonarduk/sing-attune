@@ -14,6 +14,15 @@ const DEFAULT_LATENCY_MS = 0;
 
 let openPreflightModal: (() => Promise<boolean>) | null = null;
 let preflightCompleted = false;
+// #650: mirrors pitch-overlay's "Synthetic pitch input (no WebSocket)" checkbox
+// state here (a services module) rather than having audio-preflight import
+// pitch-overlay directly, which would create a cycle (pitch-overlay already
+// imports loadUserVoiceTypeId from this module). The audio-preflight modal
+// reads this to decide whether "Start rehearsal" may bypass the real
+// microphone permission gate — synthetic mode replaces the mic entirely, so
+// gating on browser mic permission would defeat the setting's documented
+// purpose of letting the app be exercised without a working microphone.
+let syntheticPitchInputEnabled = false;
 
 function getStorage(): Storage | null {
   if (typeof window === 'undefined') return null;
@@ -30,6 +39,14 @@ export function registerAudioPreflightOpener(opener: () => Promise<boolean>): vo
 
 export function markAudioPreflightComplete(): void {
   preflightCompleted = true;
+}
+
+export function isSyntheticPitchInputEnabled(): boolean {
+  return syntheticPitchInputEnabled;
+}
+
+export function setSyntheticPitchInputEnabled(enabled: boolean): void {
+  syntheticPitchInputEnabled = enabled;
 }
 
 export async function ensureAudioPreflightReady(): Promise<boolean> {

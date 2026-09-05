@@ -36,7 +36,7 @@ import { resolveSelectedDeviceId, type AudioInputDevice } from '../../audio/devi
 import { PracticeRecorder } from '../../audio/recorder';
 import { type Feature } from '../../feature-types';
 import { analysePartPitchRange } from '../../score-analyser';
-import { loadUserVoiceTypeId } from '../../services/audio-preflight';
+import { loadUserVoiceTypeId, setSyntheticPitchInputEnabled } from '../../services/audio-preflight';
 import { recordSessionFrame } from '../../services/session-recording';
 
 // ── Module-level singletons (survive score reloads) ──────────────────────────
@@ -646,6 +646,10 @@ function mount(_slot: HTMLElement): void {
   settingsTrailEl.value = String(overlaySettings.trailMs / 1000);
   settingsNoteNamesEl.checked = showNoteNames;
   settingsSynthEl.checked = syntheticModeEnabled;
+  // Mirror initial state into the shared services/audio-preflight flag (#650)
+  // so the preflight modal's mic-permission gate reflects this checkbox even
+  // before it's ever toggled.
+  setSyntheticPitchInputEnabled(syntheticModeEnabled);
   updateSettingsLabels();
   updatePitchReadout();
   updateSessionRangeReadout();
@@ -736,6 +740,7 @@ function mount(_slot: HTMLElement): void {
 
   settingsSynthEl.addEventListener('change', () => {
     syntheticModeEnabled = settingsSynthEl.checked;
+    setSyntheticPitchInputEnabled(syntheticModeEnabled);
     closePitchSocket();
     if (!syntheticModeEnabled) connectPitchSocket();
   });

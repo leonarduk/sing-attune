@@ -96,7 +96,10 @@ vi.mock('../../audio/recorder', () => ({
   },
 }));
 vi.mock('../../score-analyser', () => ({ analysePartPitchRange: () => null }));
-vi.mock('../../services/audio-preflight', () => ({ loadUserVoiceTypeId: () => null }));
+vi.mock('../../services/audio-preflight', () => ({
+  loadUserVoiceTypeId: () => null,
+  setSyntheticPitchInputEnabled: () => {},
+}));
 
 import { pitchOverlayFeature } from './index';
 

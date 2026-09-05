@@ -1,5 +1,6 @@
 import { type Feature } from '../../feature-types';
 import {
+  isSyntheticPitchInputEnabled,
   loadPreflightDeviceId,
   loadPreflightLatencyMs,
   loadOctaveCompensationEnabled,
@@ -199,6 +200,20 @@ async function getMicrophonePermissionState(): Promise<MicrophonePermissionState
 }
 
 async function syncPermissionUiFromBrowserState(): Promise<void> {
+  if (isSyntheticPitchInputEnabled()) {
+    // #650: synthetic pitch input stands in for a real microphone entirely
+    // (see pitch/synthetic.ts + the pitch-overlay settings checkbox), so
+    // "Start rehearsal" must not be hard-gated on navigator.permissions mic
+    // state here — that gate previously left the button permanently
+    // disabled whenever mic permission was denied/unavailable, defeating
+    // the setting's documented purpose of exercising the app without a
+    // working microphone.
+    setPermissionStatus('Synthetic pitch input enabled — microphone permission not required.');
+    setRequestButtonVisibility(false);
+    if (continueButtonEl) continueButtonEl.disabled = false;
+    return;
+  }
+
   const permissionState = await getMicrophonePermissionState();
   if (permissionState === 'granted') {
     setPermissionStatus('Microphone permission granted.');
@@ -332,6 +347,14 @@ async function ensureMonitorStream(): Promise<void> {
 }
 
 async function requestPermissionAndDevices(): Promise<void> {
+  if (isSyntheticPitchInputEnabled()) {
+    // #650: skip real getUserMedia/device enumeration entirely when synthetic
+    // pitch input is on — there is no mic to probe, and a denied/unavailable
+    // getUserMedia call here would otherwise re-disable "Start rehearsal"
+    // (via the catch branch below) right after syncPermissionUiFromBrowserState()
+    // enabled it.
+    return;
+  }
   setError('');
   try {
     await ensureMonitorStream();
