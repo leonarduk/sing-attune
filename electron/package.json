@@ -10,7 +10,7 @@
     "package:win": "npm run prepackage:win && electron-builder --win nsis"
   },
   "devDependencies": {
-    "electron": "^31.0.2",
+    "electron": "^44.1.1",
     "electron-builder": "^24.13.3"
   },
   "build": {
