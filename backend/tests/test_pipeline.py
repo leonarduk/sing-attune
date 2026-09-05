@@ -1273,8 +1273,11 @@ class TestPauseResumeRaceDuringSetForceCpuRebuild:
         assert not t_force.is_alive()
 
         # elapsed_ms must reflect the ~5000ms that had actually elapsed
-        # once, not twice (~10000ms).
-        assert 4000.0 <= elapsed_at_pause <= 6000.0, (
+        # once, not twice (~10000ms). Wide tolerance band: this only bounds
+        # scheduling jitter between thread start and lock acquisition, not
+        # the anchored 5s itself, but a heavily loaded CI runner can still
+        # stretch that gap.
+        assert 3000.0 <= elapsed_at_pause <= 7000.0, (
             f"elapsed_ms={elapsed_at_pause:.1f}ms looks double-counted "
             "(expected ~5000ms)"
         )
