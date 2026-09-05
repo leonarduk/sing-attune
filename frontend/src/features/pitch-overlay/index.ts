@@ -496,7 +496,7 @@ async function refreshAudioSettings(
     selectedDeviceId = null;
     settingsEngineEl.textContent = 'Pitch engine: unavailable';
     settingsCpuWarningEl.classList.remove('visible');
-    showErrorBanner('Unable to load audio devices. Check backend audio permissions and retry.');
+    showErrorBanner('Unable to load audio devices. Check backend audio permissions and retry.', { dismissible: true });
     console.error('Failed to load settings data:', err);
   }
 }
@@ -729,7 +729,7 @@ function mount(_slot: HTMLElement): void {
       if (!res.ok) throw new Error(`/audio/engine/force-cpu HTTP ${res.status}`);
       await refreshAudioSettings(settingsDeviceEl, settingsEngineEl, settingsCpuWarningEl, settingsForceCpuEl);
     } catch (err) {
-      showErrorBanner('Unable to switch pitch engine mode.');
+      showErrorBanner('Unable to switch pitch engine mode.', { dismissible: true });
       console.error('Failed to update pitch engine mode:', err);
     }
   });

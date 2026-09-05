@@ -293,4 +293,28 @@ describe('scoreLoaderFeature reentrancy guard (#435)', () => {
     expect(showErrorBannerMock).not.toHaveBeenCalled();
     expect(getSession()?.model.title).toBe('Second');
   });
+
+  // #651: the error banner's Dismiss button only renders when showErrorBanner
+  // is called with { dismissible: true }; score-loader's call sites used to
+  // omit it, leaving users stuck with a permanent banner after a failed load.
+  it('shows a dismissible error banner when score parsing fails', async () => {
+    const slot = document.getElementById('slot-score-loader') as HTMLDivElement;
+    scoreLoaderFeature.mount(slot);
+
+    const input = document.getElementById('file-input') as HTMLInputElement;
+    const file = new File(['not xml'], 'bad.txt', { type: 'text/plain' });
+
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change'));
+    await flushMicrotasks();
+
+    expect(rendererMocks.loadCalls).toHaveLength(1);
+    rendererMocks.loadCalls[0].reject(new Error('parse failed'));
+    await flushMicrotasks();
+
+    expect(showErrorBannerMock).toHaveBeenCalledWith(
+      expect.stringContaining('Could not load this MusicXML file'),
+      { dismissible: true },
+    );
+  });
 });
