@@ -338,6 +338,10 @@ class PlaybackPipeline:
                 if was_running:
                     device_id = self._capture.device_id if self._capture else None
                     # Snapshot elapsed time before teardown so we can restore it.
+                    # This is what makes pause()'s `if self._capture:` guard
+                    # (#571) correct: a pause() that lands after self._capture
+                    # is nulled below sees the stretch of time already
+                    # accounted for here and skips re-accumulating it.
                     if current_state == PlaybackState.PLAYING:
                         self._elapsed_ms += (
                             (time.monotonic() - self._play_monotonic)
