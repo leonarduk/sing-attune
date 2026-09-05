@@ -14,12 +14,20 @@ Scope (additive to existing unit tests in test_pitch.py / test_pipeline.py):
      CREPE inference      ≤ 40 ms  (p95)
      Serialisation+queue  ≤ 20 ms  (p95)
      Total push→emit      ≤ 80 ms  (p95)
-   Results are written to docs/latency-baseline.md at session end.
+   Results are written to docs/latency-baseline.md at session end by the
+   pytest_sessionfinish hook in conftest.py (a hook defined in this module
+   would never actually be called by pytest — see conftest.py's comment).
 
 3. TestStressDrift  (pytest.mark.hardware)
    Simulates a 3-minute session with synthetic windows injected at real-time
    cadence.  Verifies the pYIN worker thread doesn't build up a real-time
-   processing backlog (see class docstring — issue #545).
+   processing backlog, or drop more than a small fraction of windows doing
+   so (see class docstring — issues #545, #553).
+
+4. TestLatencyBreakdownCPU  (pytest.mark.hardware)
+   Measures per-call pYIN inference latency (p50/p95/max, no hard budget
+   yet — see class docstring, issue #553). Results are written to
+   docs/latency-baseline.md at session end alongside the GPU rows.
 
 Markers
 ───────
@@ -38,7 +46,6 @@ Run stress test locally (any dev machine):
 
 from __future__ import annotations
 
-import datetime
 import math
 import threading
 import time
@@ -57,11 +64,23 @@ from backend.audio.pipeline import PlaybackPipeline, PlaybackState
 from backend.score.parser import parse_musicxml
 from backend.score.timeline import Timeline
 
+# Relative import is required here, not `from backend.tests.conftest import
+# _record`: backend/ has no __init__.py, so pytest's own conftest loader
+# (which walks up from this file looking for package boundaries) imports
+# conftest.py as top-level `tests.conftest`, while an absolute
+# `backend.tests.conftest` import resolves through the separately
+# editable-installed `sing-attune-backend` package — two different module
+# objects in sys.modules, each with its own independent `_latency_results`
+# dict. The relative import instead follows *this* module's own runtime
+# package identity, landing on the exact module pytest registered as a
+# plugin, so state written here is the state pytest_sessionfinish reads
+# (issue #553 — this was silently discarding every recorded measurement).
+from .conftest import _record
+
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 PART_I = REPO_ROOT / "musescore" / "homeward_bound-PARTI.mxl"
-LATENCY_DOC = REPO_ROOT / "docs" / "latency-baseline.md"
 
 # ── Shared helper ──────────────────────────────────────────────────────────────
 
@@ -391,7 +410,8 @@ class TestStressDrift:
     """
     Simulate a 3-minute session by injecting windows at real-time cadence and
     verify the PitchPipeline worker thread doesn't accumulate a real-time
-    processing backlog.
+    processing backlog, or drop more than a small fraction of windows while
+    doing so.
 
     "Drift" here is |last emitted frame's PlaybackPipeline.elapsed_ms -
     actual wall-clock loop duration| — both wall-clock-derived (see
@@ -402,6 +422,11 @@ class TestStressDrift:
     overflow, so if per-window inference ever exceeds the ~46ms hop budget
     for a stretch, a backlog builds up that's still draining when the loop
     ends — that backlog is what this measures, not a timestamp bug.
+
+    Drift alone can miss a worker that drops windows early and then catches
+    back up (drift ends near zero, but real frames were lost along the way)
+    — see issue #553. dropped_frames is asserted separately so that case
+    still fails.
 
     Uses pYIN so any dev machine can run this without a GPU.
     No real audio hardware is opened — all input is synthetic.
@@ -419,6 +444,15 @@ class TestStressDrift:
     # (32 windows * ~46ms/hop =~ 1.5s) so a genuine "worker can't keep up
     # at all" regression still fails this test.
     DRIFT_BUDGET_MS: float = 1000.0
+    # Calibrated (issue #553) against three real runs on the same machine
+    # used for #545: 0.31% (12/3875), 0.57% (22/3875), 2.07% (80/3875)
+    # dropped. Set at roughly 4x the observed max for headroom against
+    # day-to-day variance, while staying far below the drop rate a genuine
+    # "worker can't keep up at all" regression would produce (that failure
+    # mode isn't bounded the way DRIFT_BUDGET_MS is by queue depth — a
+    # sustained inability to keep up drops a large fraction of windows, not
+    # a few percent).
+    DROPPED_FRAMES_BUDGET_PCT: float = 8.0
 
     def test_timestamp_drift_within_budget(self) -> None:
         hop_duration_s = HOP_SIZE / SAMPLE_RATE
@@ -459,7 +493,7 @@ class TestStressDrift:
             f"last_t={last_t_ms[-1]:.1f} ms  wall={actual_duration_ms:.1f} ms  "
             f"drift={drift_ms:.1f} ms  dropped={pitch_pl.dropped_frames}"
         )
-        _record("stress_drift", drift_ms, drift_ms, drift_ms)
+        _record("stress_drift", drift_ms, drift_ms, drift_ms, budget=self.DRIFT_BUDGET_MS)
 
         assert drift_ms < self.DRIFT_BUDGET_MS, (
             f"Timestamp drift {drift_ms:.1f} ms exceeds {self.DRIFT_BUDGET_MS} ms budget "
@@ -471,120 +505,83 @@ class TestStressDrift:
             "backend/audio/pitch.py. See issue #545."
         )
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Latency doc writer
-# ═══════════════════════════════════════════════════════════════════════════════
-
-_latency_results: dict[str, dict] = {}
-
-
-def _record(key: str, p50: float, p95: float, max_val: float) -> None:
-    """Accumulate a measurement. Written to doc at session end."""
-    _latency_results[key] = {"p50": p50, "p95": p95, "max": max_val}
-
-
-def pytest_sessionfinish(session, exitstatus) -> None:  # noqa: ARG001
-    """Write docs/latency-baseline.md if any measurements were collected this run."""
-    if not _latency_results:
-        return
-
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    def _row(key: str, label: str, budget_ms: float) -> str:
-        r = _latency_results.get(key)
-        if r is None:
-            return f"| {label} | — | — | — | ≤ {budget_ms:.0f} ms | — |"
-        status = "✅" if r["p95"] <= budget_ms else "❌"
-        return (
-            f"| {label} | {r['p50']:.1f} ms | {r['p95']:.1f} ms | "
-            f"{r['max']:.1f} ms | ≤ {budget_ms:.0f} ms | {status} |"
+        dropped_pct = pitch_pl.dropped_frames / n_windows * 100.0
+        _record(
+            "dropped_pct", dropped_pct, dropped_pct, dropped_pct,
+            budget=self.DROPPED_FRAMES_BUDGET_PCT,
         )
 
-    drift_budget = TestStressDrift.DRIFT_BUDGET_MS
-    drift = _latency_results.get("stress_drift")
-    if drift:
-        drift_status = "✅" if drift["max"] < drift_budget else "❌"
-        drift_row = (
-            f"| Timestamp drift (3 min) | — | — | {drift['max']:.1f} ms "
-            f"| < {drift_budget:.0f} ms | {drift_status} |"
+        assert dropped_pct < self.DROPPED_FRAMES_BUDGET_PCT, (
+            f"{pitch_pl.dropped_frames}/{n_windows} windows ({dropped_pct:.1f}%) were "
+            f"dropped, exceeding the {self.DROPPED_FRAMES_BUDGET_PCT:.0f}% budget — the "
+            "worker is falling behind by more than ordinary scheduling jitter, even "
+            f"though drift ({drift_ms:.1f} ms) stayed under budget this run. See issue #553."
         )
-    else:
-        drift_row = f"| Timestamp drift (3 min) | — | — | — | < {drift_budget:.0f} ms | — |"
 
-    doc = f"""\
-# sing-attune — Latency Baseline
 
-_Generated: {now}_
+# ═══════════════════════════════════════════════════════════════════════════════
+# 4. CPU (pYIN) inference latency  (hardware — any dev machine, no GPU needed)
+# ═══════════════════════════════════════════════════════════════════════════════
 
-## Hardware
 
-| Component | Detail |
-|---|---|
-| GPU | NVIDIA RTX 5070 |
-| CUDA | 12.9 |
-| Pitch engine | torchcrepe (`weighted_argmax` decoder, `full` model) |
-| CPU fallback | librosa pYIN |
-| OS | Windows 11 |
+@pytest.mark.hardware
+class TestLatencyBreakdownCPU:
+    """
+    Measure per-call inference latency on the CPU (pYIN) path.
 
-## GPU Path Results
+    Unlike TestLatencyBreakdownGPU, there's no CUDA JIT compilation to warm
+    past — PyinPitchEngine.estimate() is plain librosa on every call, so a
+    handful of discarded calls (WARMUP_CALLS) is enough to absorb any
+    one-time cost (e.g. the first `import librosa`). This test reports
+    p50/p95/max to docs/latency-baseline.md but does NOT assert a hard
+    pass/fail budget: unlike the GPU budgets (which came from issue #5's
+    original product targets), no CPU-path target has been set yet, and
+    issue #545 already found individual pYIN calls exceeding the existing
+    80ms worker-thread warning threshold (backend/audio/pitch.py) — asserting
+    an invented number here would risk a chronically-failing test rather than
+    the real goal, which is making the numbers visible so a target can be set
+    from data (issue #553).
+    """
 
-| Stage | p50 | p95 | max | Budget | Status |
-|---|---|---|---|---|---|
-{_row("crepe_inference", "CREPE inference", 40)}
-{_row("serialisation_queue", "Serialisation + queue", 20)}
-| WebSocket frame delivery | _(see notes)_ | _(see notes)_ | _(see notes)_ | ≤ 20 ms | — |
-{_row("total_pipeline", "Total (dequeue → frame emitted)", 80)}
+    N_SAMPLES: int = 50
+    WARMUP_CALLS: int = 3
 
-### Notes on WebSocket delivery
+    def test_pyin_inference_latency(self) -> None:
+        latencies: list[float] = []
+        done = threading.Event()
+        call_count = [0]
 
-WebSocket frame delivery is not directly measurable from the backend alone.
-It is implicitly bounded by the **Total** row above.
-A frontend round-trip measurement should be added in a follow-up issue.
+        pl = PitchPipeline(engine=Engine.PYIN)
+        original_infer = pl._infer
 
-### Notes on warmup and measurement methodology
+        def timed_infer(window: np.ndarray, capture_time_ms: float):
+            call_count[0] += 1
+            if call_count[0] <= self.WARMUP_CALLS:
+                return original_infer(window, capture_time_ms)
+            t0 = time.monotonic()
+            result = original_infer(window, capture_time_ms)
+            latencies.append((time.monotonic() - t0) * 1000.0)
+            if len(latencies) >= self.N_SAMPLES:
+                done.set()
+            return result
 
-torchcrepe CUDA JIT compilation takes ~20 inferences to reach steady state.
-All measurements exclude the warmup phase.
-Cold-start latency is ~290 ms p95 — expected, not a concern for sustained use.
+        pl._infer = timed_infer  # type: ignore[method-assign]
+        pl.start()
 
-The Total stage measures dequeue→emit on the worker thread rather than
-push→wakeup across threads. Cross-thread Event.wait() on Windows has ~15.6 ms
-timer resolution, which inflates p95 by ~450 ms over 50 samples even when
-actual inference is 15 ms. Both timestamps are taken on the same thread
-(time.monotonic()) so measurement error is sub-millisecond.
+        for _ in range(self.WARMUP_CALLS + self.N_SAMPLES + 5):
+            pl.push(_sine_window(440.0))
+        done.wait(timeout=30.0)
+        pl.stop()
 
-## Stress Test — Timestamp Drift
+        if len(latencies) < 10:
+            pytest.skip(f"Insufficient samples: {len(latencies)}")
 
-| Test | Result | Budget |
-|---|---|---|
-{drift_row}
-
-Simulated 3-minute session: synthetic 440 Hz windows at real-time cadence.
-Drift = |last frame t_ms − actual wall-clock duration|. This is a proxy for
-pYIN worker-thread backlog (PitchPipeline's queue is bounded and drops
-frames rather than blocking), not PlaybackPipeline clock accuracy — see
-TestStressDrift's docstring and issue #545 for the full analysis.
-
-## CPU Path (pYIN)
-
-CPU latency not formally measured in this baseline.
-A follow-up issue should define targets before any CPU-only deployment.
-
-## How to Reproduce
-
-```bash
-# GPU measurements (requires CUDA-capable GPU)
-uv run pytest backend/tests/test_integration.py -v -m gpu -s
-
-# Stress drift (any dev machine, no GPU required)
-uv run pytest backend/tests/test_integration.py -v -m hardware -k stress -s
-
-# All non-hardware tests (CI-safe)
-uv run pytest backend/tests/test_integration.py -v -m "not hardware"
-```
-"""
-
-    LATENCY_DOC.parent.mkdir(parents=True, exist_ok=True)
-    LATENCY_DOC.write_text(doc, encoding="utf-8")
-    print(f"\n✅  Latency baseline written → {LATENCY_DOC}")
+        p50 = float(np.percentile(latencies, 50))
+        p95 = float(np.percentile(latencies, 95))
+        max_lat = max(latencies)
+        hop_budget_ms = (HOP_SIZE / SAMPLE_RATE) * 1000.0
+        print(
+            f"\npYIN inference — p50={p50:.1f} ms  p95={p95:.1f} ms  max={max_lat:.1f} ms  "
+            f"(hop budget for reference: {hop_budget_ms:.1f} ms, no pass/fail target set — see #553)"
+        )
+        _record("pyin_inference", p50, p95, max_lat)
