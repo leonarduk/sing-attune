@@ -34,6 +34,15 @@ function devMusescorePlugin(): Plugin {
 
 export default defineConfig({
   plugins: [devMusescorePlugin()],
+  // Emit "./assets/…" instead of the Vite default "/assets/…" in the built
+  // HTML. The packaged Electron app loads dist/index.html via loadFile()
+  // (a file:// origin — see frontend/electron/main.js and issue #436): a
+  // root-absolute "/assets/x.js" resolves to file:///assets/x.js (dropped
+  // from the filesystem root, no drive letter/dir prefix) and 404s, while a
+  // relative "./assets/x.js" resolves against index.html's own directory
+  // and loads correctly. Harmless for the Vite dev server and any
+  // same-origin static host, which both still resolve "./" the same as "/".
+  base: './',
   build: {
     rollupOptions: {
       input: {

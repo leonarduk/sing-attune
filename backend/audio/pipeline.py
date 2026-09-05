@@ -90,6 +90,18 @@ class PlaybackPipeline:
         # PitchPipeline. This lock is never acquired by the pitch worker
         # thread (only `self._lock` is), so it cannot reintroduce the
         # worker-vs-event-loop contention this issue fixes.
+        #
+        # pause()/resume() deliberately do NOT take this lock (only
+        # `self._lock`, briefly). They're called synchronously from `async
+        # def` REST handlers same as stop()/set_force_cpu() (#425), so
+        # blocking one on a lock held across the other's multi-second
+        # teardown/rebuild would stall the whole asyncio event loop — the
+        # exact hazard #425 fixed, just moved to a different method. Instead,
+        # set_force_cpu()'s rebuild phase re-reads self._state after
+        # re-acquiring self._lock rather than trusting a pre-teardown
+        # snapshot, so it can never clobber a pause()/resume() that ran
+        # during its unlocked gap (#571). See set_force_cpu()'s rebuild
+        # phase and pause()'s `if self._capture:` guard for the details.
         self._lifecycle_lock = threading.Lock()
 
         # Timing
@@ -182,9 +194,21 @@ class PlaybackPipeline:
         with self._lock:
             if self._state != PlaybackState.PLAYING:
                 return
-            # Accumulate elapsed time before suspending capture
-            self._elapsed_ms += (time.monotonic() - self._play_monotonic) * 1000.0 * self._tempo_multiplier
+            # self._capture can be None here even though self._state is still
+            # PLAYING: set_force_cpu() detaches self._capture/self._pitch and
+            # releases self._lock *before* its blocking hardware teardown
+            # (#425), without touching self._state until it rebuilds. If
+            # pause() lands in that gap, self._elapsed_ms was already frozen
+            # by set_force_cpu()'s own accumulation off this same,
+            # not-yet-reset self._play_monotonic at the moment it detached —
+            # accumulating again here would double-count the *entire*
+            # playing duration since the last play/resume, not just the
+            # small race window (#571). Gate on self._capture — the same
+            # condition already guarding the .stop() call below — so the
+            # redundant add is skipped precisely when set_force_cpu() has
+            # already accounted for this stretch of time.
             if self._capture:
+                self._elapsed_ms += (time.monotonic() - self._play_monotonic) * 1000.0 * self._tempo_multiplier
                 self._capture.stop()
             self._state = PlaybackState.PAUSED
             log.info("PlaybackPipeline paused at t=%.1f ms", self._elapsed_ms)
@@ -340,11 +364,30 @@ class PlaybackPipeline:
                         on_window=self._pitch.push,
                     )
                     self._pitch.start()
-                    if current_state == PlaybackState.PLAYING:
+                    # Re-read self._state instead of trusting the
+                    # `current_state` snapshot taken before the lock was
+                    # released above. pause()/resume() only take self._lock,
+                    # not `_lifecycle_lock` (see its docstring in __init__),
+                    # so either can run to completion during the unlocked
+                    # teardown gap. self._state is never written during the
+                    # detach phase, so it's guaranteed to still be PLAYING or
+                    # PAUSED here — the only state was_running started from,
+                    # and the only transition pause()/resume() can make
+                    # between them. Blindly restoring `current_state` (and
+                    # unconditionally overwriting self._state with it below)
+                    # used to silently discard whatever a racing
+                    # pause()/resume() call had just decided: e.g.
+                    # resurrecting capture right after the user paused, or
+                    # leaving a resume() stuck with capture never actually
+                    # started (#571).
+                    if self._state == PlaybackState.PLAYING:
                         self._capture.start()
                         # Reset the play anchor so elapsed_ms continues smoothly.
                         self._play_monotonic = time.monotonic()
-                    self._state = current_state
+                    # self._state already holds the right value — either the
+                    # untouched `current_state` (no race) or whatever a
+                    # racing pause()/resume() set it to — so it's
+                    # deliberately NOT overwritten here.
                 log.info(
                     "PlaybackPipeline engine updated — engine=%s mode=%s device=%s",
                     self._runtime_info.engine.name,

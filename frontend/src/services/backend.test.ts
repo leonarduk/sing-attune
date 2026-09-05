@@ -1,4 +1,37 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+describe('apiUrl / wsUrl (issue #436 — file:// Electron origin handling)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it('leaves root-relative paths untouched on a normal http(s) origin', async () => {
+    vi.stubGlobal('location', { protocol: 'http:', host: 'localhost:5173' });
+    const { apiUrl, wsUrl } = await import('./backend');
+
+    expect(apiUrl('/health')).toBe('/health');
+    expect(wsUrl('/ws/pitch')).toBe('ws://localhost:5173/ws/pitch');
+  });
+
+  it('uses wss:// for wsUrl on an https origin', async () => {
+    vi.stubGlobal('location', { protocol: 'https:', host: 'example.com' });
+    const { wsUrl } = await import('./backend');
+
+    expect(wsUrl('/ws/pitch')).toBe('wss://example.com/ws/pitch');
+  });
+
+  it('targets the fixed backend origin under a file:// origin (packaged Electron app)', async () => {
+    vi.stubGlobal('location', { protocol: 'file:', host: '' });
+    const { apiUrl, wsUrl } = await import('./backend');
+
+    expect(apiUrl('/health')).toBe('http://127.0.0.1:8000/health');
+    expect(apiUrl('/playback/tempo?multiplier=1.000')).toBe(
+      'http://127.0.0.1:8000/playback/tempo?multiplier=1.000',
+    );
+    expect(wsUrl('/ws/pitch')).toBe('ws://127.0.0.1:8000/ws/pitch');
+  });
+});
 
 describe('backend error banner', () => {
   beforeEach(() => {

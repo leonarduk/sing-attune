@@ -626,8 +626,34 @@ class TestAutomaticCpuFallback:
             for _ in range(_MAX_CONSECUTIVE_TORCHCREPE_FAILURES + 2):
                 failing_pitch.push(np.zeros(2048, dtype=np.float32))
 
-            assert self._wait_until(lambda: p.force_cpu is True)
-            assert self._wait_until(lambda: p.runtime_info.engine == Engine.PYIN)
+            # set_force_cpu() flips force_cpu/runtime_info *before* it tears
+            # down/rebuilds the hardware (see its own comments), so this
+            # wait is not gated by that rebuild -- it is gated by ordinary
+            # thread-scheduling/GIL-handoff latency in getting the freshly
+            # spawned "pitch-engine-fallback" thread (see
+            # _on_pitch_engine_failure) actually running. Confirmed by
+            # instrumenting both call sites: across repeated healthy runs
+            # this took anywhere from ~50ms to ~470ms end-to-end (a >9x
+            # spread from run to run with nothing else wrong), so the
+            # default 3s budget has too little headroom against a rare
+            # tail-latency spike -- observed once locally as a flaky
+            # failure (issue #625). Give this specific assertion more
+            # patience rather than raising the shared default, which would
+            # also slow down failure detection for the STOPPED-pipeline
+            # case in test_on_pitch_engine_failure_calls_set_force_cpu (no
+            # hardware to tear down there).
+            assert self._wait_until(lambda: p.force_cpu is True, timeout=10.0)
+            # p._pitch is nulled out in the same locked block that flips
+            # force_cpu/runtime_info, *before* the rebuild that reassigns
+            # it -- so p._pitch can still legitimately be None right after
+            # the line above returns. Wait for the rebuild to finish too
+            # (not just the engine label) before touching p._pitch below,
+            # or this can intermittently raise AttributeError on
+            # 'NoneType' instead of the assertion actually being tested.
+            assert self._wait_until(
+                lambda: p._pitch is not None and p.runtime_info.engine == Engine.PYIN,
+                timeout=10.0,
+            )
             assert p.runtime_info.mode == "forced_cpu"
             # A brand new PitchPipeline was swapped in — confirm it's the CPU engine.
             assert p._pitch is not failing_pitch
@@ -1077,6 +1103,208 @@ class TestStopAndSetForceCpuDoNotStallOnBusyWorker:
         assert p.state == PlaybackState.STOPPED
         assert p._capture is None
         assert p._pitch is None
+
+
+# ── #571: pause()/resume() racing set_force_cpu()'s rebuild ───────────────────
+
+
+class _GatedFakePitchPipeline:
+    """
+    Like `_FakePitchPipeline`, but `.stop()` blocks until the test explicitly
+    releases it — used to deterministically land a racing pause()/resume()
+    call inside set_force_cpu()'s unlocked teardown gap (see
+    `_teardown_hardware()`/#425) instead of relying on incidental timing.
+
+    `teardown_started` fires the instant `.stop()` is entered. Since
+    `_teardown_hardware()` is only ever called *after*
+    `PlaybackPipeline._lock` has been released, a test thread that has
+    observed `teardown_started` knows the lock is free and it's now safe to
+    call pause()/resume() from another thread without racing the detach step
+    itself. `.stop()` then blocks on `proceed` so the gap stays open until
+    the test has finished exercising it and explicitly lets teardown (and
+    therefore set_force_cpu()'s rebuild) continue.
+    """
+
+    def __init__(self, engine=None, on_frame=None, on_engine_failure=None):
+        self.engine = engine
+        self.on_engine_failure = on_engine_failure
+        self.started = False
+        self.stopped = False
+        self.teardown_started = threading.Event()
+        self.proceed = threading.Event()
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stopped = True
+        self.teardown_started.set()
+        self.proceed.wait(timeout=5.0)
+
+    def push(self, _):
+        pass
+
+
+class TestPauseResumeRaceDuringSetForceCpuRebuild:
+    """
+    Regression tests for #571.
+
+    set_force_cpu() detaches self._capture/self._pitch and releases
+    self._lock *before* the blocking _teardown_hardware() call (#425), then
+    re-acquires the lock afterwards to rebuild hardware and restore
+    playback state. pause()/resume() only take self._lock (not
+    `_lifecycle_lock`), so either can run to completion in that gap.
+
+    Before the fix, set_force_cpu()'s rebuild phase unconditionally trusted
+    a `current_state` snapshot taken *before* the gap: it restarted capture
+    (or not) and overwrote self._state based on that stale value alone,
+    silently discarding whatever pause()/resume() had *just* decided.
+    Concretely: a pause() that raced in got its PAUSED state clobbered back
+    to PLAYING and capture force-restarted without consent; a resume() that
+    raced in got its PLAYING state clobbered back to PAUSED and capture
+    never actually started.
+    """
+
+    def _pipeline(self) -> PlaybackPipeline:
+        from backend.audio.pitch import Engine
+        return PlaybackPipeline(engine=Engine.PYIN)
+
+    def _patch_hardware(self, monkeypatch):
+        import backend.audio.pipeline as pipeline_mod
+        monkeypatch.setattr(pipeline_mod, "MicCapture", _FakeMicCapture)
+        monkeypatch.setattr(pipeline_mod, "PitchPipeline", _GatedFakePitchPipeline)
+
+    def test_pause_during_set_force_cpu_rebuild_is_not_clobbered(self, monkeypatch):
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        self._patch_hardware(monkeypatch)
+
+        p = self._pipeline()
+        p._capture = _FakeMicCapture()
+        old_pitch = _GatedFakePitchPipeline()
+        p._pitch = old_pitch
+        p._state = PlaybackState.PLAYING
+        p._play_monotonic = time.monotonic()
+        p._elapsed_ms = 1000.0
+
+        t_force = threading.Thread(target=lambda: p.set_force_cpu(True))
+        t_force.start()
+
+        # Wait until set_force_cpu() has detached hardware and released
+        # self._lock — it's now blocked inside _teardown_hardware() ->
+        # old_pitch.stop() waiting on `proceed`.
+        assert old_pitch.teardown_started.wait(timeout=5.0), (
+            "set_force_cpu() never reached the unlocked teardown gap"
+        )
+
+        # self._lock is free right now — pause() must run to completion
+        # immediately rather than blocking behind set_force_cpu().
+        pause_start = time.monotonic()
+        p.pause()
+        pause_elapsed = time.monotonic() - pause_start
+        assert pause_elapsed < 1.0, (
+            f"pause() took {pause_elapsed:.2f}s during set_force_cpu()'s "
+            "teardown gap — did it start blocking on _lifecycle_lock?"
+        )
+        assert p.state == PlaybackState.PAUSED
+
+        # Let set_force_cpu() finish tearing down and rebuild.
+        old_pitch.proceed.set()
+        t_force.join(timeout=5.0)
+        assert not t_force.is_alive()
+
+        # The pause() that happened *during* the swap must win: state stays
+        # PAUSED, and the freshly rebuilt capture must NOT have been
+        # started — starting it would resume audio capture the user never
+        # asked for.
+        assert p.state == PlaybackState.PAUSED
+        assert p._capture.started is False
+        assert p.force_cpu is True  # the engine swap itself still completed
+
+    def test_resume_during_set_force_cpu_rebuild_is_not_clobbered(self, monkeypatch):
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        self._patch_hardware(monkeypatch)
+
+        p = self._pipeline()
+        p._capture = _FakeMicCapture()
+        old_pitch = _GatedFakePitchPipeline()
+        p._pitch = old_pitch
+        p._state = PlaybackState.PAUSED
+        p._elapsed_ms = 2000.0
+
+        t_force = threading.Thread(target=lambda: p.set_force_cpu(True))
+        t_force.start()
+
+        assert old_pitch.teardown_started.wait(timeout=5.0), (
+            "set_force_cpu() never reached the unlocked teardown gap"
+        )
+
+        resume_start = time.monotonic()
+        p.resume()
+        resume_elapsed = time.monotonic() - resume_start
+        assert resume_elapsed < 1.0, (
+            f"resume() took {resume_elapsed:.2f}s during set_force_cpu()'s "
+            "teardown gap — did it start blocking on _lifecycle_lock?"
+        )
+        assert p.state == PlaybackState.PLAYING
+
+        old_pitch.proceed.set()
+        t_force.join(timeout=5.0)
+        assert not t_force.is_alive()
+
+        # The resume() that happened *during* the swap must win: state
+        # stays PLAYING, and the freshly rebuilt capture must actually be
+        # started — otherwise the user resumed but audio capture silently
+        # never restarted.
+        assert p.state == PlaybackState.PLAYING
+        assert p._capture.started is True
+        assert p.force_cpu is True
+
+    def test_elapsed_ms_not_double_counted_when_pause_races_set_force_cpu(
+        self, monkeypatch
+    ):
+        """
+        set_force_cpu() freezes elapsed_ms as of the detach point before
+        releasing the lock. If pause() races in during the teardown gap and
+        redundantly re-accumulates off the same (not-yet-reset)
+        self._play_monotonic anchor, elapsed_ms would jump forward by
+        however long the pipeline had already been playing — not just the
+        small race window. Guarding pause()'s accumulation on
+        `self._capture` (None during the gap) prevents this.
+        """
+        monkeypatch.delenv("PITCH_ENGINE", raising=False)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        self._patch_hardware(monkeypatch)
+
+        p = self._pipeline()
+        p._capture = _FakeMicCapture()
+        old_pitch = _GatedFakePitchPipeline()
+        p._pitch = old_pitch
+        p._state = PlaybackState.PLAYING
+        # Anchor play_monotonic well in the past so a double-count is large
+        # and easy to detect, not lost in scheduling jitter.
+        p._play_monotonic = time.monotonic() - 5.0
+        p._elapsed_ms = 0.0
+
+        t_force = threading.Thread(target=lambda: p.set_force_cpu(True))
+        t_force.start()
+        assert old_pitch.teardown_started.wait(timeout=5.0)
+
+        p.pause()
+        elapsed_at_pause = p.elapsed_ms
+
+        old_pitch.proceed.set()
+        t_force.join(timeout=5.0)
+        assert not t_force.is_alive()
+
+        # elapsed_ms must reflect the ~5000ms that had actually elapsed
+        # once, not twice (~10000ms).
+        assert 4000.0 <= elapsed_at_pause <= 6000.0, (
+            f"elapsed_ms={elapsed_at_pause:.1f}ms looks double-counted "
+            "(expected ~5000ms)"
+        )
+        assert p.elapsed_ms == pytest.approx(elapsed_at_pause)
 
 
 # ── Frame fan-out ─────────────────────────────────────────────────────────────

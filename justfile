@@ -41,13 +41,17 @@ build-backend:
 build-frontend:
     cd {{frontend-dir}}; npm run build
 
-# Build Electron Windows installer (requires backend binary)
+# Build Electron Windows installer (requires backend binary). Uses the
+# frontend/electron/ pipeline (loadFile() renderer + explicit backend origin
+# via ELECTRON_MODE), which is what package-on-release.yml actually ships;
+# the sibling electron/ pipeline is unused by the release workflow (#436).
 package:
-    cd electron; npm run package:win
+    cd {{frontend-dir}}; npm run package:win
 # Build backend standalone binary (PyInstaller thin CPU-only variant)
 build-backend-thin:
     uv run pyinstaller --noconfirm backend-thin.spec
 
-# Package thin desktop installer
+# Package thin desktop installer. Still the electron/ pipeline (#436) —
+# frontend/ has no thin builder config yet.
 package-thin:
     cd electron; npx electron-builder --config electron-builder-thin.yml
