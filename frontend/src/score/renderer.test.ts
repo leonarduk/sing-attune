@@ -6,14 +6,16 @@ const mocks = vi.hoisted(() => ({
   loadMock: vi.fn(async (_file: Blob) => undefined),
   updateGraphicMock: vi.fn(),
   instances: [] as Array<{ Sheet: { Transpose: number } }>,
+  constructorOptions: [] as unknown[],
 }));
 
 vi.mock('opensheetmusicdisplay', () => ({
   OpenSheetMusicDisplay: class {
     Sheet = { Transpose: 0 };
 
-    constructor(_container: HTMLElement, _options: unknown) {
+    constructor(_container: HTMLElement, options: unknown) {
       mocks.instances.push(this);
+      mocks.constructorOptions.push(options);
     }
 
     async load(file: Blob): Promise<void> {
@@ -53,6 +55,27 @@ describe('withSuppressedOsmdWarnings', () => {
     ).rejects.toThrow('boom');
 
     expect(console.warn).toBe(originalWarn);
+  });
+});
+
+describe('OsmdScoreRenderer title-page credits (#649)', () => {
+  beforeEach(() => {
+    mocks.constructorOptions.length = 0;
+  });
+
+  it('re-enables drawCredits so compacttight mode does not hide subtitle/composer/lyricist', () => {
+    // Regression test for #649: OSMD's `drawingParameters: 'compacttight'`
+    // internally sets DrawCredits=false, which silences Subtitle/Composer/
+    // Lyricist rendering (only Title survived, because it was re-enabled
+    // separately). `drawCredits: true` is applied by OSMD *after* the
+    // drawingParameters preset, so it must be present to restore the full
+    // title-page credit block for scores like musescore/homeward_bound.mxl.
+    new OsmdScoreRenderer(document.createElement('div'));
+
+    expect(mocks.constructorOptions).toHaveLength(1);
+    const options = mocks.constructorOptions[0] as Record<string, unknown>;
+    expect(options.drawCredits).toBe(true);
+    expect(options.drawingParameters).toBe('compacttight');
   });
 });
 

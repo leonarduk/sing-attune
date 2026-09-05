@@ -115,6 +115,18 @@ export class OsmdScoreRenderer implements ScoreRenderer {
     this.osmd = new OpenSheetMusicDisplay(container, {
       autoResize: true,
       drawTitle: true,
+      // OSMD's `drawingParameters: 'compacttight'` (below) internally calls
+      // DrawingParameters.setForCompactMode(), which sets `DrawCredits = false`
+      // — silently disabling subtitle/composer/lyricist/copyright rendering
+      // (only the title survives, because we re-enable it explicitly above).
+      // That meant a score's dedication, arranger/composer credits, and
+      // footnote never reached the DOM even though OSMD had parsed them from
+      // the MusicXML `credit-words` correctly (verified via osmd.Sheet.Subtitle
+      // /.Composer/.Lyricist at runtime). `drawCredits: true` is applied by
+      // OSMD *after* the drawingParameters preset (see OpenSheetMusicDisplay.
+      // setOptions()), so it restores the full title-page credit block without
+      // giving up the compact layout's reduced staff/system spacing. See #649.
+      drawCredits: true,
       // followCursor scrolls the browser *window*, not our #score-container div.
       // ScoreCursor._scrollToCursor() calls scrollIntoView() on the cursor element
       // which handles container-level scroll correctly. Keeping this true would

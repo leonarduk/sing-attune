@@ -269,6 +269,18 @@ function mount(slot: HTMLElement): void {
     clearSession();
     clearLoopRegion();
     scoreContainerEl.innerHTML = '';
+    // OSMD sizes its SVG from container.offsetWidth (not clientWidth), which
+    // *includes* the width the vertical scrollbar carves out of
+    // #score-container's content box. Rendering OSMD straight into
+    // #score-container therefore produces an SVG a scrollbar-width too wide,
+    // clipping right-justified title-page text (composer/lyricist credits) —
+    // see #649. Render into a plain, non-scrolling wrapper div instead: a
+    // block child with no explicit width naturally sizes to its parent's
+    // available content width, which already excludes the scrollbar, so its
+    // offsetWidth is correct without OSMD needing any change.
+    const scoreSurfaceEl = document.createElement('div');
+    scoreSurfaceEl.id = 'score-surface';
+    scoreContainerEl.appendChild(scoreSurfaceEl);
 
     // Kick off soundfont loading early (idempotent) so it overlaps with parse.
     ensureSoundfontLoaded((err) => {
@@ -281,7 +293,7 @@ function mount(slot: HTMLElement): void {
       console.error('[Soundfont] load error:', err);
     });
 
-    const renderer = new OsmdScoreRenderer(scoreContainerEl);
+    const renderer = new OsmdScoreRenderer(scoreSurfaceEl);
     let model: ScoreModel;
 
     try {

@@ -65,14 +65,15 @@ const rendererMocks = vi.hoisted(() => ({
     resolve: (model: unknown) => void;
     reject: (err: unknown) => void;
   }>,
+  constructedContainers: [] as HTMLElement[],
 }));
 
 vi.mock('../../score/renderer', () => {
   class FakeOsmdScoreRenderer {
     loaded = false;
     scoreModel: unknown = null;
-    constructor(_container: HTMLElement) {
-      void _container;
+    constructor(container: HTMLElement) {
+      rendererMocks.constructedContainers.push(container);
     }
 
     load(file: File): Promise<unknown> {
@@ -152,10 +153,48 @@ async function flushMicrotasks(times = 3): Promise<void> {
   }
 }
 
+describe('scoreLoaderFeature render surface (#649)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    rendererMocks.loadCalls.length = 0;
+    rendererMocks.constructedContainers.length = 0;
+    installDom();
+    clearSession();
+    clearLoopRegion();
+  });
+
+  it('renders OSMD into a #score-surface child, not the scrolling #score-container itself', async () => {
+    // Regression test for #649: OSMD sizes its SVG from its container's
+    // offsetWidth, which does not exclude the width #score-container's own
+    // scrollbar carves out of its content box. Rendering straight into
+    // #score-container therefore clips right-justified title-page text
+    // (composer/lyricist credits) by the scrollbar's width. The fix renders
+    // into a plain, non-scrolling wrapper div instead, so its offsetWidth is
+    // already scrollbar-correct.
+    const slot = document.getElementById('slot-score-loader') as HTMLDivElement;
+    scoreLoaderFeature.mount(slot);
+
+    const input = document.getElementById('file-input') as HTMLInputElement;
+    const file = new File(['<a/>'], 'test.xml', { type: 'application/vnd.recordare.musicxml+xml' });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change'));
+    await flushMicrotasks();
+
+    const scoreContainerEl = document.getElementById('score-container') as HTMLDivElement;
+    expect(rendererMocks.constructedContainers).toHaveLength(1);
+    const renderTarget = rendererMocks.constructedContainers[0];
+
+    expect(renderTarget).not.toBe(scoreContainerEl);
+    expect(renderTarget.id).toBe('score-surface');
+    expect(scoreContainerEl.contains(renderTarget)).toBe(true);
+  });
+});
+
 describe('scoreLoaderFeature reentrancy guard (#435)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     rendererMocks.loadCalls.length = 0;
+    rendererMocks.constructedContainers.length = 0;
     installDom();
     clearSession();
     clearLoopRegion();
