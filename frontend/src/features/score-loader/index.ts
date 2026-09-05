@@ -236,7 +236,7 @@ function mount(slot: HTMLElement): void {
       const file = new File([blob], filename, { type: blob.type || 'application/vnd.recordare.musicxml+xml' });
       await loadScore(file);
     } catch (err) {
-      showErrorBanner(`Could not load test score ${filename}.`);
+      showErrorBanner(`Could not load test score ${filename}.`, { dismissible: true });
       setAppStatus(`test score load failed: ${String(err)}`, 'error');
       console.error('Dev test score load failed:', err);
     }
@@ -293,7 +293,7 @@ function mount(slot: HTMLElement): void {
       // rejection (score/renderer.ts), which fires in the narrower case
       // where the same renderer instance's load() was itself called twice.
       if (isStale()) return;
-      showErrorBanner('Could not load this MusicXML file. Try exporting again from notation software.');
+      showErrorBanner('Could not load this MusicXML file. Try exporting again from notation software.', { dismissible: true });
       setAppStatus(String(err), 'error');
       console.error('Score parse/render failed:', err);
       resetDropZoneToIdle();
@@ -353,7 +353,7 @@ function mount(slot: HTMLElement): void {
       }
     } catch (err) {
       if (isStale()) return;
-      showErrorBanner('Score loaded, but playback setup failed. Check audio/soundfont settings and try again.');
+      showErrorBanner('Score loaded, but playback setup failed. Check audio/soundfont settings and try again.', { dismissible: true });
       setAppStatus(String(err), 'error');
       console.error('Post-parse score setup failed:', err);
       resetDropZoneToIdle();
