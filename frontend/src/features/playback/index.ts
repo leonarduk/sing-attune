@@ -306,8 +306,11 @@ function mount(_slot: HTMLElement): void {
     const playbackState = session?.engine.state ?? 'idle';
     const canTransport = playbackState === 'playing' || playbackState === 'paused';
 
-    // Play: enabled only when a score is loaded and not already playing.
-    if (!session || playbackState === 'playing') {
+    // Play: enabled only when a score is loaded and transport isn't already
+    // active. While paused, Pause's button relabels itself "Resume" and shows
+    // the same glyph Play uses — if Play stayed enabled too, both controls
+    // would be indistinguishable and clickable at once (#705).
+    if (!session || canTransport) {
       btnPlay.disabled = true;
     } else {
       btnPlay.disabled = false;
