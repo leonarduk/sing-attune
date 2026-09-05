@@ -105,12 +105,10 @@ function mount(slot: HTMLElement): void {
         <strong>Audio transcription</strong>
         <span id="transcription-status">${IDLE_STATUS_MESSAGE}</span>
       </div>
-      <input id="transcription-file-input" type="file" accept=".wav,.wave,.mp3,audio/wav,audio/mpeg" title="Upload an MP3 or WAV file to generate a MusicXML transcription" />
-      <div id="transcription-file-meta" class="transcription-meta">No audio selected.</div>
       <p class="transcription-description">
         Upload an audio recording to convert it into a MusicXML score. Download the generated MusicXML and then load it in the main score panel for practice.
       </p>
-      <input id="transcription-file-input" type="file" accept=".wav,.wave,.mp3,audio/wav,audio/mpeg" />
+      <input id="transcription-file-input" type="file" accept=".wav,.wave,.mp3,audio/wav,audio/mpeg" title="Upload an MP3 or WAV file to generate a MusicXML transcription" />
       <div class="transcription-meta">
         <div>${ACCEPTED_FORMATS_LABEL}</div>
         <div id="transcription-file-meta">No audio selected.</div>
