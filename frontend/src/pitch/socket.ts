@@ -23,6 +23,10 @@ export function reconnectDelayMs(attempt: number): number {
   return Math.min(PITCH_RECONNECT_BASE_MS * (2 ** (attempt - 1)), PITCH_RECONNECT_MAX_MS);
 }
 
+// Range/finiteness checks below (t >= 0, 0 <= midi <= 127, 0 <= conf <= 1,
+// all finite) satisfy #440's AC #4 — they landed here via the unrelated
+// protocol-versioning change (`v: PITCH_FRAME_PROTOCOL_VERSION` above) before
+// #440 was filed, so #440's own diff never touches this file.
 export function parsePitchFrame(payload: unknown): PitchFrameV1 | null {
   if (typeof payload !== 'object' || payload === null) return null;
   const frame = payload as { v?: unknown; t?: unknown; midi?: unknown; conf?: unknown };
