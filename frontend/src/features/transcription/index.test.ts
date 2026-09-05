@@ -74,6 +74,23 @@ describe('transcriptionFeature', () => {
     expect((document.getElementById('transcription-download') as HTMLAnchorElement).download).toBe('transcription.musicxml');
   });
 
+  it('renders exactly one file input and status element, both wired up', () => {
+    const slot = document.getElementById('slot-transcription') as HTMLDivElement;
+    transcriptionFeature.mount(slot);
+
+    expect(document.querySelectorAll('#transcription-file-input').length).toBe(1);
+    expect(document.querySelectorAll('#transcription-file-meta').length).toBe(1);
+
+    const input = document.getElementById('transcription-file-input') as HTMLInputElement;
+    const file = new File(['wave'], 'take.wav', { type: 'audio/wav' });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change'));
+
+    expect(document.getElementById('transcription-file-meta')?.textContent).toContain('take.wav');
+    const runBtn = document.getElementById('btn-transcription-run') as HTMLButtonElement;
+    expect(runBtn.disabled).toBe(false);
+  });
+
   it('keeps retry and download disabled before any transcription attempt', () => {
     const slot = document.getElementById('slot-transcription') as HTMLDivElement;
     transcriptionFeature.mount(slot);
