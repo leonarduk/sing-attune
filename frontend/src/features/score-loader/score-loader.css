@@ -56,6 +56,19 @@
   background: #fff; /* OSMD renders on white */
 }
 
+/* OSMD's actual render target (see score-loader/index.ts). Kept as a plain
+ * block child of #score-container rather than rendering OSMD straight into
+ * the scrolling container: OSMD sizes its SVG from container.offsetWidth,
+ * which does not account for space #score-container's own scrollbar takes
+ * out of its content box, so OSMD-in-the-scroll-container ends up a
+ * scrollbar-width too wide and clips right-justified title-page text
+ * (composer/lyricist credits). A block with no explicit width here instead
+ * naturally sizes to the parent's available content width, which already
+ * excludes the scrollbar. See #649. */
+#score-surface {
+  width: 100%;
+}
+
 #score-loading {
   position: absolute;
   inset: 0;
