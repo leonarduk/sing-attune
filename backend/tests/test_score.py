@@ -8,6 +8,7 @@ Test scores (in musescore/):
   homeward_bound-PART_II.mxl  — Part II only (MuseScore export)
 """
 
+import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
@@ -618,3 +619,57 @@ class TestTimeline:
         # First note at beat 5 should be ~4.17 seconds in at 72 bpm
         assert tl.beat_to_seconds(5.0) == pytest.approx(5.0 * 60.0 / 72.0, rel=1e-3)
         assert tl.total_seconds == pytest.approx(189.5 * 60.0 / 72.0, abs=1.0)
+
+
+class TestHomewardBoundTitleCreditCorruption:
+    """
+    Pins the root-cause finding from #698 (OSMD renders the wrong title-page
+    text as the title for homeward_bound.mxl).
+
+    homeward_bound.mxl is an Audiveris OMR scan re-exported via MuseScore
+    (see module docstring). Its MusicXML has no <work><work-title>, and every
+    other place a title could plausibly be read from is *also* wrong or
+    mislabeled:
+      - <movement-title> (OSMD's fallback title source when work-title is
+        absent, and music21's Metadata.movementName) contains the CD blurb
+        text "with optional PianoTraX CD*", not the song title.
+      - Two <credit> blocks are marked credit-type="title", and neither one
+        is the song title ("for 2-part voices and piano" / the CD blurb again).
+      - The credit block that actually reads "HOMEWARD BOUND" (in the
+        largest font on the title page) is mislabeled credit-type="lyricist".
+    There is no XML signal in this file a general-purpose, non-file-specific
+    title picker (OSMD's, or an app-side remapping) could use to recover the
+    real title — every explicit marker points at the wrong text. This is why
+    #698 was left open with Refs (not Closes): a fix here would have to
+    hardcode "HOMEWARD BOUND" for this one file, which the app should not do.
+    """
+
+    def test_movement_title_is_the_cd_blurb_not_the_song_title(self):
+        xml = _get_xml_content(FULL_SCORE)
+        assert xml is not None
+        root = ET.fromstring(xml)
+        movement_title = root.findtext("movement-title")
+        assert movement_title == "with optional PianoTraX CD*"
+        assert "HOMEWARD" not in (movement_title or "").upper()
+
+    def test_credit_type_title_never_points_at_the_song_title(self):
+        xml = _get_xml_content(FULL_SCORE)
+        assert xml is not None
+        root = ET.fromstring(xml)
+
+        title_credit_texts = []
+        homeward_bound_credit_type = None
+        for credit in root.findall("credit"):
+            credit_type = credit.findtext("credit-type")
+            words = "".join(w.text or "" for w in credit.findall("credit-words"))
+            if credit_type == "title":
+                title_credit_texts.append(words)
+            if "HOMEWARD BOUND" in words:
+                homeward_bound_credit_type = credit_type
+
+        # Both credit-type="title" blocks exist, but neither is the title.
+        assert title_credit_texts, "expected at least one credit-type=title block"
+        assert all("HOMEWARD" not in text.upper() for text in title_credit_texts)
+
+        # The real title text is mislabeled as a lyricist credit instead.
+        assert homeward_bound_credit_type == "lyricist"
