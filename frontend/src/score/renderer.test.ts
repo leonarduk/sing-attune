@@ -189,3 +189,53 @@ describe('ScoreRenderer reentrancy guard (#435)', () => {
     expect(mocks.renderMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('ScoreRenderer OSMD render failure (#706)', () => {
+  beforeEach(() => {
+    mocks.renderMock.mockClear();
+    mocks.loadMock.mockClear();
+    mocks.updateGraphicMock.mockClear();
+    mocks.instances.length = 0;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          title: 'Test',
+          parts: ['PART I'],
+          notes: [],
+          tempo_marks: [{ beat: 0, bpm: 120 }],
+          time_signatures: [{ beat: 0, numerator: 4, denominator: 4 }],
+          total_beats: 1,
+        }),
+      })),
+    );
+  });
+
+  it('wraps an OSMD render() throw with an actionable hint instead of the bare internal error', async () => {
+    // Reproduces #706: a MusicXML file with an unsupported clef declaration
+    // makes OSMD throw deep inside its layout engine ("Cannot read
+    // properties of undefined (reading 'PositionAndShape')"). Callers
+    // (score-loader) surface load()'s rejection message directly to the
+    // user, so it must name a likely cause rather than a bare stack trace.
+    mocks.renderMock.mockImplementationOnce(() => {
+      throw new TypeError("Cannot read properties of undefined (reading 'PositionAndShape')");
+    });
+
+    const renderer = new OsmdScoreRenderer({} as HTMLElement);
+    const file = new Blob(['<score-partwise/>'], { type: 'application/xml' }) as File;
+
+    let caught: unknown;
+    try {
+      await renderer.load(file);
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toMatch(/unsupported clef/i);
+    expect((caught as Error).message).toMatch(/PositionAndShape/);
+    expect(renderer.loaded).toBe(false);
+  });
+});

@@ -185,10 +185,24 @@ export class OsmdScoreRenderer implements ScoreRenderer {
     // File extends Blob; osmd.load() accepts Blob and handles both .xml and
     // .mxl internally (JSZip detects the ZIP magic bytes automatically).
     // Do NOT pass ArrayBuffer — it is not in the osmd.load() type signature.
-    await withSuppressedOsmdWarnings(async () => {
-      await this.osmd.load(file);
-      this.osmd.render();
-    });
+    try {
+      await withSuppressedOsmdWarnings(async () => {
+        await this.osmd.load(file);
+        this.osmd.render();
+      });
+    } catch (err) {
+      // OSMD's layout engine can throw from deep inside its object graph
+      // (e.g. #706: a MusicXML clef declaration on an unsupported line
+      // leaves an internal graphical object half-built, and a later layout
+      // pass crashes reading a property off it) with a message like "Cannot
+      // read properties of undefined (reading 'PositionAndShape')" that
+      // gives the user no way to act on it. Re-throw with a hint at the
+      // likely cause so score-loader's error banner/status line is
+      // actually diagnosable instead of a bare internal stack trace.
+      throw new Error(
+        `OSMD could not render this score, possibly due to an unsupported clef or other notation element: ${String(err)}`,
+      );
+    }
 
     // A newer call could also have started during the (slower) OSMD phase.
     // Re-check before committing so a stale call can never overwrite the
