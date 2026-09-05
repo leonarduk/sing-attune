@@ -637,11 +637,23 @@ class TestHomewardBoundTitleCreditCorruption:
         is the song title ("for 2-part voices and piano" / the CD blurb again).
       - The credit block that actually reads "HOMEWARD BOUND" (in the
         largest font on the title page) is mislabeled credit-type="lyricist".
-    There is no XML signal in this file a general-purpose, non-file-specific
-    title picker (OSMD's, or an app-side remapping) could use to recover the
-    real title — every explicit marker points at the wrong text. This is why
-    #698 was left open with Refs (not Closes): a fix here would have to
-    hardcode "HOMEWARD BOUND" for this one file, which the app should not do.
+    These tests document that the backend's own title-extraction signals
+    (movement-title, work-title, credit-type metadata) are genuinely
+    unreliable for this file — every explicit type/metadata marker points at
+    the wrong text, so a picker keyed on those alone cannot recover
+    "HOMEWARD BOUND" here.
+
+    That is no longer the end of the story: #698 was resolved by a
+    *different* signal, implemented on the frontend rather than here. See
+    `frontend/src/score/title-fallback.ts` (`resolveFallbackTitle`) and its
+    use in `applyTitleFallback()` in `frontend/src/score/renderer.ts` — it
+    picks the largest-font <credit-words> block on the title page instead of
+    trusting credit-type/movement-title metadata, which recovers "HOMEWARD
+    BOUND" for this file (and any other similarly mislabeled/OMR-exported
+    score) without hardcoding anything file-specific. The assertions below
+    are unchanged and still valid: they pin the fact that type/metadata-based
+    extraction alone is unreliable for this file, which is exactly why the
+    frontend heuristic exists.
     """
 
     def test_movement_title_is_the_cd_blurb_not_the_song_title(self):

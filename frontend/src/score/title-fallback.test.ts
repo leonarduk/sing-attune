@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import JSZip from 'jszip';
 import { describe, expect, it } from 'vitest';
 import { resolveFallbackTitle } from './title-fallback';
 
@@ -99,5 +103,32 @@ describe('resolveFallbackTitle (#698)', () => {
       </score-partwise>`;
 
     expect(resolveFallbackTitle(parse(xml))).toBeNull();
+  });
+});
+
+describe('resolveFallbackTitle against the real musescore/homeward_bound.mxl fixture (#698)', () => {
+  it('recovers "HOMEWARD BOUND" from the actual bundled file, not just synthetic XML', async () => {
+    // This is the same real-world file the module docstring and #698 are
+    // about (an Audiveris OMR scan re-exported via MuseScore). The unit
+    // tests above pin the heuristic's *rules* against hand-built XML; this
+    // test proves those rules actually fire correctly against the real
+    // file's real (messier) MusicXML, not just an idealized excerpt of it.
+    //
+    // .mxl is a zip archive (MusicXML's compressed container format) whose
+    // payload lives at score.xml (per META-INF/container.xml) — verified by
+    // inspecting the archive directly. jszip is already a transitive
+    // dependency of opensheetmusicdisplay (see frontend/package-lock.json),
+    // so this reuses it rather than adding a new one just for this test.
+    const currentDir = dirname(fileURLToPath(import.meta.url));
+    const mxlPath = resolve(currentDir, '../../../musescore/homeward_bound.mxl');
+    const mxlBuffer = readFileSync(mxlPath);
+    const zip = await JSZip.loadAsync(mxlBuffer);
+    const xmlText = await zip.file('score.xml')?.async('string');
+    expect(xmlText).toBeTruthy();
+
+    const xmlDoc = parse(xmlText as string);
+    const result = resolveFallbackTitle(xmlDoc);
+
+    expect(result).toEqual({ title: 'HOMEWARD BOUND', creditType: 'lyricist' });
   });
 });

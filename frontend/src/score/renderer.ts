@@ -259,15 +259,25 @@ export class OsmdScoreRenderer implements ScoreRenderer {
 
     // The promoted text is still sitting in whatever (wrong) field the
     // source file's credit-type mislabeled it as — e.g. Lyricist for
-    // homeward_bound.mxl's "HOMEWARD BOUND". Clear that field so OSMD
-    // doesn't draw the same text twice: once as the title, once again as
-    // e.g. the lyricist credit line.
-    if (fallback.creditType === 'lyricist' && sheet.LyricistString === fallback.title) {
-      sheet.LyricistString = '';
-    } else if (fallback.creditType === 'composer' && sheet.ComposerString === fallback.title) {
-      sheet.ComposerString = '';
-    } else if (fallback.creditType === 'subtitle' && sheet.SubtitleString === fallback.title) {
-      sheet.SubtitleString = '';
+    // homeward_bound.mxl's "HOMEWARD BOUND". Clear whichever OSMD Sheet
+    // credit-string field currently holds exactly that text (other than
+    // TitleString, which was just set to it on purpose) so OSMD doesn't draw
+    // the same text twice: once as the title, once again under its original,
+    // mislabeled role. Checking every credit-string field OSMD's Sheet
+    // exposes — rather than switching on fallback.creditType against a
+    // hardcoded list — means this doesn't need updating if some other
+    // credit-type (e.g. "arranger") turns out to be similarly mislabeled in
+    // some other file.
+    const creditFields = [
+      'SubtitleString',
+      'ComposerString',
+      'LyricistString',
+      'CopyrightString',
+    ] as const;
+    for (const field of creditFields) {
+      if (sheet[field] === fallback.title) {
+        sheet[field] = '';
+      }
     }
   }
 
