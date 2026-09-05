@@ -9,9 +9,10 @@
  * Separation of concerns: OSMD renders pixels; ScoreModel drives timing.
  * Never use OSMD note positions for timing — they differ from the backend model.
  */
-import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
+import { MXLFile, OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { extractMeasureHitZones, type MeasureHitZone } from './click-seek';
 import { OsmdScoreCursor, type ScoreCursor } from './cursor';
+import { resolveFallbackTitle } from './title-fallback';
 import { apiUrl } from '../services/backend';
 
 const OSMD_SKY_BOTTOM_LINE_WARNING = 'Not enough lines for SkyBottomLine calculation';
@@ -37,6 +38,29 @@ export async function withSuppressedOsmdWarnings<T>(fn: () => Promise<T>): Promi
     return await fn();
   } finally {
     console.warn = originalWarn;
+  }
+}
+
+/**
+ * Recover the raw MusicXML text from a score file so it can be scanned for
+ * the title-fallback heuristic (#698) independently of OSMD's own parsing.
+ *
+ * Reuses OSMD's own MXLFile helper (already a dependency, so this adds no
+ * new package) rather than assuming the file is either always zipped
+ * (.mxl) or always plain text (.xml) — MXLFile.tryUnzip() detects which one
+ * it is. Best-effort: any failure here just means the fallback heuristic
+ * can't run for this file, never that the score fails to load.
+ */
+async function extractMusicXmlText(file: Blob): Promise<string | null> {
+  try {
+    const mxl = new MXLFile(file);
+    const isZip = await mxl.tryUnzip();
+    if (isZip && mxl.unzipSuccessful) {
+      return await mxl.getXmlString();
+    }
+    return await file.text();
+  } catch {
+    return null;
   }
 }
 
@@ -187,6 +211,10 @@ export class OsmdScoreRenderer implements ScoreRenderer {
     // Do NOT pass ArrayBuffer — it is not in the osmd.load() type signature.
     await withSuppressedOsmdWarnings(async () => {
       await this.osmd.load(file);
+      // Must run after osmd.load() (so this.osmd.Sheet exists to override)
+      // and before osmd.render() (so the override is what actually gets
+      // drawn) — see #698.
+      await this.applyTitleFallback(file);
       this.osmd.render();
     });
 
@@ -202,6 +230,55 @@ export class OsmdScoreRenderer implements ScoreRenderer {
     this._loaded = true;
     this.applyVisualTranspose(this.visualTransposeSemitones);
     return model;
+  }
+
+  /**
+   * Overrides OSMD's title if the largest-font-credit fallback heuristic
+   * (#698) finds one. No-op (leaves OSMD's own title resolution alone) for
+   * the well-formed case — see resolveFallbackTitle's docstring for exactly
+   * when it does and doesn't fire.
+   */
+  private async applyTitleFallback(file: Blob): Promise<void> {
+    const xmlText = await extractMusicXmlText(file);
+    if (!xmlText) return;
+
+    let xmlDoc: Document;
+    try {
+      xmlDoc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    } catch {
+      return;
+    }
+    if (xmlDoc.getElementsByTagName('parsererror').length > 0) return;
+
+    const fallback = resolveFallbackTitle(xmlDoc);
+    if (!fallback) return;
+
+    const sheet = this.osmd.Sheet;
+    if (!sheet) return;
+    sheet.TitleString = fallback.title;
+
+    // The promoted text is still sitting in whatever (wrong) field the
+    // source file's credit-type mislabeled it as — e.g. Lyricist for
+    // homeward_bound.mxl's "HOMEWARD BOUND". Clear whichever OSMD Sheet
+    // credit-string field currently holds exactly that text (other than
+    // TitleString, which was just set to it on purpose) so OSMD doesn't draw
+    // the same text twice: once as the title, once again under its original,
+    // mislabeled role. Checking every credit-string field OSMD's Sheet
+    // exposes — rather than switching on fallback.creditType against a
+    // hardcoded list — means this doesn't need updating if some other
+    // credit-type (e.g. "arranger") turns out to be similarly mislabeled in
+    // some other file.
+    const creditFields = [
+      'SubtitleString',
+      'ComposerString',
+      'LyricistString',
+      'CopyrightString',
+    ] as const;
+    for (const field of creditFields) {
+      if (sheet[field] === fallback.title) {
+        sheet[field] = '';
+      }
+    }
   }
 
   get loaded(): boolean {

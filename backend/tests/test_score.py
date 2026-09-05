@@ -8,6 +8,7 @@ Test scores (in musescore/):
   homeward_bound-PART_II.mxl  — Part II only (MuseScore export)
 """
 
+import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
@@ -652,3 +653,69 @@ class TestTimeline:
         # First note at beat 5 should be ~4.17 seconds in at 72 bpm
         assert tl.beat_to_seconds(5.0) == pytest.approx(5.0 * 60.0 / 72.0, rel=1e-3)
         assert tl.total_seconds == pytest.approx(189.5 * 60.0 / 72.0, abs=1.0)
+
+
+class TestHomewardBoundTitleCreditCorruption:
+    """
+    Pins the root-cause finding from #698 (OSMD renders the wrong title-page
+    text as the title for homeward_bound.mxl).
+
+    homeward_bound.mxl is an Audiveris OMR scan re-exported via MuseScore
+    (see module docstring). Its MusicXML has no <work><work-title>, and every
+    other place a title could plausibly be read from is *also* wrong or
+    mislabeled:
+      - <movement-title> (OSMD's fallback title source when work-title is
+        absent, and music21's Metadata.movementName) contains the CD blurb
+        text "with optional PianoTraX CD*", not the song title.
+      - Two <credit> blocks are marked credit-type="title", and neither one
+        is the song title ("for 2-part voices and piano" / the CD blurb again).
+      - The credit block that actually reads "HOMEWARD BOUND" (in the
+        largest font on the title page) is mislabeled credit-type="lyricist".
+    These tests document that the backend's own title-extraction signals
+    (movement-title, work-title, credit-type metadata) are genuinely
+    unreliable for this file — every explicit type/metadata marker points at
+    the wrong text, so a picker keyed on those alone cannot recover
+    "HOMEWARD BOUND" here.
+
+    That is no longer the end of the story: #698 was resolved by a
+    *different* signal, implemented on the frontend rather than here. See
+    `frontend/src/score/title-fallback.ts` (`resolveFallbackTitle`) and its
+    use in `applyTitleFallback()` in `frontend/src/score/renderer.ts` — it
+    picks the largest-font <credit-words> block on the title page instead of
+    trusting credit-type/movement-title metadata, which recovers "HOMEWARD
+    BOUND" for this file (and any other similarly mislabeled/OMR-exported
+    score) without hardcoding anything file-specific. The assertions below
+    are unchanged and still valid: they pin the fact that type/metadata-based
+    extraction alone is unreliable for this file, which is exactly why the
+    frontend heuristic exists.
+    """
+
+    def test_movement_title_is_the_cd_blurb_not_the_song_title(self):
+        xml = _get_xml_content(FULL_SCORE)
+        assert xml is not None
+        root = ET.fromstring(xml)
+        movement_title = root.findtext("movement-title")
+        assert movement_title == "with optional PianoTraX CD*"
+        assert "HOMEWARD" not in (movement_title or "").upper()
+
+    def test_credit_type_title_never_points_at_the_song_title(self):
+        xml = _get_xml_content(FULL_SCORE)
+        assert xml is not None
+        root = ET.fromstring(xml)
+
+        title_credit_texts = []
+        homeward_bound_credit_type = None
+        for credit in root.findall("credit"):
+            credit_type = credit.findtext("credit-type")
+            words = "".join(w.text or "" for w in credit.findall("credit-words"))
+            if credit_type == "title":
+                title_credit_texts.append(words)
+            if "HOMEWARD BOUND" in words:
+                homeward_bound_credit_type = credit_type
+
+        # Both credit-type="title" blocks exist, but neither is the title.
+        assert title_credit_texts, "expected at least one credit-type=title block"
+        assert all("HOMEWARD" not in text.upper() for text in title_credit_texts)
+
+        # The real title text is mislabeled as a lyricist credit instead.
+        assert homeward_bound_credit_type == "lyricist"

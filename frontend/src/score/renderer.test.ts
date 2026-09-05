@@ -1,17 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OsmdScoreRenderer, withSuppressedOsmdWarnings } from './renderer';
 
+interface MockSheet {
+  Transpose: number;
+  TitleString: string;
+  SubtitleString: string;
+  ComposerString: string;
+  LyricistString: string;
+}
+
 const mocks = vi.hoisted(() => ({
   renderMock: vi.fn(),
   loadMock: vi.fn(async (_file: Blob) => undefined),
   updateGraphicMock: vi.fn(),
-  instances: [] as Array<{ Sheet: { Transpose: number } }>,
+  instances: [] as Array<{ Sheet: MockSheet }>,
   constructorOptions: [] as unknown[],
 }));
 
 vi.mock('opensheetmusicdisplay', () => ({
   OpenSheetMusicDisplay: class {
-    Sheet = { Transpose: 0 };
+    Sheet: MockSheet = {
+      Transpose: 0,
+      TitleString: '',
+      SubtitleString: '',
+      ComposerString: '',
+      LyricistString: '',
+    };
 
     constructor(_container: HTMLElement, options: unknown) {
       mocks.instances.push(this);
@@ -28,6 +42,21 @@ vi.mock('opensheetmusicdisplay', () => ({
 
     render(): void {
       mocks.renderMock();
+    }
+  },
+  // Real OSMD's MXLFile, used by OsmdScoreRenderer's title-fallback (#698)
+  // to recover raw MusicXML text independently of OSMD's own parsing. The
+  // tests below feed plain (unzipped) XML blobs, so tryUnzip() always
+  // "fails" here and callers fall back to file.text() — matching how the
+  // real MXLFile behaves for a non-zip Blob.
+  MXLFile: class {
+    unzipSuccessful = false;
+    constructor(_blob: Blob) {}
+    async tryUnzip(): Promise<boolean> {
+      return false;
+    }
+    async getXmlString(): Promise<string> {
+      throw new Error('not a zip file');
     }
   },
 }));
@@ -76,6 +105,89 @@ describe('OsmdScoreRenderer title-page credits (#649)', () => {
     const options = mocks.constructorOptions[0] as Record<string, unknown>;
     expect(options.drawCredits).toBe(true);
     expect(options.drawingParameters).toBe('compacttight');
+  });
+});
+
+/**
+ * jsdom's Blob (used by vitest's jsdom test environment) doesn't implement
+ * .text() — real browser Blobs do, so this is a test-environment gap, not a
+ * production bug. Build a File-like object with a working .text() so the
+ * fallback path under test (extractMusicXmlText -> file.text()) is
+ * exercised the same way it would be in the browser.
+ */
+function fileWithXmlText(xml: string): File {
+  const blob = new Blob([xml], { type: 'application/xml' });
+  return Object.assign(blob, { text: async () => xml, name: 'score.xml' }) as File;
+}
+
+describe('OsmdScoreRenderer title fallback (#698)', () => {
+  beforeEach(() => {
+    mocks.renderMock.mockClear();
+    mocks.loadMock.mockClear();
+    mocks.instances.length = 0;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          title: 'Test',
+          parts: ['PART I'],
+          notes: [],
+          tempo_marks: [{ beat: 0, bpm: 120 }],
+          time_signatures: [{ beat: 0, numerator: 4, denominator: 4 }],
+          total_beats: 1,
+        }),
+      })),
+    );
+  });
+
+  it('promotes the largest-font credit as the OSMD title and clears the credit it was mislabeled under', async () => {
+    // Mirrors musescore/homeward_bound.mxl: no work-title, both
+    // credit-type="title" blocks unsized, real title mislabeled lyricist
+    // but printed far larger than anything else on the page.
+    const xml = `<?xml version="1.0"?>
+      <score-partwise>
+        <credit page="1">
+          <credit-type>title</credit-type>
+          <credit-words>with optional PianoTraX CD*</credit-words>
+        </credit>
+        <credit page="1">
+          <credit-type>lyricist</credit-type>
+          <credit-words font-size="23">HOMEWARD BOUND</credit-words>
+        </credit>
+      </score-partwise>`;
+    const file = fileWithXmlText(xml);
+
+    const renderer = new OsmdScoreRenderer(document.createElement('div'));
+    // The renderer's own OSMD instance is a mock, so it never actually
+    // parses credit-type="lyricist" into Sheet.LyricistString the way real
+    // OSMD would. Seed it here to reproduce that starting state, so the
+    // assertion below can verify the fallback pass clears it (rather than
+    // trivially passing because it was already empty).
+    mocks.instances[0].Sheet.LyricistString = 'HOMEWARD BOUND';
+    await renderer.load(file);
+
+    expect(mocks.instances[0].Sheet.TitleString).toBe('HOMEWARD BOUND');
+    expect(mocks.instances[0].Sheet.LyricistString).toBe('');
+  });
+
+  it('leaves OSMD title resolution untouched when a <work-title> is present', async () => {
+    const xml = `<?xml version="1.0"?>
+      <score-partwise>
+        <work><work-title>Amazing Grace</work-title></work>
+        <credit page="1">
+          <credit-type>lyricist</credit-type>
+          <credit-words font-size="40">SOME BIG TEXT</credit-words>
+        </credit>
+      </score-partwise>`;
+    const file = fileWithXmlText(xml);
+
+    const renderer = new OsmdScoreRenderer(document.createElement('div'));
+    await renderer.load(file);
+
+    expect(mocks.instances[0].Sheet.TitleString).toBe('');
+    expect(mocks.instances[0].Sheet.LyricistString).toBe('');
   });
 });
 
