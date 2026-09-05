@@ -12,10 +12,11 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from music21 import bar, converter, meter, note, repeat, stream
+from music21 import bar, converter, meter, metadata, note, repeat, stream
 
 from backend.score.parser import (
     _expand_repeats,
+    _extract_title,
     _get_xml_content,
     _normalize_part_name,
     parse_musicxml,
@@ -39,6 +40,39 @@ class TestPartNameNormalisation:
 
     def test_leaves_non_part_names_unchanged(self):
         assert _normalize_part_name("PIANO") == "PIANO"
+
+
+class TestExtractTitle:
+    """
+    Regression coverage for #701: movementName lives on score.metadata, not on
+    score itself, so the fallback must read score.metadata.movementName
+    (guarded the same way as the primary .title access) rather than probing
+    the Score object with hasattr.
+    """
+
+    def test_uses_title_when_present(self):
+        score = stream.Score()
+        score.metadata = metadata.Metadata()
+        score.metadata.title = "Homeward Bound"
+        score.metadata.movementName = "Should Not Be Used"
+        assert _extract_title(score) == "Homeward Bound"
+
+    def test_falls_back_to_movement_name_when_title_missing(self):
+        score = stream.Score()
+        score.metadata = metadata.Metadata()
+        score.metadata.title = None
+        score.metadata.movementName = "Movement Title"
+        assert _extract_title(score) == "Movement Title"
+
+    def test_returns_untitled_when_neither_is_set(self):
+        score = stream.Score()
+        score.metadata = metadata.Metadata()
+        assert _extract_title(score) == "Untitled"
+
+    def test_returns_untitled_when_metadata_is_none(self):
+        score = stream.Score()
+        score.metadata = None
+        assert _extract_title(score) == "Untitled"
 
 
 # ---------------------------------------------------------------------------

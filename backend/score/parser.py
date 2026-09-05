@@ -71,9 +71,11 @@ def _extract_title(score: Score) -> str:
     md = score.metadata
     if md and md.title:
         return md.title
-    # Fallback: movement title is sometimes used
-    if hasattr(score, "movementName") and score.movementName:
-        return score.movementName
+    # Fallback: movement title is sometimes used. movementName lives on
+    # score.metadata, not on score itself (a bare hasattr(score, "movementName")
+    # check is always False and silently disables this fallback) — see #701.
+    if md and md.movementName:
+        return md.movementName
     return "Untitled"
 
 
