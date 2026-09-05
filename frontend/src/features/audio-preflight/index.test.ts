@@ -29,6 +29,7 @@ vi.mock('../../services/score-session', async (importOriginal) => {
   };
 });
 
+import { setSyntheticPitchInputEnabled } from '../../services/audio-preflight';
 import { audioPreflightFeature, __audioPreflightInternals } from './index';
 
 let nextAnalyserPeak = 0;
@@ -140,6 +141,10 @@ beforeEach(() => {
 afterEach(() => {
   audioPreflightFeature.unmount?.();
   vi.unstubAllGlobals();
+  // syntheticPitchInputEnabled is a module-level singleton in
+  // services/audio-preflight.ts — reset it so state doesn't leak into
+  // unrelated tests (#650).
+  setSyntheticPitchInputEnabled(false);
 });
 describe('audio preflight device selection', () => {
   it('returns null when no devices are available', () => {
@@ -319,6 +324,45 @@ describe('audio preflight permission request button visibility', () => {
   });
 });
 
+
+describe('audio preflight synthetic pitch input bypass (#650)', () => {
+  it('enables Start rehearsal when synthetic pitch input is on and mic permission is denied', async () => {
+    document.body.innerHTML = '<div id="slot-audio-preflight"></div>';
+    installMediaMocks({ permissionState: 'denied', getUserMediaError: new Error('permission denied') });
+    setSyntheticPitchInputEnabled(true);
+    const slot = document.getElementById('slot-audio-preflight') as HTMLDivElement;
+    audioPreflightFeature.mount(slot);
+
+    const openPromise = openModalAndWaitUntilReady();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const continueButton = document.getElementById('audio-preflight-continue') as HTMLButtonElement;
+    const status = document.getElementById('audio-preflight-permission') as HTMLDivElement;
+
+    expect(continueButton.disabled).toBe(false);
+    expect(status.textContent).toContain('Synthetic pitch input enabled');
+
+    continueButton.click();
+    await expect(openPromise).resolves.toBe(true);
+  });
+
+  it('keeps Start rehearsal disabled when synthetic pitch input is off and mic permission is denied', async () => {
+    document.body.innerHTML = '<div id="slot-audio-preflight"></div>';
+    installMediaMocks({ permissionState: 'denied', getUserMediaError: new Error('permission denied') });
+    setSyntheticPitchInputEnabled(false);
+    const slot = document.getElementById('slot-audio-preflight') as HTMLDivElement;
+    audioPreflightFeature.mount(slot);
+
+    const openPromise = openModalAndWaitUntilReady();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const continueButton = document.getElementById('audio-preflight-continue') as HTMLButtonElement;
+    expect(continueButton.disabled).toBe(true);
+
+    __audioPreflightInternals.closeModal(false);
+    await expect(openPromise).resolves.toBe(false);
+  });
+});
 
 describe('audio preflight mic test feedback', () => {
   it('classifies silence as no signal', () => {
